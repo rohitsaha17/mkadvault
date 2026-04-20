@@ -66,7 +66,15 @@
     "reports": "Reports",
     "notifications": "Notifications",
     "settings": "Settings",
-    "logout": "Logout"
+    "logout": "Logout",
+    "myAccount": "My Account",
+    "myProfile": "My Profile",
+    "changePassword": "Change Password",
+    "organizationSettings": "Organization Settings",
+    "preferences": "Preferences",
+    "helpSupport": "Help & Support",
+    "toggleTheme": "Toggle Theme",
+    "signedInAs": "Signed in as"
   },
   "auth": {
     "login": "Log in",

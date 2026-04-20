@@ -72,10 +72,21 @@ export default async function NewProposalPage({
       .single(),
   ]);
 
-  // Build photo map (site_id → url)
+  // Build photo map (site_id → full public URL).
+  //
+  // IMPORTANT: site_photos.photo_url stores a bucket-relative path
+  // (e.g. "{org_id}/{site_id}/{ts}.jpg"). The PDF renderer
+  // (@react-pdf/renderer) and the <img> preview both need a real URL.
+  // Passing the raw path caused the PDF document to throw on mount, which
+  // crashed Step 3 ("Preview & Export") with the generic "This page
+  // couldn't load" error — particularly visible when generating the rate
+  // card because it pre-selects every site (more images, more chances to
+  // fail).
+  const storagePublicBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/site-photos`;
   const photoMap = new Map<string, string>();
   for (const p of photosData ?? []) {
-    photoMap.set(p.site_id, p.photo_url);
+    const isAlreadyUrl = /^https?:\/\//i.test(p.photo_url);
+    photoMap.set(p.site_id, isAlreadyUrl ? p.photo_url : `${storagePublicBase}/${p.photo_url}`);
   }
 
   const sites: SiteForProposal[] = (sitesData ?? []).map((s) => ({

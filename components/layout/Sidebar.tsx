@@ -21,20 +21,19 @@ import {
   BarChart3,
   Bell,
   Settings,
-  LogOut,
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { logoutAction } from "@/app/[locale]/(auth)/actions";
+import { UserMenu } from "./UserMenu";
 import type { Profile } from "@/lib/types/database";
 
 // ─── Nav items grouped by section ─────────────────────────────────────────────
@@ -203,46 +202,56 @@ export function Sidebar({ profile, onCollapsedChange }: SidebarProps) {
         ))}
       </nav>
 
-      {/* ── User block ─────────────────────────────────────────────────── */}
+      {/* ── User block (click to open account menu) ────────────────────── */}
       <div className="border-t border-sidebar-border p-3 shrink-0">
         {collapsed ? (
-          <Tooltip>
-            <TooltipTrigger>
-              <button
-                onClick={() => logoutAction()}
-                className="w-full flex items-center justify-center h-10 rounded-lg text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-red-400 transition-colors"
-              >
-                <LogOut className="h-[18px] w-[18px]" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">{t("logout")}</TooltipContent>
-          </Tooltip>
+          <UserMenu
+            profile={profile}
+            side="right"
+            align="end"
+            triggerClassName="w-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          >
+            <Tooltip>
+              <TooltipTrigger render={<span className="block" />}>
+                <div className="flex items-center justify-center">
+                  <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border hover:ring-primary/50 transition-colors">
+                    <AvatarImage src={profile?.avatar_url ?? undefined} />
+                    <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                {profile?.full_name ?? "Account"}
+              </TooltipContent>
+            </Tooltip>
+          </UserMenu>
         ) : (
-          <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/40 p-2 pr-3">
-            <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border">
-              <AvatarImage src={profile?.avatar_url ?? undefined} />
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-white truncate">
-                {profile?.full_name ?? "User"}
-              </p>
-              <p className="text-[10px] text-sidebar-foreground/60 truncate capitalize">
-                {profile?.role?.replace(/_/g, " ") ?? "member"}
-              </p>
+          <UserMenu
+            profile={profile}
+            side="top"
+            align="start"
+            triggerClassName="w-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          >
+            <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/40 hover:bg-sidebar-accent/70 p-2 pr-3 transition-colors cursor-pointer">
+              <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border">
+                <AvatarImage src={profile?.avatar_url ?? undefined} />
+                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-xs font-semibold text-white truncate">
+                  {profile?.full_name ?? "User"}
+                </p>
+                <p className="text-[10px] text-sidebar-foreground/60 truncate capitalize">
+                  {profile?.role?.replace(/_/g, " ") ?? "member"}
+                </p>
+              </div>
+              <ChevronsUpDown className="h-4 w-4 text-sidebar-foreground/60 shrink-0" />
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-sidebar-foreground/60 hover:text-red-400 hover:bg-sidebar-accent shrink-0"
-              onClick={() => logoutAction()}
-              aria-label={t("logout")}
-            >
-              <LogOut className="h-4 w-4" />
-            </Button>
-          </div>
+          </UserMenu>
         )}
       </div>
 

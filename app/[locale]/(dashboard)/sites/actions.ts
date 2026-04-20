@@ -82,6 +82,11 @@ export async function createSite(values: unknown): Promise<ActionResult> {
       municipal_permission_number: d.municipal_permission_number ?? null,
       municipal_permission_expiry: d.municipal_permission_expiry ?? null,
       notes: d.notes ?? null,
+      // Drop any empty rows before persisting. The column is JSONB NOT NULL
+      // DEFAULT '[]'::jsonb, so an empty array is always safe.
+      custom_dimensions: (d.custom_dimensions ?? []).filter(
+        (x) => x.label?.trim() && x.value?.trim()
+      ),
     })
     .select("id")
     .single();
@@ -159,6 +164,9 @@ export async function updateSite(
       municipal_permission_number: d.municipal_permission_number ?? null,
       municipal_permission_expiry: d.municipal_permission_expiry ?? null,
       notes: d.notes ?? null,
+      custom_dimensions: (d.custom_dimensions ?? []).filter(
+        (x) => x.label?.trim() && x.value?.trim()
+      ),
     })
     .eq("id", siteId);
 
@@ -222,10 +230,20 @@ export async function deleteSite(siteId: string): Promise<{ error?: string }> {
 // Uploads a single photo to Supabase Storage and inserts a site_photos row.
 // Called from the client-side photo uploader.
 
+type UploadedPhoto = {
+  id: string;
+  site_id: string;
+  organization_id: string;
+  photo_url: string;
+  photo_type: string;
+  is_primary: boolean;
+  sort_order: number;
+};
+
 export async function uploadSitePhoto(
   siteId: string,
   formData: FormData
-): Promise<{ error?: string; photoId?: string }> {
+): Promise<{ error?: string; photo?: UploadedPhoto }> {
   const supabase = await createClient();
 
   const {
@@ -284,13 +302,13 @@ export async function uploadSitePhoto(
       is_primary,
       sort_order: count ?? 0,
     })
-    .select("id")
+    .select("id, site_id, organization_id, photo_url, photo_type, is_primary, sort_order")
     .single();
 
   if (dbError) return { error: dbError.message };
 
   revalidatePath(`/sites/${siteId}`);
-  return { photoId: photo.id };
+  return { photo: photo as UploadedPhoto };
 }
 
 // ─── deleteSitePhoto ──────────────────────────────────────────────────────────

@@ -3,16 +3,25 @@
 // Steps: 1 Basic Info → 2 Location → 3 Specs → 4 Commercial → 5 Notes/Review
 // Photo upload is handled on the site detail page after the site is saved.
 import { useState, useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { Loader2, ChevronLeft, ChevronRight, Check, Plus, Trash2, UserPlus } from "lucide-react";
 import { siteSchema, siteFormDefaults, type SiteFormValues } from "@/lib/validations/site";
 import { createSite, updateSite } from "@/app/[locale]/(dashboard)/sites/actions";
+import { createLandowner } from "@/app/[locale]/(dashboard)/landowners/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { Site, Landowner } from "@/lib/types/database";
 
@@ -30,7 +39,7 @@ const STEPS = [
 const STEP_FIELDS: (keyof SiteFormValues)[][] = [
   ["name", "site_code", "media_type", "structure_type", "status"],
   ["address", "city", "state", "pincode", "landmark", "latitude", "longitude"],
-  ["width_ft", "height_ft", "illumination", "facing", "traffic_side", "visibility_distance_m"],
+  ["width_ft", "height_ft", "illumination", "facing", "traffic_side", "visibility_distance_m", "custom_dimensions"],
   ["ownership_model", "landowner_id", "base_rate_inr", "municipal_permission_number", "municipal_permission_expiry"],
   ["notes"],
 ];
@@ -47,13 +56,17 @@ interface SiteFormProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
+export function SiteForm({ existingSite, landowners: initialLandowners = [] }: SiteFormProps) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [isPending, startTransition] = useTransition();
+  // Local copy so we can append a newly-created landowner without reloading
+  // the whole page.
+  const [landowners, setLandowners] = useState(initialLandowners);
+  const [landownerDialogOpen, setLandownerDialogOpen] = useState(false);
 
   // Pre-fill defaults from existing site (edit mode)
-  const defaultValues: SiteFormValues = existingSite
+  const defaultValues: Partial<SiteFormValues> = existingSite
     ? {
         name: existingSite.name,
         site_code: existingSite.site_code,
@@ -82,6 +95,7 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
         municipal_permission_number: existingSite.municipal_permission_number ?? undefined,
         municipal_permission_expiry: existingSite.municipal_permission_expiry ?? undefined,
         notes: existingSite.notes ?? undefined,
+        custom_dimensions: existingSite.custom_dimensions ?? [],
       }
     : siteFormDefaults;
 
@@ -91,13 +105,22 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
     trigger,
     setValue,
     watch,
+    control,
     formState: { errors },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } = useForm<SiteFormValues>({
     resolver: zodResolver(siteSchema) as any,
-    defaultValues,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    defaultValues: defaultValues as any,
     mode: "onTouched",
   });
+
+  // Dynamic list of extra dimension rows (each has label + value).
+  const {
+    fields: dimensionFields,
+    append: appendDimension,
+    remove: removeDimension,
+  } = useFieldArray({ control, name: "custom_dimensions" });
 
   const watchedWidth = watch("width_ft");
   const watchedHeight = watch("height_ft");
@@ -117,12 +140,22 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
     setStep((s) => s - 1);
   }
 
-  // Final submit
+  // Final submit — guarded so accidental submits (Enter key in an input on
+  // earlier steps, or the form re-rendering the submit button between Next
+  // clicks) don't create a site before the user reaches the Review step.
   function onSubmit(values: SiteFormValues) {
+    if (step !== STEPS.length - 1) return;
+    // Drop any empty custom dimension rows the user left behind.
+    const cleaned = {
+      ...values,
+      custom_dimensions: (values.custom_dimensions ?? []).filter(
+        (d) => d.label.trim() && d.value.trim()
+      ),
+    };
     startTransition(async () => {
       const result = existingSite
-        ? await updateSite(existingSite.id, values)
-        : await createSite(values);
+        ? await updateSite(existingSite.id, cleaned)
+        : await createSite(cleaned);
 
       if ("error" in result) {
         toast.error(result.error);
@@ -132,6 +165,43 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
       toast.success(existingSite ? "Site updated" : "Site created");
       router.push(`/sites/${result.siteId}`);
     });
+  }
+
+  // ── Inline landowner quick-create ──────────────────────────────────────
+  // Lets the user add a landowner by just entering a name (+ optional phone
+  // and email) without leaving the site form. Full details can be added
+  // later from the Landowners page.
+  const [lwName, setLwName] = useState("");
+  const [lwPhone, setLwPhone] = useState("");
+  const [lwEmail, setLwEmail] = useState("");
+  const [lwSaving, setLwSaving] = useState(false);
+
+  async function handleCreateLandowner() {
+    if (!lwName.trim()) {
+      toast.error("Enter a landowner name");
+      return;
+    }
+    setLwSaving(true);
+    try {
+      const result = await createLandowner({
+        full_name: lwName.trim(),
+        phone: lwPhone.trim() || undefined,
+        email: lwEmail.trim() || undefined,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      // Append to local list + select it
+      const created = { id: result.id, full_name: lwName.trim() };
+      setLandowners((prev) => [...prev, created]);
+      setValue("landowner_id", result.id, { shouldValidate: true });
+      toast.success("Landowner added");
+      setLandownerDialogOpen(false);
+      setLwName(""); setLwPhone(""); setLwEmail("");
+    } finally {
+      setLwSaving(false);
+    }
   }
 
   return (
@@ -341,22 +411,24 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
             <h2 className="text-sm font-semibold text-foreground border-b border-border pb-2">Specifications</h2>
 
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Width (ft)" error={errors.width_ft?.message}>
+              <FormField label="Width (ft)" error={errors.width_ft?.message} required>
                 <Input
                   {...register("width_ft", { valueAsNumber: true })}
                   type="number"
                   step="any"
                   min="0"
                   placeholder="e.g. 40"
+                  className={cn(errors.width_ft && "border-destructive focus-visible:ring-destructive/40")}
                 />
               </FormField>
-              <FormField label="Height (ft)" error={errors.height_ft?.message}>
+              <FormField label="Height (ft)" error={errors.height_ft?.message} required>
                 <Input
                   {...register("height_ft", { valueAsNumber: true })}
                   type="number"
                   step="any"
                   min="0"
                   placeholder="e.g. 20"
+                  className={cn(errors.height_ft && "border-destructive focus-visible:ring-destructive/40")}
                 />
               </FormField>
             </div>
@@ -367,8 +439,81 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
               </p>
             )}
 
+            {/* Custom dimensions — free-form label/value pairs for anything
+                beyond width × height (e.g. "Depth", "Pole Height"). */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium text-foreground">
+                  Additional Dimensions
+                </Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => appendDimension({ label: "", value: "" })}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add dimension
+                </Button>
+              </div>
+              {dimensionFields.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Optional — add measurements like depth, pole height, or panel
+                  thickness if they apply to this structure.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {dimensionFields.map((f, idx) => (
+                    <div key={f.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-start">
+                      <div>
+                        <Input
+                          {...register(`custom_dimensions.${idx}.label` as const)}
+                          placeholder="Dimension name (e.g. Depth)"
+                          className={cn(
+                            errors.custom_dimensions?.[idx]?.label &&
+                              "border-destructive focus-visible:ring-destructive/40"
+                          )}
+                        />
+                        {errors.custom_dimensions?.[idx]?.label && (
+                          <p className="text-xs text-destructive mt-1">
+                            {errors.custom_dimensions[idx]?.label?.message}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <Input
+                          {...register(`custom_dimensions.${idx}.value` as const)}
+                          placeholder="Measurement (e.g. 3 ft)"
+                          className={cn(
+                            errors.custom_dimensions?.[idx]?.value &&
+                              "border-destructive focus-visible:ring-destructive/40"
+                          )}
+                        />
+                        {errors.custom_dimensions?.[idx]?.value && (
+                          <p className="text-xs text-destructive mt-1">
+                            {errors.custom_dimensions[idx]?.value?.message}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="mt-0.5 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeDimension(idx)}
+                        aria-label="Remove dimension"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Illumination" error={errors.illumination?.message}>
+              <FormField label="Illumination" error={errors.illumination?.message} required>
                 <NativeSelect
                   {...register("illumination")}
                   options={[
@@ -382,6 +527,21 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
                 />
               </FormField>
 
+              <FormField label="Traffic Side" error={errors.traffic_side?.message} required>
+                <NativeSelect
+                  {...register("traffic_side")}
+                  options={[
+                    { value: "", label: "— Select —" },
+                    { value: "lhs", label: "Left Hand Side" },
+                    { value: "rhs", label: "Right Hand Side" },
+                    { value: "both", label: "Both Sides" },
+                  ]}
+                  error={!!errors.traffic_side}
+                />
+              </FormField>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <FormField label="Facing Direction" error={errors.facing?.message}>
                 <NativeSelect
                   {...register("facing")}
@@ -397,21 +557,6 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
                     { value: "SW", label: "South-West" },
                   ]}
                   error={!!errors.facing}
-                />
-              </FormField>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <FormField label="Traffic Side" error={errors.traffic_side?.message}>
-                <NativeSelect
-                  {...register("traffic_side")}
-                  options={[
-                    { value: "", label: "— Select —" },
-                    { value: "lhs", label: "Left Hand Side" },
-                    { value: "rhs", label: "Right Hand Side" },
-                    { value: "both", label: "Both Sides" },
-                  ]}
-                  error={!!errors.traffic_side}
                 />
               </FormField>
 
@@ -447,17 +592,24 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
             </FormField>
 
             {/* Landowner picker — only meaningful for owned sites. Rented sites
-                are linked to a partner agency via the contracts module. */}
+                are linked to a partner agency via the contracts module. The
+                "+ Add" button opens a quick-create dialog so the user doesn't
+                have to leave the site form. */}
             {watch("ownership_model") === "owned" && (
-              <FormField
-                label="Landowner"
-                error={errors.landowner_id?.message}
-                hint={
-                  landowners.length === 0
-                    ? "No landowners found. Add one from the Landowners page, then return to link it here."
-                    : "Link this site to the person/entity who owns the land."
-                }
-              >
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium text-foreground">Landowner</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setLandownerDialogOpen(true)}
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Add landowner
+                  </Button>
+                </div>
                 <NativeSelect
                   {...register("landowner_id")}
                   options={[
@@ -466,13 +618,21 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
                   ]}
                   error={!!errors.landowner_id}
                 />
-              </FormField>
+                {errors.landowner_id?.message ? (
+                  <p className="text-xs text-destructive">{errors.landowner_id.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {landowners.length === 0
+                      ? "No landowners yet — click Add landowner to create one inline."
+                      : "Link this site to the person/entity who owns the land."}
+                  </p>
+                )}
+              </div>
             )}
 
             <FormField
               label="Base Monthly Rate (₹)"
               error={errors.base_rate_inr?.message}
-              hint="Your internal cost or listing rate per month"
             >
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none">
@@ -542,6 +702,65 @@ export function SiteForm({ existingSite, landowners = [] }: SiteFormProps) {
           )}
         </div>
       </form>
+
+      {/* ── Inline landowner quick-create dialog ─────────────────────────────
+          Minimum-info popup so the user can add a landowner mid-flow. The
+          rest of the landowner's details (PAN, bank, address, etc.) can be
+          filled in later from the Landowners module. */}
+      <Dialog open={landownerDialogOpen} onOpenChange={setLandownerDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Landowner</DialogTitle>
+            <DialogDescription>
+              Just the basics for now — you can fill in the rest from the Landowners page later.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Full Name <span className="text-destructive">*</span></Label>
+              <Input
+                value={lwName}
+                onChange={(e) => setLwName(e.target.value)}
+                placeholder="e.g. Rakesh Sharma"
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Phone</Label>
+                <Input
+                  value={lwPhone}
+                  onChange={(e) => setLwPhone(e.target.value)}
+                  placeholder="e.g. 9876543210"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  value={lwEmail}
+                  onChange={(e) => setLwEmail(e.target.value)}
+                  placeholder="e.g. name@example.com"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setLandownerDialogOpen(false)}
+              disabled={lwSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleCreateLandowner} disabled={lwSaving}>
+              {lwSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save landowner
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -582,6 +801,15 @@ function ReviewStep({
           <ReviewRow
             label="Dimensions"
             value={`${values.width_ft ?? "?"} × ${values.height_ft ?? "?"} ft`}
+          />
+        )}
+        {values.custom_dimensions && values.custom_dimensions.filter((d) => d.label && d.value).length > 0 && (
+          <ReviewRow
+            label="Other Dimensions"
+            value={values.custom_dimensions
+              .filter((d) => d.label && d.value)
+              .map((d) => `${d.label}: ${d.value}`)
+              .join(", ")}
           />
         )}
         {values.illumination && <ReviewRow label="Illumination" value={values.illumination} />}

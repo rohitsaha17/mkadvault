@@ -58,9 +58,14 @@ export default async function CampaignDetailPage({
     client?: Pick<Client, "id" | "company_name" | "brand_name" | "primary_contact_name" | "primary_contact_phone"> | null;
   };
 
-  // Current user role for role-based UI (cached per request)
+  // Current user role(s) for role-based UI (cached per request). Uses the
+  // roles[] array when present (multi-role users) and falls back to primary
+  // role so single-role profiles still work.
   const session = await getSession();
-  const userRole = session?.profile?.role ?? "viewer";
+  const userRoles: string[] =
+    session?.profile?.roles && session.profile.roles.length > 0
+      ? session.profile.roles
+      : [session?.profile?.role ?? "viewer"];
 
   // Fetch related data in parallel
   const [
@@ -428,7 +433,7 @@ export default async function CampaignDetailPage({
 
             {/* Change Requests tab */}
             {tab === "changes" && (
-              <ChangeRequestsTab requests={changeRequests} userRole={userRole} />
+              <ChangeRequestsTab requests={changeRequests} userRoles={userRoles} />
             )}
           </section>
         </div>

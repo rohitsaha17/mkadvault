@@ -11,7 +11,9 @@ import type { CampaignChangeRequest } from "@/lib/types/database";
 
 interface Props {
   requests: CampaignChangeRequest[];
-  userRole: string;
+  // Accepts the roles[] array so multi-role users (exec + accountant) are
+  // handled correctly alongside single-role users.
+  userRoles: string[];
 }
 
 const STATUS_STYLE: Record<string, { icon: React.ReactNode; classes: string }> = {
@@ -20,13 +22,15 @@ const STATUS_STYLE: Record<string, { icon: React.ReactNode; classes: string }> =
   rejected: { icon: <XCircle className="h-4 w-4" />, classes: "bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400" },
 };
 
-export function ChangeRequestsTab({ requests, userRole }: Props) {
+export function ChangeRequestsTab({ requests, userRoles }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
-  const canReview = ["super_admin", "admin", "sales_manager"].includes(userRole);
+  const canReview = userRoles.some((r) =>
+    ["super_admin", "admin", "manager", "executive"].includes(r)
+  );
 
   function handleApprove(requestId: string) {
     startTransition(async () => {

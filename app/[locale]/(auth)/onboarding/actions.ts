@@ -16,8 +16,8 @@ const createOrgSchema = z.object({
   role: z.enum([
     "super_admin",
     "admin",
-    "sales_manager",
-    "operations_manager",
+    "manager",
+    "executive",
     "accounts",
   ]),
 });
@@ -79,12 +79,15 @@ export async function createOrganization(
     return { error: `Failed to create organisation: ${orgError.message}` };
   }
 
-  // Link the user's profile to this new org with chosen role
+  // Link the user's profile to this new org with chosen role. Also set
+  // roles[] to match so single-role users start with a consistent record
+  // even on DBs where the sync trigger hasn't run yet.
   const { error: profileError } = await admin
     .from("profiles")
     .update({
       org_id: org.id,
       role: parsed.data.role,
+      roles: [parsed.data.role],
     })
     .eq("id", user.id);
 

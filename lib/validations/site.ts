@@ -28,12 +28,30 @@ export const siteSchema = z.object({
   longitude: z.number().optional(),
 
   // ── Step 3: Specifications ─────────────────────────────────────────────
-  width_ft: z.number().positive("Must be positive").optional(),
-  height_ft: z.number().positive("Must be positive").optional(),
-  illumination: z.enum(["frontlit", "backlit", "digital", "nonlit"]).optional(),
+  // Width, height, illumination, traffic_side are mandatory per spec — every
+  // physical site must declare these. Facing + visibility distance remain
+  // optional because older stock sometimes lacks this data.
+  width_ft: z.number({ message: "Width is required" }).positive("Must be positive"),
+  height_ft: z.number({ message: "Height is required" }).positive("Must be positive"),
+  illumination: z.enum(["frontlit", "backlit", "digital", "nonlit"], {
+    message: "Select an illumination type",
+  }),
   facing: z.enum(["N", "S", "E", "W", "NE", "NW", "SE", "SW"]).optional(),
-  traffic_side: z.enum(["lhs", "rhs", "both"]).optional(),
+  traffic_side: z.enum(["lhs", "rhs", "both"], {
+    message: "Select a traffic side",
+  }),
   visibility_distance_m: z.number().positive("Must be positive").optional(),
+  // Extra dimensions the user adds — e.g. {label:"Depth", value:"3 ft"}.
+  // Stored as JSONB on the sites table. Each entry must have a non-empty
+  // label and value (we drop empty rows on submit rather than erroring).
+  custom_dimensions: z
+    .array(
+      z.object({
+        label: z.string().min(1, "Dimension name is required"),
+        value: z.string().min(1, "Dimension value is required"),
+      })
+    )
+    .optional(),
 
   // ── Step 4: Commercial ─────────────────────────────────────────────────
   ownership_model: z.enum(["owned", "rented"]),
@@ -51,8 +69,11 @@ export const siteSchema = z.object({
 
 export type SiteFormValues = z.infer<typeof siteSchema>;
 
-// Default values for a blank new-site form
-export const siteFormDefaults: SiteFormValues = {
+// Default values for a blank new-site form.
+// Width/height/illumination/traffic_side are declared required in the schema
+// but intentionally left undefined here so the user is forced to pick — zod
+// surfaces the validation error on submit if they skip them.
+export const siteFormDefaults: Partial<SiteFormValues> = {
   name: "",
   site_code: "",
   media_type: "billboard",
@@ -63,4 +84,5 @@ export const siteFormDefaults: SiteFormValues = {
   state: "",
   ownership_model: "owned",
   landowner_id: undefined,
+  custom_dimensions: [],
 };

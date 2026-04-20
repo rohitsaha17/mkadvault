@@ -19,6 +19,9 @@ interface Props {
   sites: Pick<Site, "id" | "name" | "site_code" | "city">[];
   landowners: Pick<Landowner, "id" | "full_name" | "phone">[];
   agencies: Pick<PartnerAgency, "id" | "agency_name">[];
+  // When launching the form from a site page, prefill the Site dropdown so
+  // the user doesn't have to search for it again.
+  preselectedSiteId?: string;
 }
 
 function F({ label, error, children, required }: {
@@ -50,7 +53,7 @@ function NativeSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   );
 }
 
-export function ContractForm({ existing, sites, landowners, agencies }: Props) {
+export function ContractForm({ existing, sites, landowners, agencies, preselectedSiteId }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -75,7 +78,11 @@ export function ContractForm({ existing, sites, landowners, agencies }: Props) {
     lock_period_months: existing.lock_period_months ?? undefined,
     early_termination_clause: existing.early_termination_clause ?? undefined,
     notes: existing.notes ?? undefined,
-  } : contractDefaults as ContractFormValues;
+  } : {
+    ...(contractDefaults as ContractFormValues),
+    // Prefill site_id when the form was launched from a specific site page
+    ...(preselectedSiteId ? { site_id: preselectedSiteId } : {}),
+  };
 
   const { register, handleSubmit, watch, control, formState: { errors } } = useForm<ContractFormValues>({
     resolver: zodResolver(contractSchema),

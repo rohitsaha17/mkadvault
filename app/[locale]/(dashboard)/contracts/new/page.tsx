@@ -10,11 +10,16 @@ export const metadata = { title: "New Contract" };
 
 export default async function NewContractPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  // Launched from a site detail page with ?site_id=<uuid>, the Site dropdown
+  // is prefilled so the user doesn't need to re-pick it.
+  searchParams: Promise<{ site_id?: string }>;
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
+  const { site_id } = await searchParams;
 
   const supabase = await createClient();
 
@@ -42,7 +47,12 @@ export default async function NewContractPage({
         title="New Contract"
         description="Set up a contract with a landowner or agency. A payment schedule will be auto-generated."
       />
-      <ContractForm sites={sites} landowners={landowners} agencies={agencies} />
+      <ContractForm
+        sites={sites}
+        landowners={landowners}
+        agencies={agencies}
+        preselectedSiteId={site_id}
+      />
     </div>
   );
 }

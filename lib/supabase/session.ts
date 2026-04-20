@@ -14,6 +14,10 @@ export type SessionProfile = {
   id: string;
   org_id: string | null;
   role: string | null;
+  // All roles this user holds (single-role users have [role]; exec+accounts
+  // combo users have both). Always check this array for permissions that
+  // either member of the combo can grant.
+  roles: string[];
   full_name: string | null;
   avatar_url: string | null;
   is_active: boolean | null;
@@ -48,9 +52,23 @@ export const getSession = cache(async (): Promise<Session> => {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, org_id, role, full_name, avatar_url, is_active")
+    .select("id, org_id, role, roles, full_name, avatar_url, is_active")
     .eq("id", user.id)
     .maybeSingle();
+
+  // Normalise: if the DB returned a row with no `roles` populated (e.g.
+  // because migration 020 hasn't run yet against this instance), fall back
+  // to `[role]` so permission checks keep working.
+  const normalised: SessionProfile | null = profile
+    ? {
+        ...(profile as SessionProfile),
+        roles:
+          Array.isArray((profile as SessionProfile).roles) &&
+          (profile as SessionProfile).roles.length > 0
+            ? (profile as SessionProfile).roles
+            : [(profile as SessionProfile).role ?? "viewer"],
+      }
+    : null;
 
   return {
     user: {
@@ -58,6 +76,6 @@ export const getSession = cache(async (): Promise<Session> => {
       email: user.email ?? null,
       full_name: (user.user_metadata?.full_name as string | undefined) ?? null,
     },
-    profile: (profile as SessionProfile | null) ?? null,
+    profile: normalised,
   };
 });

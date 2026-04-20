@@ -668,15 +668,25 @@ export async function reviewChangeRequest(
   const ctx = await getOrgAndUser();
   if (!ctx) return { error: "Not authenticated" };
 
-  // Verify user role (admin/manager)
+  // Verify user role (admin/executive). Checks roles[] first (multi-role
+  // users), falling back to the primary role column.
   const { data: profile } = await ctx.supabase
     .from("profiles")
-    .select("role")
+    .select("role, roles")
     .eq("id", ctx.user.id)
     .single();
 
-  if (!profile || !["super_admin", "admin", "sales_manager"].includes(profile.role)) {
-    return { error: "Only admins and managers can review change requests" };
+  const allowed = ["super_admin", "admin", "manager", "executive"];
+  const userRoles: string[] =
+    Array.isArray((profile as { roles?: string[] } | null)?.roles) &&
+    ((profile as { roles?: string[] } | null)?.roles?.length ?? 0) > 0
+      ? ((profile as { roles?: string[] }).roles as string[])
+      : profile?.role
+        ? [profile.role]
+        : [];
+
+  if (!profile || !userRoles.some((r) => allowed.includes(r))) {
+    return { error: "Only admins, managers and executives can review change requests" };
   }
 
   // Fetch the request

@@ -1,15 +1,32 @@
 // App-wide constants — statuses, media types, roles used across the application
 
-// User roles (matches profiles.role column)
+// User roles (matches profiles.role column + profiles.roles elements).
+// sales_manager and operations_manager were merged into "executive" in
+// migration 020. A user can additionally hold the {executive, accounts}
+// combo via profiles.roles — see USER_ROLE_COMBOS below.
 export const USER_ROLES = [
   "super_admin",
-  "sales_manager",
-  "operations_manager",
-  "accounts",
   "admin",
+  "manager",
+  "executive",
+  "accounts",
   "viewer",
 ] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+// Roles that can be combined (multi-select) on a single user.
+// Today the only valid combo is {executive, accounts}. The Users UI uses this
+// to decide when to show checkboxes vs. a single-select.
+export const COMBINABLE_ROLES: ReadonlyArray<UserRole> = ["executive", "accounts"];
+
+// Helper: true when a role set is a valid {executive, accounts} combo.
+export function isExecutiveAccountsCombo(roles: readonly UserRole[]): boolean {
+  return (
+    roles.length === 2 &&
+    roles.includes("executive") &&
+    roles.includes("accounts")
+  );
+}
 
 // Site media types
 export const MEDIA_TYPES = [

@@ -53,21 +53,35 @@ export default async function proxy(request: NextRequest) {
   // getUser() validates the token with Supabase and refreshes it if needed
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Helper: build a redirect response that carries Supabase's refreshed
+  // session cookies. Without copying cookies, a redirect during proxy can
+  // drop the newly-rotated access/refresh tokens, logging the user out.
+  const redirectTo = (path: string, searchParams?: Record<string, string>) => {
+    const url = request.nextUrl.clone();
+    url.pathname = path;
+    if (searchParams) {
+      for (const [k, v] of Object.entries(searchParams)) {
+        url.searchParams.set(k, v);
+      }
+    }
+    const res = NextResponse.redirect(url);
+    supabaseResponse.cookies.getAll().forEach(({ name, value }) => {
+      res.cookies.set(name, value);
+    });
+    return res;
+  };
+
   // ─── 2. Auth-based redirects ─────────────────────────────────────────────────
   if (isProtected && !user) {
     // Not logged in → send to login, preserving the locale prefix if any
     const loginPath = isLocaleSegment ? `/${firstSegment}/login` : "/login";
-    const url = request.nextUrl.clone();
-    url.pathname = loginPath;
-    return NextResponse.redirect(url);
+    return redirectTo(loginPath);
   }
 
   if (isAuthPage && user && !isOnboarding) {
     // Already logged in → send to dashboard (unless on onboarding page)
     const dashboardPath = isLocaleSegment ? `/${firstSegment}/dashboard` : "/dashboard";
-    const url = request.nextUrl.clone();
-    url.pathname = dashboardPath;
-    return NextResponse.redirect(url);
+    return redirectTo(dashboardPath);
   }
 
   // ─── 2a. Profile check: org, active status, role ────────────────────────────
@@ -75,56 +89,73 @@ export default async function proxy(request: NextRequest) {
   if (user && (isProtected || isOnboarding)) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("org_id, role, is_active")
+      .select("org_id, role, roles, is_active")
       .eq("id", user.id)
       .maybeSingle();
+
+    // Null profile = the handle_new_user trigger hasn't fired yet (can happen
+    // right after signup/invite). Send them to onboarding rather than looping
+    // them to /login?error=Account+deactivated.
+    if (!profile) {
+      const onboardPath = isLocaleSegment ? `/${firstSegment}/onboarding` : "/onboarding";
+      if (isOnboarding) {
+        // Already on onboarding — don't redirect, let the page render.
+      } else {
+        return redirectTo(onboardPath);
+      }
+    }
 
     const hasOrg = !!profile?.org_id;
 
     // No org + accessing protected route → send to onboarding
     if (!hasOrg && isProtected) {
       const onboardPath = isLocaleSegment ? `/${firstSegment}/onboarding` : "/onboarding";
-      const url = request.nextUrl.clone();
-      url.pathname = onboardPath;
-      return NextResponse.redirect(url);
+      return redirectTo(onboardPath);
     }
 
     // Has org + on onboarding → send to dashboard
     if (hasOrg && isOnboarding) {
       const dashboardPath = isLocaleSegment ? `/${firstSegment}/dashboard` : "/dashboard";
-      const url = request.nextUrl.clone();
-      url.pathname = dashboardPath;
-      return NextResponse.redirect(url);
+      return redirectTo(dashboardPath);
     }
 
     // Remaining checks only apply to protected routes (not onboarding)
-    // If the account has been deactivated by an admin, force logout flow
-    if (isProtected && (!profile || profile.is_active === false)) {
+    // If the account has been explicitly deactivated, force logout flow.
+    // (profile is guaranteed non-null here — the null case returned above.)
+    if (isProtected && profile && profile.is_active === false) {
       const loginPath = isLocaleSegment ? `/${firstSegment}/login` : "/login";
-      const url = request.nextUrl.clone();
-      url.pathname = loginPath;
-      url.searchParams.set("error", "Account deactivated");
-      return NextResponse.redirect(url);
+      return redirectTo(loginPath, { error: "Account deactivated" });
     }
 
     // Role-based route protection (only for protected routes with active profiles)
     if (isProtected && profile) {
       const ROLE_RULES: Record<string, string[]> = {
+        // Team-member management — admins only. Managers explicitly cannot
+        // invite/edit users or change settings (they do sales + ops + accounts).
         "/settings/users": ["super_admin", "admin"],
-        "/billing":        ["super_admin", "admin", "accounts"],
-        "/reports":        ["super_admin", "admin", "sales_manager"],
+        // Billing accessible to anyone who handles money: accountants +
+        // managers (who cover accounts too) + admins.
+        "/billing":        ["super_admin", "admin", "manager", "accounts"],
+        // Reports: same audience as the full dashboard — managers + execs + admins.
+        "/reports":        ["super_admin", "admin", "manager", "executive"],
       };
+
+      // Check the roles[] array if present (multi-role users), otherwise
+      // fall back to the primary role column.
+      const userRoles: string[] =
+        Array.isArray((profile as { roles?: string[] }).roles) &&
+        ((profile as { roles?: string[] }).roles?.length ?? 0) > 0
+          ? ((profile as { roles?: string[] }).roles as string[])
+          : [profile.role];
 
       for (const [routePrefix, allowedRoles] of Object.entries(ROLE_RULES)) {
         const matchesRoute =
           realPath === routePrefix || realPath.startsWith(`${routePrefix}/`);
-        if (matchesRoute && !allowedRoles.includes(profile.role)) {
+        if (matchesRoute && !userRoles.some((r) => allowedRoles.includes(r))) {
           const dashboardPath = isLocaleSegment
             ? `/${firstSegment}/dashboard`
             : "/dashboard";
-          const url = request.nextUrl.clone();
-          url.pathname = dashboardPath;
-          return NextResponse.redirect(url);
+          return redirectTo(dashboardPath);
         }
       }
     }

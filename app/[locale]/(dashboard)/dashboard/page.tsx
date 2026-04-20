@@ -969,12 +969,21 @@ async function RoleSpecificDashboard({
 
   const greeting = profile.full_name ? `Welcome back, ${profile.full_name}` : "Welcome back";
 
-  // ── sales_manager ─────────────────────────────────────────────────────────
+  // ── executive (sales + operations combined) ───────────────────────────────
+  // Executives do both sales (pipeline, proposals) AND operations (mountings,
+  // site upkeep), so we show both sets of stats on one dashboard.
 
-  if (role === "sales_manager") {
+  // Managers see the same dashboard as executives — they handle the same
+  // sales + operations work (plus accounts, which surfaces separately in
+  // /billing). Keeping a single branch avoids duplicating ~80 lines of
+  // Supabase queries and stat cards.
+  if (role === "executive" || role === "manager") {
     const [
       { data: pipeline },
       { data: availableSites },
+      { data: todayMountings },
+      { data: weekMountings },
+      { data: maintenanceSites },
     ] = await Promise.all([
       supabase
         .from("campaigns")
@@ -988,6 +997,23 @@ async function RoleSpecificDashboard({
         .eq("organization_id", orgId)
         .eq("status", "available")
         .is("deleted_at", null),
+      supabase
+        .from("campaign_sites")
+        .select("id, site_id")
+        .eq("organization_id", orgId)
+        .eq("mounting_date", todayStr),
+      supabase
+        .from("campaign_sites")
+        .select("id, site_id")
+        .eq("organization_id", orgId)
+        .gte("mounting_date", todayStr)
+        .lte("mounting_date", weekEnd),
+      supabase
+        .from("sites")
+        .select("id")
+        .eq("organization_id", orgId)
+        .eq("status", "maintenance")
+        .is("deleted_at", null),
     ]);
 
     const enquiries = (pipeline ?? []).filter((c) => c.status === "enquiry").length;
@@ -1000,7 +1026,8 @@ async function RoleSpecificDashboard({
     );
 
     return (
-      <RoleWrapper greeting={greeting} role="Sales Manager">
+      <RoleWrapper greeting={greeting} role={role === "manager" ? "Manager" : "Executive"}>
+        {/* Sales / pipeline */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <SimpleStatCard label="Enquiries" value={String(enquiries)} />
           <SimpleStatCard label="Proposals Out" value={String(proposals)} />
@@ -1021,40 +1048,8 @@ async function RoleSpecificDashboard({
             value={String((availableSites ?? []).length)}
           />
         </div>
-      </RoleWrapper>
-    );
-  }
-
-  // ── operations_manager ────────────────────────────────────────────────────
-
-  if (role === "operations_manager") {
-    const [
-      { data: todayMountings },
-      { data: weekMountings },
-      { data: maintenanceSites },
-    ] = await Promise.all([
-      supabase
-        .from("campaign_sites")
-        .select("id, site_id")
-        .eq("organization_id", orgId)
-        .eq("mounting_date", todayStr),
-      supabase
-        .from("campaign_sites")
-        .select("id, site_id")
-        .eq("organization_id", orgId)
-        .gte("mounting_date", todayStr)
-        .lte("mounting_date", weekEnd),
-      supabase
-        .from("sites")
-        .select("id")
-        .eq("organization_id", orgId)
-        .eq("status", "maintenance")
-        .is("deleted_at", null),
-    ]);
-
-    return (
-      <RoleWrapper greeting={greeting} role="Operations Manager">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Operations / mounting */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
           <SimpleStatCard label="Mountings Today" value={String((todayMountings ?? []).length)} />
           <SimpleStatCard label="Mountings This Week" value={String((weekMountings ?? []).length)} />
           <SimpleStatCard label="Sites Under Maintenance" value={String((maintenanceSites ?? []).length)} />

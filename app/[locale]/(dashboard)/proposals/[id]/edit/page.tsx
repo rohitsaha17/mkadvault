@@ -44,8 +44,15 @@ export default async function EditProposalPage({
   const proposal = proposalData as unknown as Proposal;
   const existingSites = (proposalSitesData ?? []) as unknown as ProposalSite[];
 
+  // Convert bucket-relative paths to full public URLs so the PDF renderer
+  // and <img> previews can load them. See proposals/new/page.tsx for the
+  // full rationale (same fix).
+  const storagePublicBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/site-photos`;
   const photoMap = new Map<string, string>();
-  for (const p of photosData ?? []) photoMap.set(p.site_id, p.photo_url);
+  for (const p of photosData ?? []) {
+    const isAlreadyUrl = /^https?:\/\//i.test(p.photo_url);
+    photoMap.set(p.site_id, isAlreadyUrl ? p.photo_url : `${storagePublicBase}/${p.photo_url}`);
+  }
 
   const sites: SiteForProposal[] = (sitesData ?? []).map((s) => ({
     id: s.id,

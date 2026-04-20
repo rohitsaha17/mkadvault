@@ -13,8 +13,9 @@ import {
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { Landowner, Contract, Site, ContractPayment } from "@/lib/types/database";
 
-// Roles that can see bank/PAN details
-const SENSITIVE_ROLES = ["super_admin", "admin", "accounts"];
+// Roles that can see bank/PAN details. Manager covers accounts duties so
+// they need access to payout information too.
+const SENSITIVE_ROLES = ["super_admin", "admin", "manager", "accounts"];
 
 export default async function LandownerDetailPage({
   params,

@@ -1,41 +1,58 @@
 "use client";
-// Team members management — invite form + table with role editor and
-// activate/deactivate controls. Admin-only (the parent page enforces this).
+// Team members management — invite form + table with multi-select role editor
+// and activate/deactivate controls. Admin-only (parent page enforces this).
+//
+// Role model:
+//   * Single-select roles: super_admin, admin, executive, accounts, viewer
+//   * Multi-select combo:  {executive, accounts} — a user can hold both
+//   * No other multi combos are allowed (DB has a matching CHECK in migration 020)
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Loader2, UserPlus, ShieldCheck, UserX, UserCheck, Mail } from "lucide-react";
+import {
+  Loader2,
+  UserPlus,
+  ShieldCheck,
+  UserX,
+  UserCheck,
+  Mail,
+  Check,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   inviteUser,
-  updateUserRole,
+  updateUserRoles,
   setUserActive,
   resendInvite,
 } from "@/app/[locale]/(dashboard)/settings/users/actions";
 import type { UserRole } from "@/lib/types/database";
 import type { TeamMember } from "@/app/[locale]/(dashboard)/settings/users/page";
 
+// ─── Role catalog ─────────────────────────────────────────────────────────────
 const ROLES: { value: UserRole; label: string; description: string }[] = [
-  { value: "super_admin",        label: "Super Admin",        description: "Full access including billing" },
-  { value: "admin",              label: "Admin",              description: "Manage team, settings, everything" },
-  { value: "sales_manager",      label: "Sales Manager",      description: "Clients, campaigns, proposals" },
-  { value: "operations_manager", label: "Operations Manager", description: "Sites, mounting, creatives" },
-  { value: "accounts",           label: "Accounts",           description: "Billing, payments, reports" },
-  { value: "viewer",             label: "Viewer",             description: "Read-only access" },
+  { value: "super_admin", label: "Super Admin", description: "Full access including billing" },
+  { value: "admin",       label: "Admin",       description: "Manage team, settings, everything" },
+  { value: "manager",     label: "Manager",     description: "Sales, operations & accounts — cannot change settings" },
+  { value: "executive",   label: "Executive",   description: "Sales + operations: clients, campaigns, sites, mounting" },
+  { value: "accounts",    label: "Accountant",  description: "Billing, payments, aging, reports" },
+  { value: "viewer",      label: "Viewer",      description: "Read-only access" },
 ];
+
+// Which roles can be combined with another. Today only executive + accounts.
+const COMBINABLE = new Set<UserRole>(["executive", "accounts"]);
 
 const ROLE_TONES: Record<UserRole, string> = {
   super_admin:
     "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30",
   admin:
     "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30",
-  sales_manager:
-    "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30",
-  operations_manager:
+  manager:
     "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30",
+  executive:
+    "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30",
   accounts:
     "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/30",
   viewer:
@@ -45,12 +62,44 @@ const ROLE_TONES: Record<UserRole, string> = {
 const ROLE_LABEL: Record<UserRole, string> = {
   super_admin: "Super Admin",
   admin: "Admin",
-  sales_manager: "Sales Manager",
-  operations_manager: "Operations Manager",
-  accounts: "Accounts",
+  manager: "Manager",
+  executive: "Executive",
+  accounts: "Accountant",
   viewer: "Viewer",
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Toggle a role in the current selection. Rules:
+//   * If the clicked role is NOT combinable, it becomes the only selection.
+//   * If the clicked role IS combinable and you're adding it to a non-combo
+//     selection, it replaces the current selection.
+//   * If both clicked and currently-selected roles are combinable, the
+//     clicked role is toggled (added or removed) — producing either a
+//     single-role selection or the {executive, accounts} pair.
+function toggleRole(current: UserRole[], clicked: UserRole): UserRole[] {
+  // Non-combinable always wins and clears the rest.
+  if (!COMBINABLE.has(clicked)) return [clicked];
+
+  // Clicked is combinable. If current selection has non-combinable roles,
+  // replace everything with just the clicked role.
+  if (current.some((r) => !COMBINABLE.has(r))) return [clicked];
+
+  // Both combinable — toggle the clicked one in/out.
+  const alreadyIn = current.includes(clicked);
+  const next = alreadyIn
+    ? current.filter((r) => r !== clicked)
+    : [...current, clicked];
+
+  // Never allow empty — if user just deselected the only role, fall back to the click.
+  return next.length === 0 ? [clicked] : next;
+}
+
+function rolesToSortedLabel(roles: UserRole[]): string {
+  return roles.map((r) => ROLE_LABEL[r]).join(" + ");
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface Props {
   members: TeamMember[];
   currentUserId: string;
@@ -64,7 +113,7 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
   // Invite form state
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
-  const [role, setRole] = useState<UserRole>("viewer");
+  const [selectedRoles, setSelectedRoles] = useState<UserRole[]>(["viewer"]);
   const [showInvite, setShowInvite] = useState(false);
 
   function handleInvite(e: React.FormEvent) {
@@ -73,8 +122,16 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
       toast.error("Email and full name are required");
       return;
     }
+    if (selectedRoles.length === 0) {
+      toast.error("Pick at least one role");
+      return;
+    }
     startTransition(async () => {
-      const res = await inviteUser({ email: email.trim(), full_name: fullName.trim(), role });
+      const res = await inviteUser({
+        email: email.trim(),
+        full_name: fullName.trim(),
+        roles: selectedRoles,
+      });
       if (res.error) {
         toast.error(res.error);
         return;
@@ -82,17 +139,16 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
       toast.success(`Invite sent to ${email}`);
       setEmail("");
       setFullName("");
-      setRole("viewer");
+      setSelectedRoles(["viewer"]);
       setShowInvite(false);
-      // Optimistic — the server revalidates, and the page will refetch on nav;
-      // for immediate feedback, add a placeholder row
       setMembers((prev) => [
         ...prev,
         {
           id: `pending-${Date.now()}`,
           full_name: fullName.trim(),
           email: email.trim(),
-          role,
+          role: selectedRoles[0],
+          roles: selectedRoles,
           is_active: true,
           phone: null,
           last_sign_in_at: null,
@@ -102,17 +158,21 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
     });
   }
 
-  function handleRoleChange(userId: string, newRole: UserRole) {
+  function handleRolesChange(userId: string, newRoles: UserRole[]) {
     setBusyId(userId);
     startTransition(async () => {
-      const res = await updateUserRole(userId, newRole);
+      const res = await updateUserRoles(userId, newRoles);
       setBusyId(null);
       if (res.error) {
         toast.error(res.error);
         return;
       }
       toast.success("Role updated");
-      setMembers((prev) => prev.map((m) => (m.id === userId ? { ...m, role: newRole } : m)));
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === userId ? { ...m, role: newRoles[0], roles: newRoles } : m
+        )
+      );
     });
   }
 
@@ -145,7 +205,7 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
 
   return (
     <div className="space-y-6">
-      {/* Invite card */}
+      {/* ── Invite card ──────────────────────────────────────────────────── */}
       <section className="rounded-2xl border border-border bg-card card-elevated p-6">
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-3">
           <div className="flex items-center gap-2">
@@ -186,23 +246,47 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
 
             <div className="space-y-1.5">
               <Label className="text-sm font-medium text-foreground">Role</Label>
+              <p className="text-xs text-muted-foreground">
+                Pick a single role, or assign both <span className="font-medium text-foreground">Executive</span> and{" "}
+                <span className="font-medium text-foreground">Accountant</span> together for users who handle
+                both operations and finance.
+              </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
-                {ROLES.map((r) => (
-                  <button
-                    type="button"
-                    key={r.value}
-                    onClick={() => setRole(r.value)}
-                    className={`flex flex-col items-start rounded-xl border p-3 text-left transition-colors ${
-                      role === r.value
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-background hover:bg-muted/40"
-                    }`}
-                  >
-                    <span className="text-sm font-medium text-foreground">{r.label}</span>
-                    <span className="text-xs text-muted-foreground">{r.description}</span>
-                  </button>
-                ))}
+                {ROLES.map((r) => {
+                  const isSelected = selectedRoles.includes(r.value);
+                  const isCombinable = COMBINABLE.has(r.value);
+                  return (
+                    <button
+                      type="button"
+                      key={r.value}
+                      onClick={() => setSelectedRoles((prev) => toggleRole(prev, r.value))}
+                      className={`relative flex flex-col items-start rounded-xl border p-3 text-left transition-colors ${
+                        isSelected
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-background hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="text-sm font-medium text-foreground flex-1">
+                          {r.label}
+                        </span>
+                        {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                      </div>
+                      <span className="text-xs text-muted-foreground">{r.description}</span>
+                      {isCombinable && (
+                        <span className="mt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Combinable
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
+              {selectedRoles.length > 1 && (
+                <p className="text-xs text-primary">
+                  Selected combo: {rolesToSortedLabel(selectedRoles)}
+                </p>
+              )}
             </div>
 
             <div className="flex gap-2">
@@ -218,7 +302,7 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
                   setShowInvite(false);
                   setEmail("");
                   setFullName("");
-                  setRole("viewer");
+                  setSelectedRoles(["viewer"]);
                 }}
               >
                 Cancel
@@ -237,7 +321,7 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
         )}
       </section>
 
-      {/* Members list */}
+      {/* ── Members list ─────────────────────────────────────────────────── */}
       <section className="rounded-2xl border border-border bg-card card-elevated overflow-hidden">
         <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-5 py-3">
           <ShieldCheck className="h-4 w-4 text-muted-foreground" />
@@ -256,6 +340,7 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
               const isSelf = m.id === currentUserId;
               const isPendingRow = m.id.startsWith("pending-");
               const busy = busyId === m.id;
+              const memberRoles = m.roles && m.roles.length > 0 ? m.roles : [m.role];
 
               return (
                 <div
@@ -292,26 +377,12 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
                     </div>
                   </div>
 
-                  {/* Role badge + selector */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span
-                      className={`hidden md:inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${ROLE_TONES[m.role]}`}
-                    >
-                      {ROLE_LABEL[m.role]}
-                    </span>
-                    <select
-                      value={m.role}
-                      onChange={(e) => handleRoleChange(m.id, e.target.value as UserRole)}
-                      disabled={busy || isPendingRow}
-                      className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground disabled:opacity-50"
-                    >
-                      {ROLES.map((r) => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* Role badges + role editor popover (opens into inline chooser) */}
+                  <RolePicker
+                    value={memberRoles as UserRole[]}
+                    disabled={busy || isPendingRow}
+                    onChange={(next) => handleRolesChange(m.id, next)}
+                  />
 
                   {/* Last sign in */}
                   <div className="hidden lg:block text-right shrink-0 w-32">
@@ -363,6 +434,113 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+// ─── Inline role picker (per row) ────────────────────────────────────────────
+// Shows the current role pill(s). Clicking opens a small inline chooser
+// where the admin can toggle roles in/out using the same toggleRole() rules
+// as the invite form.
+function RolePicker({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: UserRole[];
+  disabled?: boolean;
+  onChange: (next: UserRole[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<UserRole[]>(value);
+
+  function openPicker() {
+    setDraft(value);
+    setOpen(true);
+  }
+  function apply() {
+    if (draft.length === 0) return;
+    setOpen(false);
+    // Only fire if actually changed
+    if (draft.length !== value.length || draft.some((r) => !value.includes(r))) {
+      onChange(draft);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 shrink-0 relative">
+      <div className="flex flex-wrap items-center gap-1 min-h-6">
+        {value.map((r) => (
+          <span
+            key={r}
+            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${ROLE_TONES[r]}`}
+          >
+            {ROLE_LABEL[r]}
+          </span>
+        ))}
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-8 text-xs"
+        onClick={open ? apply : openPicker}
+        disabled={disabled}
+      >
+        {open ? "Save" : "Edit"}
+      </Button>
+
+      {open && (
+        <div className="absolute right-0 top-9 z-10 w-72 rounded-xl border border-border bg-popover p-2 shadow-lg ring-1 ring-border">
+          <p className="px-2 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Choose role(s)
+          </p>
+          <div className="space-y-1">
+            {ROLES.map((r) => {
+              const checked = draft.includes(r.value);
+              return (
+                <button
+                  type="button"
+                  key={r.value}
+                  onClick={() => setDraft((prev) => toggleRole(prev, r.value))}
+                  className={`w-full flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+                    checked ? "bg-primary/5" : "hover:bg-muted/50"
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                      checked
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-muted-foreground/40"
+                    }`}
+                  >
+                    {checked && <Check className="h-3 w-3" />}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-xs font-medium text-foreground">{r.label}</span>
+                    <span className="block text-[10px] text-muted-foreground">{r.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-1 mt-2 pt-2 border-t border-border">
+            <Button size="sm" className="flex-1 h-7 text-xs" onClick={apply} disabled={draft.length === 0}>
+              Save
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => {
+                setOpen(false);
+                setDraft(value);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,12 +4,15 @@
 //
 // These types map 1:1 to the SQL schema in supabase/migrations/
 
+// Single role values allowed in profiles.role (primary role) and as elements
+// of profiles.roles (multi-role set). sales_manager and operations_manager
+// were consolidated into "executive" in migration 020.
 export type UserRole =
   | "super_admin"
-  | "sales_manager"
-  | "operations_manager"
-  | "accounts"
   | "admin"
+  | "manager"
+  | "executive"
+  | "accounts"
   | "viewer";
 
 export type SubscriptionTier = "free" | "starter" | "pro" | "enterprise";
@@ -66,7 +69,13 @@ export type OrganizationUpdate = Partial<
 export interface Profile {
   id: string; // same as auth.users.id
   org_id: string | null;
+  // Primary role (single value). Kept for backward-compat with RLS policies
+  // and for the common case where a user has just one role.
   role: UserRole;
+  // Full set of roles assigned to the user. For single-role users this is
+  // just [role]; for the executive+accountant combo it's both values.
+  // Always check `roles` when gating permissions that either role can grant.
+  roles: UserRole[];
   full_name: string | null;
   phone: string | null;
   avatar_url: string | null;
@@ -110,6 +119,9 @@ export interface Site {
   width_ft: number | null;
   height_ft: number | null;
   total_sqft: number | null; // generated column
+  // Free-form extra dimensions beyond width/height (e.g. depth, pole height).
+  // Persisted as JSONB on `sites.custom_dimensions`. Defaults to [].
+  custom_dimensions: { label: string; value: string }[];
 
   illumination: IlluminationType | null;
   facing: FacingDirection | null;

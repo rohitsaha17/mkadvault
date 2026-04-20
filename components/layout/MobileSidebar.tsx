@@ -6,12 +6,12 @@ import { useTranslations } from "next-intl";
 import {
   LayoutDashboard, MapPin, Home, Building2, FileText,
   Users, Megaphone, Receipt, FileSpreadsheet, BarChart3,
-  Bell, Settings, LogOut, Sparkles,
+  Bell, Settings, Sparkles, ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { logoutAction } from "@/app/[locale]/(auth)/actions";
+import { UserMenu } from "./UserMenu";
 import type { Profile } from "@/lib/types/database";
 
 const NAV_SECTIONS = [
@@ -127,29 +127,30 @@ export function MobileSidebar({ open, onClose, profile }: MobileSidebarProps) {
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
-          <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/40 p-2 pr-3">
-            <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border">
-              <AvatarImage src={profile?.avatar_url ?? undefined} />
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-white truncate">
-                {profile?.full_name ?? "User"}
-              </p>
-              <p className="text-[10px] text-sidebar-foreground/60 truncate capitalize">
-                {profile?.role?.replace(/_/g, " ") ?? ""}
-              </p>
+          <UserMenu
+            profile={profile}
+            side="top"
+            align="start"
+            triggerClassName="w-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          >
+            <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/40 hover:bg-sidebar-accent/70 p-2 pr-3 transition-colors cursor-pointer">
+              <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border">
+                <AvatarImage src={profile?.avatar_url ?? undefined} />
+                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-xs font-semibold text-white truncate">
+                  {profile?.full_name ?? "User"}
+                </p>
+                <p className="text-[10px] text-sidebar-foreground/60 truncate capitalize">
+                  {profile?.role?.replace(/_/g, " ") ?? ""}
+                </p>
+              </div>
+              <ChevronsUpDown className="h-4 w-4 text-sidebar-foreground/60 shrink-0" />
             </div>
-            <button
-              onClick={() => logoutAction()}
-              className="text-sidebar-foreground/60 hover:text-red-400 transition-colors p-1.5 rounded-md hover:bg-sidebar-accent"
-              aria-label={t("logout")}
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
+          </UserMenu>
         </div>
       </SheetContent>
     </Sheet>

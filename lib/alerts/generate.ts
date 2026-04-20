@@ -279,7 +279,7 @@ async function generateCampaignEndingAlerts(orgId: string, advanceDays = [30, 15
     alerts.push({
       organization_id: orgId,
       user_id: null,
-      target_role: "sales_manager",
+      target_role: "executive",
       alert_type: "campaign_ending",
       title: `Campaign ending in ${daysUntil} days`,
       message: `"${camp.campaign_name}" for ${clientName} ends on ${fmtDate(camp.end_date)}.`,
@@ -322,7 +322,7 @@ async function generateMunicipalExpiryAlerts(orgId: string, advanceDays = [60, 3
     alerts.push({
       organization_id: orgId,
       user_id: null,
-      target_role: "operations_manager",
+      target_role: "executive",
       alert_type: "municipal_expiry",
       title: `Municipal permit expiring in ${daysUntil} days`,
       message: `Site ${site.site_code ?? site.name} municipal permission expires on ${fmtDate(site.municipal_permission_expiry)}.`,
@@ -373,7 +373,7 @@ async function generateMountingAlerts(orgId: string) {
     alerts.push({
       organization_id: orgId,
       user_id: null,
-      target_role: "operations_manager",
+      target_role: "executive",
       alert_type: "mounting_scheduled",
       title: "Mounting scheduled for tomorrow",
       message: `Mounting at ${siteName} for "${campaignName}"${clientName ? ` (${clientName})` : ""} is scheduled for ${fmtDate(csTyped.mounting_date)}.`,

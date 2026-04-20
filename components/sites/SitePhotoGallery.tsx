@@ -3,6 +3,7 @@
 // controls. Calls server actions for mutations; gets signed URLs from Supabase Storage.
 import { useState, useRef, useTransition } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Upload, Trash2, Star, Loader2, ImageOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function SitePhotoGallery({ siteId, photos: initialPhotos, storageBaseUrl }: Props) {
+  const router = useRouter();
   const [photos, setPhotos] = useState(initialPhotos);
   const [isPending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
@@ -35,19 +37,33 @@ export function SitePhotoGallery({ siteId, photos: initialPhotos, storageBaseUrl
     if (!files.length) return;
 
     setUploading(true);
+    let uploadedCount = 0;
+    // Collect successful uploads then append in one go so the gallery
+    // updates immediately — no page refresh required.
+    const newPhotos: SitePhoto[] = [];
     for (const file of files) {
       const formData = new FormData();
       formData.append("file", file);
       const result = await uploadSitePhoto(siteId, formData);
       if (result.error) {
         toast.error(result.error);
+        continue;
+      }
+      if (result.photo) {
+        newPhotos.push(result.photo as SitePhoto);
+        uploadedCount++;
       }
     }
+    if (newPhotos.length > 0) {
+      setPhotos((prev) => [...prev, ...newPhotos]);
+    }
     setUploading(false);
-    // Refresh is handled by revalidatePath in the server action;
-    // for optimistic updates we'd need router.refresh() here.
-    // For now, prompt user to refresh or navigate away and back.
-    toast.success("Photo(s) uploaded. Refresh to see them.");
+    if (uploadedCount > 0) {
+      toast.success(`${uploadedCount} photo${uploadedCount > 1 ? "s" : ""} uploaded`);
+      // Refresh the server component tree so any other parts of the page
+      // (e.g. photo count headings) stay in sync.
+      router.refresh();
+    }
     // Reset input
     if (fileRef.current) fileRef.current.value = "";
   }

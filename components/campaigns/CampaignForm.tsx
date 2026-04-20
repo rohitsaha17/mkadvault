@@ -20,6 +20,9 @@ interface Props {
   clients: Pick<Client, "id" | "company_name" | "brand_name">[];
   sites: Pick<Site, "id" | "site_code" | "name" | "city" | "base_rate_paise" | "total_sqft" | "media_type">[];
   preselectedClientId?: string;
+  // When launching the form from a site page, pre-add this site to the sites
+  // step so the user only has to pick a client and dates.
+  preselectedSiteId?: string;
 }
 
 const STEPS = [
@@ -84,7 +87,7 @@ function calcSiteTotal(rateInr: number, rateType: string, startDate?: string, en
   return rateInr; // fallback if no dates
 }
 
-export function CampaignForm({ clients, sites, preselectedClientId }: Props) {
+export function CampaignForm({ clients, sites, preselectedClientId, preselectedSiteId }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isDraftPending, startDraftTransition] = useTransition();
@@ -98,7 +101,18 @@ export function CampaignForm({ clients, sites, preselectedClientId }: Props) {
       campaign_name: "",
       client_id: preselectedClientId ?? "",
       pricing_type: "itemized",
-      sites: [],
+      // If launched from a site page, pre-add that site with its base rate as
+      // the display rate so the booking flow starts with one row already.
+      sites: preselectedSiteId && sites.some((s) => s.id === preselectedSiteId)
+        ? [{
+            site_id: preselectedSiteId,
+            rate_type: "per_month" as const,
+            display_rate_inr: (() => {
+              const s = sites.find((x) => x.id === preselectedSiteId);
+              return s?.base_rate_paise ? s.base_rate_paise / 100 : undefined;
+            })(),
+          }]
+        : [],
       services: [],
     },
   });

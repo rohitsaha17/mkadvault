@@ -13,6 +13,7 @@ import {
   User,
   ScrollText,
   Megaphone,
+  Plus,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import type { Site, SitePhoto } from "@/lib/types/database";
@@ -241,11 +242,30 @@ export default async function SiteDetailPage({ params }: Props) {
           </Section>
 
           {/* Contracts */}
-          <Section title="Contracts" icon={<ScrollText className="h-4 w-4" />}>
+          <Section
+            title="Contracts"
+            icon={<ScrollText className="h-4 w-4" />}
+            action={
+              <Link href={`/contracts/new?site_id=${id}`}>
+                <Button size="sm" variant="outline" className="gap-1.5">
+                  <Plus className="h-3.5 w-3.5" />
+                  New Contract
+                </Button>
+              </Link>
+            }
+          >
             {contracts.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">
-                No contracts linked to this site yet.
-              </p>
+              <div className="py-4 text-center">
+                <p className="text-sm text-muted-foreground">
+                  No contracts linked to this site yet.
+                </p>
+                <Link href={`/contracts/new?site_id=${id}`}>
+                  <Button size="sm" variant="outline" className="mt-3 gap-1.5">
+                    <Plus className="h-3.5 w-3.5" />
+                    Create First Contract
+                  </Button>
+                </Link>
+              </div>
             ) : (
               <div className="divide-y divide-border -mx-1">
                 {contracts.map((c) => {
@@ -282,11 +302,30 @@ export default async function SiteDetailPage({ params }: Props) {
           </Section>
 
           {/* Campaign Bookings */}
-          <Section title="Campaign Bookings" icon={<Megaphone className="h-4 w-4" />}>
+          <Section
+            title="Campaign Bookings"
+            icon={<Megaphone className="h-4 w-4" />}
+            action={
+              <Link href={`/campaigns/new?site_id=${id}`}>
+                <Button size="sm" variant="outline" className="gap-1.5">
+                  <Plus className="h-3.5 w-3.5" />
+                  Book Campaign
+                </Button>
+              </Link>
+            }
+          >
             {campaignSites.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">
-                No campaigns have booked this site yet.
-              </p>
+              <div className="py-4 text-center">
+                <p className="text-sm text-muted-foreground">
+                  No campaigns have booked this site yet.
+                </p>
+                <Link href={`/campaigns/new?site_id=${id}`}>
+                  <Button size="sm" variant="outline" className="mt-3 gap-1.5">
+                    <Plus className="h-3.5 w-3.5" />
+                    Book a Campaign
+                  </Button>
+                </Link>
+              </div>
             ) : (
               <div className="divide-y divide-border -mx-1">
                 {campaignSites.map((cs) => {
@@ -417,17 +456,24 @@ export default async function SiteDetailPage({ params }: Props) {
 function Section({
   title,
   icon,
+  action,
   children,
 }: {
   title: string;
   icon: React.ReactNode;
+  // Optional right-aligned action slot in the section header (e.g. a "New"
+  // button that opens a create flow scoped to this entity).
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="rounded-2xl border border-border bg-card card-elevated p-5 sm:p-6">
-      <div className="mb-4 flex items-center gap-2 border-b border-border pb-3">
-        <span className="text-muted-foreground">{icon}</span>
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      <div className="mb-4 flex items-center justify-between gap-2 border-b border-border pb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        </div>
+        {action}
       </div>
       {children}
     </section>

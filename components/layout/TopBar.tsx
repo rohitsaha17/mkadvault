@@ -9,17 +9,9 @@ import { Menu, Search, Sun, Moon, Languages, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { MobileSidebar } from "./MobileSidebar";
+import { UserMenu } from "./UserMenu";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
-import { logoutAction } from "@/app/[locale]/(auth)/actions";
 import { useRouter, usePathname } from "@/i18n/navigation";
 import type { Profile } from "@/lib/types/database";
 
@@ -158,39 +150,17 @@ export function TopBar({ profile }: TopBarProps) {
           <div className="w-px h-6 bg-border mx-1" />
 
           {/* User dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Avatar className="h-9 w-9 ring-2 ring-border hover:ring-primary/40 transition-colors">
-                <AvatarImage src={profile?.avatar_url ?? undefined} />
-                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-60">
-              <DropdownMenuLabel className="font-normal">
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-sm font-semibold truncate">
-                    {profile?.full_name ?? "User"}
-                  </p>
-                  <p className="text-xs text-muted-foreground capitalize truncate">
-                    {profile?.role?.replace(/_/g, " ") ?? ""}
-                  </p>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push("/settings")}>
-                {t("settings")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => logoutAction()}
-                className="text-destructive focus:text-destructive"
-              >
-                {t("logout")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <UserMenu
+            profile={profile}
+            triggerClassName="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Avatar className="h-9 w-9 ring-2 ring-border hover:ring-primary/40 transition-colors">
+              <AvatarImage src={profile?.avatar_url ?? undefined} />
+              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+          </UserMenu>
         </div>
       </header>
 

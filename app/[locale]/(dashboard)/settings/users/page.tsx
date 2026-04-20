@@ -18,7 +18,12 @@ export interface TeamMember {
   id: string;
   full_name: string | null;
   email: string | null;
+  // Primary role — kept for backward compat. Prefer `roles` for gating.
   role: UserRole;
+  // Full role set (single-role users have [role]; exec+accountant users
+  // have both). Always present — page.tsx normalises when the DB row is
+  // missing the column (pre-migration-020 instances).
+  roles: UserRole[];
   is_active: boolean;
   phone: string | null;
   last_sign_in_at: string | null;
@@ -55,7 +60,13 @@ export default async function UsersPage({
     );
   }
 
-  const isAdmin = ["super_admin", "admin"].includes(profile.role ?? "");
+  // Admin check looks at the full roles[] set so executive+accountant combo
+  // users don't accidentally get elevated — only true admins pass.
+  const profileRoles: string[] =
+    Array.isArray(profile.roles) && profile.roles.length > 0
+      ? profile.roles
+      : [profile.role ?? ""];
+  const isAdmin = profileRoles.some((r) => ["super_admin", "admin"].includes(r));
 
   if (!isAdmin) {
     return (
@@ -75,7 +86,7 @@ export default async function UsersPage({
   // Fetch all profiles in this org
   const { data: profilesData } = await supabase
     .from("profiles")
-    .select("id, full_name, role, is_active, phone, created_at")
+    .select("id, full_name, role, roles, is_active, phone, created_at")
     .eq("org_id", profile.org_id)
     .order("created_at", { ascending: true });
 
@@ -94,11 +105,18 @@ export default async function UsersPage({
 
   const members: TeamMember[] = profilesList.map((p) => {
     const auth = authMap.get(p.id);
+    // Fall back to [role] if `roles` column is missing/empty on this instance.
+    const rolesArr: UserRole[] =
+      Array.isArray((p as { roles?: string[] }).roles) &&
+      ((p as { roles?: string[] }).roles?.length ?? 0) > 0
+        ? ((p as { roles?: string[] }).roles as UserRole[])
+        : [p.role as UserRole];
     return {
       id: p.id,
       full_name: p.full_name,
       email: auth?.email ?? null,
       role: p.role as UserRole,
+      roles: rolesArr,
       is_active: p.is_active,
       phone: p.phone,
       last_sign_in_at: auth?.last_sign_in_at ?? null,
