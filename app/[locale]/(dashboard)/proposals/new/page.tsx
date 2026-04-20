@@ -1,6 +1,7 @@
 import { setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { ProposalWizard } from "@/components/proposals/ProposalWizard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import type { Client, Organization } from "@/lib/types/database";
@@ -39,10 +40,9 @@ export default async function NewProposalPage({
   const { mode } = await searchParams;
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase.from("profiles").select("org_id").eq("id", user.id).single();
+  const session = await getSession();
+  if (!session) redirect("/login");
+  const { profile } = session;
   if (!profile?.org_id) redirect("/login");
 
   const [

@@ -6,7 +6,7 @@
 // - Active state uses a left indicator rail + accent background instead of full fill
 // - Collapses to a 16px icon rail on desktop, hidden on mobile (handled by MobileSidebar)
 import { useState, useEffect } from "react";
-import { usePathname, useRouter } from "@/i18n/navigation";
+import { Link, usePathname } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import {
   LayoutDashboard,
@@ -87,7 +87,6 @@ export function Sidebar({ profile, onCollapsedChange }: SidebarProps) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
-  const router = useRouter();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -164,11 +163,15 @@ export function Sidebar({ profile, onCollapsedChange }: SidebarProps) {
                   ? "bg-sidebar-accent text-white font-medium"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-white"
               );
+              // Use <Link> (not router.push on click) so Next.js prefetches the
+              // route on hover/focus — makes navigation feel instant because the
+              // RSC payload is already in memory by the time the user clicks.
               const button = (
-                <button
+                <Link
                   key={key}
-                  onClick={() => router.push(href)}
+                  href={href}
                   className={btnClass}
+                  prefetch
                 >
                   {/* Active left rail indicator */}
                   {active && (
@@ -182,7 +185,7 @@ export function Sidebar({ profile, onCollapsedChange }: SidebarProps) {
                     strokeWidth={active ? 2.25 : 2}
                   />
                   {!collapsed && <span className="truncate">{label}</span>}
-                </button>
+                </Link>
               );
 
               return collapsed ? (

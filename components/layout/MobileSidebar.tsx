@@ -1,7 +1,7 @@
 "use client";
 // MobileSidebar — slide-out nav drawer for mobile screens.
 // Mirrors the desktop Sidebar's grouped sections and theme tokens.
-import { usePathname, useRouter } from "@/i18n/navigation";
+import { Link, usePathname } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import {
   LayoutDashboard, MapPin, Home, Building2, FileText,
@@ -59,16 +59,10 @@ export function MobileSidebar({ open, onClose, profile }: MobileSidebarProps) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
-  const router = useRouter();
 
   const initials = profile?.full_name
     ? profile.full_name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
     : "?";
-
-  function navigate(href: string) {
-    router.push(href);
-    onClose();
-  }
 
   function isActive(href: string) {
     if (href === "/dashboard") return pathname === "/dashboard" || pathname.endsWith("/dashboard");
@@ -103,9 +97,11 @@ export function MobileSidebar({ open, onClose, profile }: MobileSidebarProps) {
               {section.items.map(({ key, href, icon: Icon }) => {
                 const active = isActive(href);
                 return (
-                  <button
+                  <Link
                     key={key}
-                    onClick={() => navigate(href)}
+                    href={href}
+                    onClick={onClose}
+                    prefetch
                     className={cn(
                       "group relative w-full flex items-center gap-3 h-10 px-3 rounded-lg text-sm transition-all",
                       active
@@ -123,7 +119,7 @@ export function MobileSidebar({ open, onClose, profile }: MobileSidebarProps) {
                       )}
                     />
                     <span className="truncate">{t(key as keyof typeof t)}</span>
-                  </button>
+                  </Link>
                 );
               })}
             </div>

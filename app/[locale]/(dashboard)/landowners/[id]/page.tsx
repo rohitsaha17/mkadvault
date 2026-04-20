@@ -2,6 +2,7 @@ import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { inr, fmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,22 +26,17 @@ export default async function LandownerDetailPage({
 
   const supabase = await createClient();
 
-  // Fetch landowner + current user role
-  const [{ data: lData }, { data: { user } }] = await Promise.all([
+  // Fetch landowner + cached session (for role gating) in parallel
+  const [{ data: lData }, session] = await Promise.all([
     supabase.from("landowners").select("*").eq("id", id).is("deleted_at", null).single(),
-    supabase.auth.getUser(),
+    getSession(),
   ]);
 
   if (!lData) notFound();
   const landowner = lData as unknown as Landowner;
 
-  // Get user role for gating sensitive fields
-  let canViewSensitive = false;
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles").select("role").eq("id", user.id).single();
-    canViewSensitive = SENSITIVE_ROLES.includes(profile?.role ?? "");
-  }
+  // Role-gate sensitive fields using the cached profile from the session helper
+  const canViewSensitive = SENSITIVE_ROLES.includes(session?.profile?.role ?? "");
 
   // Fetch linked contracts
   const { data: contractsData } = await supabase

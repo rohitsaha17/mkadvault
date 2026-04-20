@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, Pencil, MapPin, Calendar, User, FileText, Activity, Wrench, Wallet,
@@ -57,12 +58,9 @@ export default async function CampaignDetailPage({
     client?: Pick<Client, "id" | "company_name" | "brand_name" | "primary_contact_name" | "primary_contact_phone"> | null;
   };
 
-  // Fetch current user profile for role-based UI
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data: profileData } = user
-    ? await supabase.from("profiles").select("role").eq("id", user.id).single()
-    : { data: null };
-  const userRole = profileData?.role ?? "viewer";
+  // Current user role for role-based UI (cached per request)
+  const session = await getSession();
+  const userRole = session?.profile?.role ?? "viewer";
 
   // Fetch related data in parallel
   const [

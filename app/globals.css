@@ -270,3 +270,21 @@
 }
 .success-tick-halo    { animation: success-halo 1.4s ease-out 0.2s infinite; }
 .success-tick-message { animation: success-fade-up 0.4s ease-out 0.55s both; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Page transition — applied to the dashboard main content. New pages fade in
+   and rise a few pixels, which hides the 100-300ms render gap and makes nav
+   feel smoother than hard cutovers. Respects prefers-reduced-motion.
+   ───────────────────────────────────────────────────────────────────────── */
+@keyframes page-enter {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.page-transition > * {
+  animation: page-enter 0.22s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition > * { animation: none; }
+}

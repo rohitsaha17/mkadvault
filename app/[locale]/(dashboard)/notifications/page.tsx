@@ -1,6 +1,7 @@
 // Full notifications page — table of all alerts with filters and bulk actions
 import { setRequestLocale } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { NotificationsClient } from "@/components/notifications/NotificationsClient";
 import type { Alert } from "@/lib/types/database";
 
@@ -14,14 +15,10 @@ export default async function NotificationsPage({
 
   const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return <p className="p-6 text-sm text-muted-foreground">Not authenticated.</p>;
+  const session = await getSession();
+  if (!session) return <p className="p-6 text-sm text-muted-foreground">Not authenticated.</p>;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("org_id, role")
-    .eq("id", user.id)
-    .single();
+  const { user, profile } = session;
 
   if (!profile) return <p className="p-6 text-sm text-muted-foreground">Profile not found.</p>;
 

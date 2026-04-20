@@ -1,6 +1,7 @@
 import { setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { InvoiceForm } from "@/components/billing/InvoiceForm";
 import { PageHeader } from "@/components/shared/PageHeader";
 import type { Client, Campaign } from "@/lib/types/database";
@@ -30,16 +31,10 @@ export default async function NewInvoicePage({
 
   const supabase = await createClient();
 
-  // Verify auth
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  // Fetch profile to get org
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("org_id")
-    .eq("id", user.id)
-    .single();
+  // Verify auth (cached per request)
+  const session = await getSession();
+  if (!session) redirect("/login");
+  const { profile } = session;
   if (!profile?.org_id) redirect("/login");
 
   const [

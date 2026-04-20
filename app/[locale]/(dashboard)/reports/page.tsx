@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 
 // ─── Report card definition ──────────────────────────────────────────────────
 
@@ -45,21 +46,14 @@ export default async function ReportsPage({
 
   const supabase = await createClient();
 
-  // Auth check
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Auth check (cached per request)
+  const session = await getSession();
 
-  if (!user) {
+  if (!session) {
     redirect(`/${locale}/login`);
   }
 
-  // Fetch the user's organisation id
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("org_id")
-    .eq("id", user.id)
-    .single();
+  const { profile } = session;
 
   if (!profile?.org_id) {
     return (

@@ -17,6 +17,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { inr } from "@/lib/utils";
 import { autoCompletePastDueCampaigns } from "@/lib/campaigns/auto-complete";
 import { RevenueCostChart, CashFlowChart } from "@/components/dashboard/DashboardCharts";
@@ -208,21 +209,15 @@ export default async function DashboardPage({ params }: PageProps) {
   const tDash = await getTranslations("dashboard");
   const supabase = await createClient();
 
-  // Get authenticated user — redirect to login if session is missing
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Get cached session (user + profile). Cached per-request so this is free
+  // if the layout also called getSession().
+  const session = await getSession();
 
-  if (!user) {
+  if (!session) {
     redirect(`/${locale}/login`);
   }
 
-  // Fetch profile (org_id, role, name)
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("org_id, role, full_name")
-    .eq("id", user.id)
-    .single();
+  const { profile } = session;
 
   if (!profile?.org_id) {
     // Profile not set up yet — show minimal screen
@@ -234,7 +229,7 @@ export default async function DashboardPage({ params }: PageProps) {
   }
 
   const orgId: string = profile.org_id;
-  const role: UserRole = profile.role;
+  const role: UserRole = profile.role as UserRole;
 
   // ── Auto-complete campaigns whose end date has passed ─────────────────────
   // Fire-and-forget on dashboard load so stale campaigns get cleaned up

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, Edit, FileText, MapPin } from "lucide-react";
@@ -51,9 +52,9 @@ export default async function ProposalDetailPage({
   setRequestLocale(locale);
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-  const { data: profile } = await supabase.from("profiles").select("org_id").eq("id", user.id).single();
+  const session = await getSession();
+  if (!session) redirect("/login");
+  const { profile } = session;
   if (!profile?.org_id) redirect("/login");
 
   const [

@@ -23,6 +23,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { inr } from "@/lib/utils";
 import { SitePnlExport, type SitePnlRow } from "@/components/reports/SitePnlExport";
 
@@ -77,17 +78,10 @@ export default async function SitePnlPage({
 
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSession();
+  if (!session) redirect(`/${locale}/login`);
 
-  if (!user) redirect(`/${locale}/login`);
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("org_id")
-    .eq("id", user.id)
-    .single();
+  const { profile } = session;
 
   if (!profile?.org_id) {
     return (

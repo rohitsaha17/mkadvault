@@ -31,7 +31,7 @@ export function DashboardShell({ profile, children }: DashboardShellProps) {
             aria-hidden
             className="pointer-events-none sticky top-0 -mb-px h-px w-full bg-gradient-to-b from-background to-transparent"
           />
-          <div className="mx-auto w-full max-w-[1600px] p-4 md:p-6 lg:p-8">
+          <div className="mx-auto w-full max-w-[1600px] p-4 md:p-6 lg:p-8 page-transition">
             {children}
           </div>
         </main>

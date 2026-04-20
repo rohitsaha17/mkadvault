@@ -6,6 +6,7 @@ import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { UsersManagement } from "@/components/settings/UsersManagement";
@@ -33,21 +34,15 @@ export default async function UsersPage({
   setRequestLocale(locale);
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getSession();
 
-  if (!user) {
+  if (!session) {
     return (
       <p className="p-6 text-sm text-muted-foreground">Not authenticated.</p>
     );
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("org_id, role")
-    .eq("id", user.id)
-    .single();
+  const { user, profile } = session;
 
   if (!profile?.org_id) {
     return (
@@ -60,7 +55,7 @@ export default async function UsersPage({
     );
   }
 
-  const isAdmin = ["super_admin", "admin"].includes(profile.role);
+  const isAdmin = ["super_admin", "admin"].includes(profile.role ?? "");
 
   if (!isAdmin) {
     return (

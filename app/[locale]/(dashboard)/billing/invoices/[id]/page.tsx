@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, FileText, Receipt, Building2, History } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { inr, fmt } from "@/lib/utils";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { BillingNav } from "@/components/billing/BillingNav";
@@ -47,7 +48,7 @@ export default async function InvoiceDetailPage({
     { data: invData },
     { data: lineItemsData },
     { data: paymentsData },
-    { data: authData },
+    session,
   ] = await Promise.all([
     supabase
       .from("invoices")
@@ -65,15 +66,10 @@ export default async function InvoiceDetailPage({
       .select("*")
       .eq("invoice_id", id)
       .order("payment_date"),
-    supabase.auth.getUser(),
+    getSession(),
   ]);
 
-  const user = authData?.user ?? null;
-  let profileOrgId: string | null = null;
-  if (user) {
-    const { data: profile } = await supabase.from("profiles").select("org_id").eq("id", user.id).single();
-    profileOrgId = profile?.org_id ?? null;
-  }
+  const profileOrgId: string | null = session?.profile?.org_id ?? null;
 
   if (!invData) notFound();
 
