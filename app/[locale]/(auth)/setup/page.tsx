@@ -10,6 +10,10 @@ export const metadata = {
   title: "Initial Setup — OOH Platform",
 };
 
+// Never prerender — this page hits the DB to check if setup is already done,
+// and depends on runtime env vars (Supabase service role key).
+export const dynamic = "force-dynamic";
+
 export default async function SetupPage() {
   const admin = createAdminClient();
 
