@@ -1,9 +1,25 @@
 "use server";
 // Auth Server Actions — run on the server, called from Client Component forms.
 // Zod validates on the server side as a second layer (client already validates).
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+
+/**
+ * Derive the current site's origin from request headers so reset-password /
+ * magic-link emails always point at the host the user is actually on —
+ * localhost in dev, the Vercel URL in prod, the custom domain once linked.
+ *
+ * Falls back to NEXT_PUBLIC_APP_URL, then localhost, in that order.
+ */
+async function getSiteOrigin(): Promise<string> {
+  const h = await headers();
+  const forwardedHost = h.get("x-forwarded-host") ?? h.get("host");
+  const forwardedProto = h.get("x-forwarded-proto") ?? "https";
+  if (forwardedHost) return `${forwardedProto}://${forwardedHost}`;
+  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+}
 
 // ─── Validation schemas (server-side) ────────────────────────────────────────
 
@@ -122,10 +138,11 @@ export async function forgotPasswordAction(
   }
 
   const supabase = await createClient();
+  const origin = await getSiteOrigin();
   const { error } = await supabase.auth.resetPasswordForEmail(
     parsed.data.email,
     {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?next=/reset-password`,
+      redirectTo: `${origin}/auth/callback?next=/reset-password`,
     }
   );
 
