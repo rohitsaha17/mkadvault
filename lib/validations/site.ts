@@ -1,0 +1,66 @@
+// Zod validation schema for the site add/edit form.
+// Used on both client (react-hook-form resolver) and server (server actions).
+//
+// IMPORTANT: Keep types simple (no z.transform) so react-hook-form's zodResolver
+// doesn't have input/output type mismatches. Coercion happens in server actions.
+import { z } from "zod";
+
+export const siteSchema = z.object({
+  // ── Step 1: Basic Info ─────────────────────────────────────────────────
+  name: z.string().min(1, "Site name is required"),
+  site_code: z.string().min(1, "Site code is required").max(50),
+  media_type: z.enum([
+    "billboard", "hoarding", "dooh", "kiosk",
+    "wall_wrap", "unipole", "bus_shelter", "custom",
+  ]),
+  structure_type: z.enum(["permanent", "temporary", "digital"]),
+  status: z.enum(["available", "booked", "maintenance", "blocked", "expired"]),
+
+  // ── Step 2: Location ───────────────────────────────────────────────────
+  address: z.string().min(1, "Address is required"),
+  city: z.string().min(1, "City is required"),
+  state: z.string().min(1, "State is required"),
+  // Optional string fields — empty string is treated as null in the server action
+  pincode: z.string().optional(),
+  landmark: z.string().optional(),
+  // Lat/lng: optional numbers (HTML number input returns NaN for empty)
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+
+  // ── Step 3: Specifications ─────────────────────────────────────────────
+  width_ft: z.number().positive("Must be positive").optional(),
+  height_ft: z.number().positive("Must be positive").optional(),
+  illumination: z.enum(["frontlit", "backlit", "digital", "nonlit"]).optional(),
+  facing: z.enum(["N", "S", "E", "W", "NE", "NW", "SE", "SW"]).optional(),
+  traffic_side: z.enum(["lhs", "rhs", "both"]).optional(),
+  visibility_distance_m: z.number().positive("Must be positive").optional(),
+
+  // ── Step 4: Commercial ─────────────────────────────────────────────────
+  ownership_model: z.enum(["owned", "rented"]),
+  // Direct landowner link — only meaningful when ownership_model = "owned".
+  // Empty string from the select is coerced to undefined by the form.
+  landowner_id: z.string().uuid().optional().or(z.literal("")).transform((v) => v || undefined),
+  // Form collects rate in INR; server action converts to paise (× 100).
+  base_rate_inr: z.number().positive("Must be positive").optional(),
+  municipal_permission_number: z.string().optional(),
+  municipal_permission_expiry: z.string().optional(), // ISO date "YYYY-MM-DD"
+
+  // ── Step 6: Notes ──────────────────────────────────────────────────────
+  notes: z.string().optional(),
+});
+
+export type SiteFormValues = z.infer<typeof siteSchema>;
+
+// Default values for a blank new-site form
+export const siteFormDefaults: SiteFormValues = {
+  name: "",
+  site_code: "",
+  media_type: "billboard",
+  structure_type: "permanent",
+  status: "available",
+  address: "",
+  city: "",
+  state: "",
+  ownership_model: "owned",
+  landowner_id: undefined,
+};

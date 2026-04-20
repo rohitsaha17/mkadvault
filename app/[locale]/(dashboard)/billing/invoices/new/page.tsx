@@ -1,0 +1,91 @@
+import { setRequestLocale } from "next-intl/server";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { InvoiceForm } from "@/components/billing/InvoiceForm";
+import { PageHeader } from "@/components/shared/PageHeader";
+import type { Client, Campaign } from "@/lib/types/database";
+
+export const metadata = { title: "Create Invoice" };
+
+type InvoiceClient = Pick<Client,
+  "id" | "company_name" | "brand_name" | "gstin" | "credit_terms" |
+  "billing_address" | "billing_city" | "billing_state"
+>;
+
+type InvoiceCampaign = Pick<Campaign,
+  "id" | "campaign_name" | "client_id" | "pricing_type" | "total_value_paise"
+>;
+
+export default async function NewInvoicePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ client_id?: string; campaign_id?: string }>;
+}) {
+  const { locale } = await params;
+  setRequestLocale(locale);
+
+  const { client_id, campaign_id } = await searchParams;
+
+  const supabase = await createClient();
+
+  // Verify auth
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  // Fetch profile to get org
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("org_id")
+    .eq("id", user.id)
+    .single();
+  if (!profile?.org_id) redirect("/login");
+
+  const [
+    { data: clientsData },
+    { data: campaignsData },
+    { data: orgData },
+  ] = await Promise.all([
+    supabase
+      .from("clients")
+      .select("id, company_name, brand_name, gstin, credit_terms, billing_address, billing_city, billing_state")
+      .is("deleted_at", null)
+      .order("company_name"),
+    supabase
+      .from("campaigns")
+      .select("id, campaign_name, client_id, pricing_type, total_value_paise")
+      .is("deleted_at", null)
+      .in("status", ["confirmed", "creative_received", "printing", "mounted", "live", "completed"])
+      .order("campaign_name"),
+    supabase
+      .from("organizations")
+      .select("gstin, settings")
+      .eq("id", profile.org_id)
+      .single(),
+  ]);
+
+  const clients = (clientsData ?? []) as InvoiceClient[];
+  const campaigns = (campaignsData ?? []) as InvoiceCampaign[];
+  const orgGstin = orgData?.gstin ?? null;
+  const orgSettings = (orgData?.settings ?? {}) as Record<string, string>;
+  const defaultTerms = orgSettings.default_payment_terms ?? "Payment due within the agreed credit period. Please quote the invoice number in your payment.";
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <PageHeader
+        eyebrow="Billing"
+        title="Create Invoice"
+        description="Fill in the details below to create a new GST invoice."
+      />
+      <InvoiceForm
+        clients={clients}
+        campaigns={campaigns}
+        orgGstin={orgGstin}
+        defaultTerms={defaultTerms}
+        preselectedClientId={client_id}
+        preselectedCampaignId={campaign_id}
+      />
+    </div>
+  );
+}

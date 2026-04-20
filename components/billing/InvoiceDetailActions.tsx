@@ -1,0 +1,89 @@
+"use client";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Send, Trash2, IndianRupee } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Button } from "@/components/ui/button";
+import { RecordInvoicePaymentDialog } from "./RecordInvoicePaymentDialog";
+import { updateInvoiceStatus, deleteInvoice } from "@/app/[locale]/(dashboard)/billing/actions";
+import type { InvoiceStatus } from "@/lib/types/database";
+import type { InvoiceDocumentProps } from "./InvoiceDocument";
+
+// Dynamic import with ssr:false keeps @react-pdf/renderer out of the SSR bundle
+const InvoicePDFButton = dynamic(
+  () => import("./InvoicePDFButton").then((m) => m.InvoicePDFButton),
+  { ssr: false }
+);
+
+interface Props {
+  invoiceId: string;
+  invoiceNumber: string;
+  currentStatus: InvoiceStatus;
+  balanceDuePaise: number;
+  // PDF props (optional — shown when all data is available)
+  pdfProps?: InvoiceDocumentProps & { filename: string };
+}
+
+export function InvoiceDetailActions({ invoiceId, invoiceNumber, currentStatus, balanceDuePaise, pdfProps }: Props) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+
+  const canSend = currentStatus === "draft";
+  const canPay = ["sent", "partially_paid", "overdue"].includes(currentStatus) && balanceDuePaise > 0;
+  const canDelete = ["draft", "cancelled"].includes(currentStatus);
+
+  function handleMarkSent() {
+    startTransition(async () => {
+      const result = await updateInvoiceStatus(invoiceId, "sent");
+      if (result.error) { toast.error(result.error); return; }
+      toast.success("Invoice marked as sent");
+      router.refresh();
+    });
+  }
+
+  function handleDelete() {
+    if (!confirm(`Delete invoice ${invoiceNumber}? This cannot be undone.`)) return;
+    startTransition(async () => {
+      const result = await deleteInvoice(invoiceId);
+      if (result.error) { toast.error(result.error); return; }
+      toast.success("Invoice deleted");
+      router.push("/billing/invoices");
+    });
+  }
+
+  return (
+    <>
+      {pdfProps && <InvoicePDFButton {...pdfProps} />}
+
+      {canSend && (
+        <Button variant="outline" size="sm" onClick={handleMarkSent} disabled={isPending}>
+          <Send className="h-4 w-4 mr-2" />
+          Mark as Sent
+        </Button>
+      )}
+      {canPay && (
+        <Button size="sm" onClick={() => setShowPaymentDialog(true)}>
+          <IndianRupee className="h-4 w-4 mr-2" />
+          Record Payment
+        </Button>
+      )}
+      {canDelete && (
+        <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleDelete} disabled={isPending}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      )}
+
+      {showPaymentDialog && (
+        <RecordInvoicePaymentDialog
+          invoiceId={invoiceId}
+          invoiceNumber={invoiceNumber}
+          balanceDuePaise={balanceDuePaise}
+          onClose={() => setShowPaymentDialog(false)}
+          onSuccess={() => { router.refresh(); }}
+        />
+      )}
+    </>
+  );
+}

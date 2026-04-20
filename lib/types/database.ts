@@ -1,0 +1,767 @@
+// Database TypeScript types for the OOH Platform
+// Manually maintained — regenerate with Supabase CLI when schema changes:
+//   npx supabase gen types typescript --project-id <ref> > lib/types/database.ts
+//
+// These types map 1:1 to the SQL schema in supabase/migrations/
+
+export type UserRole =
+  | "super_admin"
+  | "sales_manager"
+  | "operations_manager"
+  | "accounts"
+  | "admin"
+  | "viewer";
+
+export type SubscriptionTier = "free" | "starter" | "pro" | "enterprise";
+
+export type MediaType =
+  | "billboard"
+  | "hoarding"
+  | "dooh"
+  | "kiosk"
+  | "wall_wrap"
+  | "unipole"
+  | "bus_shelter"
+  | "custom";
+
+export type IlluminationType = "frontlit" | "backlit" | "digital" | "nonlit";
+export type FacingDirection = "N" | "S" | "E" | "W" | "NE" | "NW" | "SE" | "SW";
+export type TrafficSide = "lhs" | "rhs" | "both";
+export type OwnershipModel = "owned" | "rented";
+export type StructureType = "permanent" | "temporary" | "digital";
+export type SiteStatus = "available" | "booked" | "maintenance" | "blocked" | "expired";
+export type PhotoType = "day" | "night" | "closeup" | "longshot" | "other";
+
+// ─── organizations ───────────────────────────────────────────────────────────
+
+export interface Organization {
+  id: string;
+  name: string;
+  gstin: string | null;
+  pan: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  pin_code: string | null;
+  phone: string | null;
+  email: string | null;
+  logo_url: string | null;
+  settings: Record<string, unknown>;
+  subscription_tier: SubscriptionTier;
+  created_at: string;
+  updated_at: string;
+}
+
+export type OrganizationInsert = Pick<Organization, "name"> &
+  Partial<
+    Omit<Organization, "id" | "created_at" | "updated_at">
+  >;
+
+export type OrganizationUpdate = Partial<
+  Omit<Organization, "id" | "created_at" | "updated_at">
+>;
+
+// ─── profiles ────────────────────────────────────────────────────────────────
+
+export interface Profile {
+  id: string; // same as auth.users.id
+  org_id: string | null;
+  role: UserRole;
+  full_name: string | null;
+  phone: string | null;
+  avatar_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProfileInsert = Pick<Profile, "id"> &
+  Partial<Omit<Profile, "id" | "created_at" | "updated_at">>;
+
+export type ProfileUpdate = Partial<
+  Omit<Profile, "id" | "created_at" | "updated_at">
+>;
+
+// ─── sites ────────────────────────────────────────────────────────────────────
+
+export interface Site {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  site_code: string;
+  name: string;
+  media_type: MediaType;
+  structure_type: StructureType;
+  status: SiteStatus;
+
+  address: string;
+  city: string;
+  state: string;
+  pincode: string | null;
+  landmark: string | null;
+  latitude: number | null;
+  longitude: number | null;
+
+  width_ft: number | null;
+  height_ft: number | null;
+  total_sqft: number | null; // generated column
+
+  illumination: IlluminationType | null;
+  facing: FacingDirection | null;
+  traffic_side: TrafficSide | null;
+  visibility_distance_m: number | null;
+
+  ownership_model: OwnershipModel;
+  // Direct link to a landowner — only set when ownership_model = "owned".
+  // Rented sites are linked to a partner_agency via the contracts table.
+  landowner_id: string | null;
+  // Stored as integer paise (1 INR = 100 paise). Display: value / 100
+  base_rate_paise: number | null;
+
+  municipal_permission_number: string | null;
+  municipal_permission_expiry: string | null; // DATE stored as ISO string
+
+  notes: string | null;
+  is_marketplace_listed: boolean;
+  marketplace_visibility_settings: Record<string, unknown>;
+}
+
+export type SiteInsert = Omit<Site, "id" | "created_at" | "updated_at" | "total_sqft"> & {
+  id?: string;
+};
+
+export type SiteUpdate = Partial<Omit<Site, "id" | "created_at" | "updated_at" | "total_sqft">>;
+
+// ─── site_photos ──────────────────────────────────────────────────────────────
+
+export interface SitePhoto {
+  id: string;
+  organization_id: string;
+  site_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+
+  photo_url: string;
+  photo_type: PhotoType;
+  is_primary: boolean;
+  sort_order: number;
+}
+
+export type SitePhotoInsert = Omit<SitePhoto, "id" | "created_at" | "updated_at">;
+
+// ─── landowners ───────────────────────────────────────────────────────────────
+
+export interface Landowner {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  full_name: string;
+  phone: string | null;
+  phone_alt: string | null;
+  email: string | null;
+
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  pin_code: string | null;
+
+  // Sensitive — stored as plain text, encrypt in production
+  pan_number: string | null;
+  aadhaar_reference: string | null;
+  bank_name: string | null;
+  bank_account_number: string | null;
+  bank_ifsc: string | null;
+
+  notes: string | null;
+}
+
+export type LandownerInsert = Omit<Landowner, "id" | "created_at" | "updated_at"> & { id?: string };
+export type LandownerUpdate = Partial<Omit<Landowner, "id" | "created_at" | "updated_at">>;
+
+// ─── partner_agencies ─────────────────────────────────────────────────────────
+
+export interface PartnerAgency {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  agency_name: string;
+  contact_person: string | null;
+  phone: string | null;
+  email: string | null;
+  gstin: string | null;
+
+  address: string | null;
+  city: string | null;
+  state: string | null;
+
+  notes: string | null;
+}
+
+export type PartnerAgencyInsert = Omit<PartnerAgency, "id" | "created_at" | "updated_at"> & { id?: string };
+export type PartnerAgencyUpdate = Partial<Omit<PartnerAgency, "id" | "created_at" | "updated_at">>;
+
+// ─── contracts ────────────────────────────────────────────────────────────────
+
+export type ContractType = "landowner" | "agency";
+export type ContractPaymentModel = "monthly_fixed" | "yearly_lumpsum" | "revenue_share" | "custom";
+export type ContractStatus = "active" | "expired" | "terminated" | "pending_renewal";
+export type PaymentStatus = "upcoming" | "due" | "paid" | "overdue" | "partially_paid";
+
+export interface Contract {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  contract_type: ContractType;
+  landowner_id: string | null;
+  agency_id: string | null;
+  site_id: string;
+
+  payment_model: ContractPaymentModel;
+  rent_amount_paise: number | null;
+  payment_day_of_month: number | null;
+  payment_date: string | null;
+  revenue_share_percentage: number | null;
+  minimum_guarantee_paise: number | null;
+  escalation_percentage: number | null;
+  escalation_frequency_months: number | null;
+
+  start_date: string;
+  end_date: string | null;
+  renewal_date: string | null;
+  notice_period_days: number;
+  lock_period_months: number | null;
+  early_termination_clause: string | null;
+
+  status: ContractStatus;
+  contract_document_url: string | null;
+  notes: string | null;
+}
+
+export type ContractInsert = Omit<Contract, "id" | "created_at" | "updated_at"> & { id?: string };
+export type ContractUpdate = Partial<Omit<Contract, "id" | "created_at" | "updated_at">>;
+
+// ─── contract_amendments ──────────────────────────────────────────────────────
+
+export interface ContractAmendment {
+  id: string;
+  organization_id: string;
+  contract_id: string;
+  created_at: string;
+  created_by: string | null;
+
+  amendment_date: string;
+  description: string;
+  old_terms: Record<string, unknown> | null;
+  new_terms: Record<string, unknown> | null;
+  document_url: string | null;
+}
+
+// ─── contract_payments ────────────────────────────────────────────────────────
+
+export interface ContractPayment {
+  id: string;
+  organization_id: string;
+  contract_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+
+  due_date: string;
+  amount_due_paise: number;
+  amount_paid_paise: number | null;
+
+  payment_date: string | null;
+  payment_mode: "cash" | "cheque" | "bank_transfer" | "upi" | "online" | null;
+  payment_reference: string | null;
+
+  tds_deducted_paise: number | null;
+  tds_percentage: number | null;
+
+  status: PaymentStatus;
+  notes: string | null;
+}
+
+export type ContractPaymentInsert = Omit<ContractPayment, "id" | "created_at" | "updated_at"> & { id?: string };
+export type ContractPaymentUpdate = Partial<Omit<ContractPayment, "id" | "created_at" | "updated_at">>;
+
+// ─── clients ──────────────────────────────────────────────────────────────────
+
+export type ClientType = "direct_client" | "agency" | "government";
+export type CreditTerms = "advance" | "net15" | "net30" | "net60";
+
+export interface Client {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  company_name: string;
+  brand_name: string | null;
+  industry_category: string | null;
+  client_type: ClientType;
+
+  primary_contact_name: string | null;
+  primary_contact_phone: string | null;
+  primary_contact_email: string | null;
+
+  secondary_contact_name: string | null;
+  secondary_contact_phone: string | null;
+  secondary_contact_email: string | null;
+
+  billing_contact_name: string | null;
+  billing_contact_phone: string | null;
+  billing_contact_email: string | null;
+
+  gstin: string | null;
+  pan: string | null;
+  billing_address: string | null;
+  billing_city: string | null;
+  billing_state: string | null;
+  billing_pin_code: string | null;
+
+  credit_terms: CreditTerms;
+  notes: string | null;
+}
+
+export type ClientInsert = Omit<Client, "id" | "created_at" | "updated_at"> & { id?: string };
+export type ClientUpdate = Partial<Omit<Client, "id" | "created_at" | "updated_at">>;
+
+// ─── campaigns ────────────────────────────────────────────────────────────────
+
+export type CampaignStatus =
+  | "enquiry"
+  | "proposal_sent"
+  | "confirmed"
+  | "creative_received"
+  | "printing"
+  | "mounted"
+  | "live"
+  | "completed"
+  | "dismounted"
+  | "cancelled";
+
+export type SiteRateType = "per_month" | "fixed";
+export type ServiceRateBasis = "per_sqft" | "lumpsum" | "other";
+
+export type PricingType = "itemized" | "bundled";
+
+export interface Campaign {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  campaign_code: string | null;
+  client_id: string;
+  campaign_name: string;
+
+  start_date: string | null;
+  end_date: string | null;
+
+  status: CampaignStatus;
+  total_value_paise: number | null;
+  pricing_type: PricingType;
+  notes: string | null;
+}
+
+export type CampaignInsert = Omit<Campaign, "id" | "created_at" | "updated_at"> & { id?: string };
+export type CampaignUpdate = Partial<Omit<Campaign, "id" | "created_at" | "updated_at">>;
+
+// ─── campaign_sites ───────────────────────────────────────────────────────────
+
+export type CampaignSiteStatus =
+  | "pending"
+  | "creative_received"
+  | "printing"
+  | "mounted"
+  | "live"
+  | "dismounted";
+
+export interface CampaignSite {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+
+  campaign_id: string;
+  site_id: string;
+
+  rate_type: SiteRateType;
+  display_rate_paise: number | null;
+  start_date: string | null;
+  end_date: string | null;
+
+  creative_file_url: string | null;
+  creative_size_width: number | null;
+  creative_size_height: number | null;
+
+  mounting_date: string | null;
+  dismounting_date: string | null;
+  mounting_photo_url: string | null;
+
+  status: CampaignSiteStatus;
+  notes: string | null;
+}
+
+export type CampaignSiteInsert = Omit<CampaignSite, "id" | "created_at" | "updated_at"> & { id?: string };
+export type CampaignSiteUpdate = Partial<Omit<CampaignSite, "id" | "created_at" | "updated_at">>;
+
+// ─── campaign_services ────────────────────────────────────────────────────────
+
+export type ServiceType =
+  | "display_rental"
+  | "flex_printing"
+  | "mounting"
+  | "design"
+  | "transport"
+  | "other";
+
+export interface CampaignService {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+
+  campaign_id: string;
+  site_id: string | null;
+
+  service_type: ServiceType;
+  description: string | null;
+  quantity: number;
+  rate_paise: number;
+  total_paise: number;
+  rate_basis: ServiceRateBasis;
+  other_label: string | null;
+}
+
+export type CampaignServiceInsert = Omit<CampaignService, "id" | "created_at" | "updated_at"> & { id?: string };
+export type CampaignServiceUpdate = Partial<Omit<CampaignService, "id" | "created_at" | "updated_at">>;
+
+// ─── campaign_activity_log ────────────────────────────────────────────────────
+
+export type CampaignActivityAction =
+  | "status_changed"
+  | "note_added"
+  | "file_uploaded"
+  | "payment_received"
+  | "site_added"
+  | "site_removed"
+  | "created"
+  | "updated"
+  | "change_requested"
+  | "change_approved"
+  | "change_rejected";
+
+export interface CampaignActivityLog {
+  id: string;
+  organization_id: string;
+  created_at: string;
+
+  campaign_id: string;
+  user_id: string | null;
+
+  action: CampaignActivityAction;
+  description: string | null;
+  old_value: string | null;
+  new_value: string | null;
+}
+
+// ─── campaign_change_requests ─────────────────────────────────────────────────
+
+export type ChangeRequestStatus = "pending" | "approved" | "rejected";
+
+export interface CampaignChangeRequest {
+  id: string;
+  organization_id: string;
+  campaign_id: string;
+  requested_by: string;
+  reviewed_by: string | null;
+  status: ChangeRequestStatus;
+  reason: string;
+  rejection_reason: string | null;
+  requested_at: string;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CampaignChangeRequestInsert = Omit<CampaignChangeRequest, "id" | "created_at" | "updated_at"> & { id?: string };
+
+// ─── invoices ─────────────────────────────────────────────────────────────────
+
+export type InvoiceStatus = "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled";
+
+export interface Invoice {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  invoice_number: string;
+  client_id: string;
+  campaign_id: string | null;
+
+  invoice_date: string;
+  due_date: string;
+
+  subtotal_paise: number;
+  cgst_paise: number;
+  sgst_paise: number;
+  igst_paise: number;
+  total_paise: number;
+  amount_paid_paise: number;
+  balance_due_paise: number;
+
+  supplier_gstin: string | null;
+  buyer_gstin: string | null;
+  place_of_supply_state: string | null;
+  is_inter_state: boolean;
+  sac_code: string;
+
+  status: InvoiceStatus;
+  notes: string | null;
+  terms_and_conditions: string | null;
+  pdf_url: string | null;
+}
+
+export type InvoiceInsert = Omit<Invoice, "id" | "created_at" | "updated_at"> & { id?: string };
+export type InvoiceUpdate = Partial<Omit<Invoice, "id" | "created_at" | "updated_at">>;
+
+// ─── invoice_line_items ───────────────────────────────────────────────────────
+
+export interface InvoiceLineItem {
+  id: string;
+  organization_id: string;
+  invoice_id: string;
+  created_at: string;
+
+  site_id: string | null;
+  service_type: ServiceType;
+  description: string;
+  hsn_sac_code: string;
+
+  quantity: number;
+  rate_paise: number;
+  amount_paise: number;
+
+  period_from: string | null;
+  period_to: string | null;
+}
+
+export type InvoiceLineItemInsert = Omit<InvoiceLineItem, "id" | "created_at"> & { id?: string };
+
+// ─── payments_received ────────────────────────────────────────────────────────
+
+export type PaymentMode = "cash" | "cheque" | "bank_transfer" | "upi" | "online";
+
+export interface PaymentReceived {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  created_by: string | null;
+
+  invoice_id: string;
+  client_id: string;
+
+  amount_paise: number;
+  payment_date: string;
+  payment_mode: PaymentMode;
+  reference_number: string | null;
+  bank_name: string | null;
+  notes: string | null;
+  receipt_number: string | null;
+}
+
+export type PaymentReceivedInsert = Omit<PaymentReceived, "id" | "created_at"> & { id?: string };
+
+// ─── proposals ────────────────────────────────────────────────────────────────
+
+export type ProposalStatus = "draft" | "sent" | "viewed" | "accepted" | "rejected";
+export type TemplateType = "grid" | "list" | "one_per_page" | "compact";
+export type ShowRatesType = "exact" | "range" | "request_quote" | "hidden";
+
+export interface Proposal {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  proposal_name: string;
+  client_id: string | null;
+
+  template_type: TemplateType;
+  show_rates: ShowRatesType;
+  show_photos: boolean;
+  show_map: boolean;
+  show_dimensions: boolean;
+  show_illumination: boolean;
+  show_traffic_info: boolean;
+  show_availability: boolean;
+
+  include_company_branding: boolean;
+  include_terms: boolean;
+  terms_text: string | null;
+  include_contact_details: boolean;
+  custom_header_text: string | null;
+  custom_footer_text: string | null;
+
+  status: ProposalStatus;
+  sent_to_email: string | null;
+  sent_at: string | null;
+  viewed_at: string | null;
+
+  pdf_url: string | null;
+  pptx_url: string | null;
+  notes: string | null;
+}
+
+export type ProposalInsert = Omit<Proposal, "id" | "created_at" | "updated_at"> & { id?: string };
+export type ProposalUpdate = Partial<Omit<Proposal, "id" | "created_at" | "updated_at">>;
+
+// ─── proposal_sites ───────────────────────────────────────────────────────────
+
+export interface ProposalSite {
+  id: string;
+  organization_id: string;
+  proposal_id: string;
+  site_id: string;
+  created_at: string;
+
+  custom_rate_paise: number | null;
+  custom_notes: string | null;
+  display_order: number;
+}
+
+export type ProposalSiteInsert = Omit<ProposalSite, "id" | "created_at"> & { id?: string };
+
+// ─── Alert Types ──────────────────────────────────────────────────────────────
+
+export type AlertType =
+  | "payment_due"
+  | "payment_overdue"
+  | "contract_renewal"
+  | "campaign_ending"
+  | "site_available"
+  | "municipal_expiry"
+  | "invoice_overdue"
+  | "mounting_scheduled";
+
+export type AlertSeverity = "info" | "warning" | "critical";
+
+export type AlertEntityType = "contract" | "campaign" | "invoice" | "site" | "contract_payment";
+
+export interface Alert {
+  id: string;
+  organization_id: string;
+  user_id: string | null;
+  target_role: string | null;
+  alert_type: AlertType;
+  title: string;
+  message: string;
+  severity: AlertSeverity;
+  related_entity_type: AlertEntityType | null;
+  related_entity_id: string | null;
+  is_read: boolean;
+  read_at: string | null;
+  is_dismissed: boolean;
+  scheduled_for: string;
+  sent_email: boolean;
+  sent_whatsapp: boolean;
+  created_at: string;
+}
+
+export interface AlertPreference {
+  id: string;
+  organization_id: string;
+  user_id: string | null;
+  role: string | null;
+  alert_type: AlertType;
+  in_app: boolean;
+  email: boolean;
+  whatsapp: boolean;
+  advance_days: number[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type AlertPreferenceUpsert = Omit<AlertPreference, "id" | "created_at" | "updated_at"> & { id?: string };
+
+// ─── Supabase Database type (for use with createClient<Database>()) ──────────
+// Extend this as more tables are added.
+
+export interface Database {
+  public: {
+    Tables: {
+      organizations: {
+        Row: Organization;
+        Insert: OrganizationInsert;
+        Update: OrganizationUpdate;
+      };
+      profiles: {
+        Row: Profile;
+        Insert: ProfileInsert;
+        Update: ProfileUpdate;
+      };
+      sites: {
+        Row: Site;
+        Insert: SiteInsert;
+        Update: SiteUpdate;
+      };
+      site_photos: {
+        Row: SitePhoto;
+        Insert: SitePhotoInsert;
+        Update: Partial<Omit<SitePhoto, "id" | "created_at" | "updated_at">>;
+      };
+    };
+    Functions: {
+      get_user_org_id: {
+        Args: Record<string, never>;
+        Returns: string | null;
+      };
+    };
+    Enums: {
+      media_type_enum: MediaType;
+      site_status_enum: SiteStatus;
+      ownership_model_enum: OwnershipModel;
+      structure_type_enum: StructureType;
+      illumination_enum: IlluminationType;
+      facing_enum: FacingDirection;
+      traffic_side_enum: TrafficSide;
+      photo_type_enum: PhotoType;
+    };
+  };
+}

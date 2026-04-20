@@ -1,0 +1,433 @@
+"use server";
+// Site Server Actions — create, update, soft-delete sites.
+// All mutations go through Supabase with RLS enforced.
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
+import { siteSchema } from "@/lib/validations/site";
+
+type ActionResult = { error: string } | { success: true; siteId: string };
+
+// ─── createSite ───────────────────────────────────────────────────────────────
+
+export async function createSite(values: unknown): Promise<ActionResult> {
+  const parsed = siteSchema.safeParse(values);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message };
+  }
+
+  // NaN can arrive from empty number inputs even after Zod parses them
+  const raw = parsed.data;
+  const d = {
+    ...raw,
+    latitude: Number.isFinite(raw.latitude) ? raw.latitude : undefined,
+    longitude: Number.isFinite(raw.longitude) ? raw.longitude : undefined,
+    width_ft: Number.isFinite(raw.width_ft) ? raw.width_ft : undefined,
+    height_ft: Number.isFinite(raw.height_ft) ? raw.height_ft : undefined,
+    visibility_distance_m: Number.isFinite(raw.visibility_distance_m) ? raw.visibility_distance_m : undefined,
+    base_rate_inr: Number.isFinite(raw.base_rate_inr) ? raw.base_rate_inr : undefined,
+  };
+  const supabase = await createClient();
+
+  // Look up the user's org_id (RLS will enforce this anyway, but we need it for INSERT)
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("org_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.org_id) {
+    return { error: "No organisation found. Please contact support." };
+  }
+
+  // Convert INR → paise for storage
+  const base_rate_paise =
+    d.base_rate_inr !== undefined ? Math.round(d.base_rate_inr * 100) : null;
+
+  // landowner_id only applies to owned sites (enforced at DB via CHECK constraint)
+  const landowner_id = d.ownership_model === "owned" ? d.landowner_id ?? null : null;
+
+  const { data: site, error } = await supabase
+    .from("sites")
+    .insert({
+      organization_id: profile.org_id,
+      created_by: user.id,
+      updated_by: user.id,
+      name: d.name,
+      site_code: d.site_code,
+      media_type: d.media_type,
+      structure_type: d.structure_type,
+      status: d.status,
+      address: d.address,
+      city: d.city,
+      state: d.state,
+      pincode: d.pincode ?? null,
+      landmark: d.landmark ?? null,
+      latitude: d.latitude ?? null,
+      longitude: d.longitude ?? null,
+      width_ft: d.width_ft ?? null,
+      height_ft: d.height_ft ?? null,
+      illumination: d.illumination ?? null,
+      facing: d.facing ?? null,
+      traffic_side: d.traffic_side ?? null,
+      visibility_distance_m: d.visibility_distance_m ? Math.round(d.visibility_distance_m) : null,
+      ownership_model: d.ownership_model,
+      landowner_id,
+      base_rate_paise,
+      municipal_permission_number: d.municipal_permission_number ?? null,
+      municipal_permission_expiry: d.municipal_permission_expiry ?? null,
+      notes: d.notes ?? null,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    // Friendly message for duplicate site_code
+    if (error.code === "23505") {
+      return { error: `Site code "${d.site_code}" already exists. Use a unique code.` };
+    }
+    return { error: error.message };
+  }
+
+  revalidatePath("/sites");
+  return { success: true, siteId: site.id };
+}
+
+// ─── updateSite ───────────────────────────────────────────────────────────────
+
+export async function updateSite(
+  siteId: string,
+  values: unknown
+): Promise<ActionResult> {
+  const parsed = siteSchema.safeParse(values);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message };
+  }
+
+  const rawUpdate = parsed.data;
+  const d = {
+    ...rawUpdate,
+    latitude: Number.isFinite(rawUpdate.latitude) ? rawUpdate.latitude : undefined,
+    longitude: Number.isFinite(rawUpdate.longitude) ? rawUpdate.longitude : undefined,
+    width_ft: Number.isFinite(rawUpdate.width_ft) ? rawUpdate.width_ft : undefined,
+    height_ft: Number.isFinite(rawUpdate.height_ft) ? rawUpdate.height_ft : undefined,
+    visibility_distance_m: Number.isFinite(rawUpdate.visibility_distance_m) ? rawUpdate.visibility_distance_m : undefined,
+    base_rate_inr: Number.isFinite(rawUpdate.base_rate_inr) ? rawUpdate.base_rate_inr : undefined,
+  };
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const base_rate_paise =
+    d.base_rate_inr !== undefined ? Math.round(d.base_rate_inr * 100) : null;
+
+  const landowner_id = d.ownership_model === "owned" ? d.landowner_id ?? null : null;
+
+  const { error } = await supabase
+    .from("sites")
+    .update({
+      updated_by: user.id,
+      landowner_id,
+      name: d.name,
+      site_code: d.site_code,
+      media_type: d.media_type,
+      structure_type: d.structure_type,
+      status: d.status,
+      address: d.address,
+      city: d.city,
+      state: d.state,
+      pincode: d.pincode ?? null,
+      landmark: d.landmark ?? null,
+      latitude: d.latitude ?? null,
+      longitude: d.longitude ?? null,
+      width_ft: d.width_ft ?? null,
+      height_ft: d.height_ft ?? null,
+      illumination: d.illumination ?? null,
+      facing: d.facing ?? null,
+      traffic_side: d.traffic_side ?? null,
+      visibility_distance_m: d.visibility_distance_m ? Math.round(d.visibility_distance_m) : null,
+      ownership_model: d.ownership_model,
+      base_rate_paise,
+      municipal_permission_number: d.municipal_permission_number ?? null,
+      municipal_permission_expiry: d.municipal_permission_expiry ?? null,
+      notes: d.notes ?? null,
+    })
+    .eq("id", siteId);
+
+  if (error) {
+    if (error.code === "23505") {
+      return { error: `Site code "${d.site_code}" already exists. Use a unique code.` };
+    }
+    return { error: error.message };
+  }
+
+  revalidatePath("/sites");
+  revalidatePath(`/sites/${siteId}`);
+  return { success: true, siteId };
+}
+
+// ─── deleteSite (soft-delete) ─────────────────────────────────────────────────
+
+export async function deleteSite(siteId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+
+  // Auth check
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // Role check — only super_admin and admin can delete
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  if (!profile || !["super_admin", "admin"].includes(profile.role)) {
+    return { error: "Only admins can delete records" };
+  }
+
+  // Guard: check for active campaigns linked to this site
+  // Active campaign statuses = anything that isn't cancelled, completed, or dismounted
+  const { count: activeCampaignSites } = await supabase
+    .from("campaign_sites")
+    .select("id, campaigns!inner(status)", { count: "exact", head: true })
+    .eq("site_id", siteId)
+    .not("campaigns.status", "in", '("cancelled","completed","dismounted")');
+
+  if (activeCampaignSites && activeCampaignSites > 0) {
+    return { error: "Cannot delete site with active campaigns" };
+  }
+
+  const { error } = await supabase
+    .from("sites")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", siteId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/sites");
+  return {};
+}
+
+// ─── uploadSitePhoto ──────────────────────────────────────────────────────────
+// Uploads a single photo to Supabase Storage and inserts a site_photos row.
+// Called from the client-side photo uploader.
+
+export async function uploadSitePhoto(
+  siteId: string,
+  formData: FormData
+): Promise<{ error?: string; photoId?: string }> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const file = formData.get("file") as File | null;
+  if (!file) return { error: "No file provided" };
+
+  // Validate size (max 5MB)
+  if (file.size > 5 * 1024 * 1024) {
+    return { error: "File too large. Maximum 5MB per photo." };
+  }
+
+  // Validate type
+  const allowed = ["image/jpeg", "image/png", "image/webp"];
+  if (!allowed.includes(file.type)) {
+    return { error: "Invalid file type. Only JPG, PNG, WEBP are accepted." };
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("org_id")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.org_id) return { error: "No organisation found." };
+
+  // Storage path: {org_id}/{site_id}/{timestamp}-{filename}
+  const ext = file.name.split(".").pop() ?? "jpg";
+  const storagePath = `${profile.org_id}/${siteId}/${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("site-photos")
+    .upload(storagePath, file);
+
+  if (uploadError) return { error: uploadError.message };
+
+  // Check if this is the first photo (make it primary)
+  const { count } = await supabase
+    .from("site_photos")
+    .select("id", { count: "exact", head: true })
+    .eq("site_id", siteId);
+
+  const is_primary = count === 0;
+
+  const { data: photo, error: dbError } = await supabase
+    .from("site_photos")
+    .insert({
+      organization_id: profile.org_id,
+      site_id: siteId,
+      created_by: user.id,
+      photo_url: storagePath,
+      photo_type: "day",
+      is_primary,
+      sort_order: count ?? 0,
+    })
+    .select("id")
+    .single();
+
+  if (dbError) return { error: dbError.message };
+
+  revalidatePath(`/sites/${siteId}`);
+  return { photoId: photo.id };
+}
+
+// ─── deleteSitePhoto ──────────────────────────────────────────────────────────
+
+export async function deleteSitePhoto(
+  photoId: string,
+  siteId: string
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+
+  // Get the photo URL before deleting the row (needed to remove from Storage)
+  const { data: photo } = await supabase
+    .from("site_photos")
+    .select("photo_url, is_primary")
+    .eq("id", photoId)
+    .single();
+
+  if (!photo) return { error: "Photo not found" };
+
+  const { error } = await supabase
+    .from("site_photos")
+    .delete()
+    .eq("id", photoId);
+
+  if (error) return { error: error.message };
+
+  // Remove from Storage (best-effort; ignore errors)
+  await supabase.storage.from("site-photos").remove([photo.photo_url]);
+
+  // If the deleted photo was primary, promote the first remaining photo
+  if (photo.is_primary) {
+    const { data: remaining } = await supabase
+      .from("site_photos")
+      .select("id")
+      .eq("site_id", siteId)
+      .order("sort_order")
+      .limit(1);
+
+    if (remaining?.[0]) {
+      await supabase
+        .from("site_photos")
+        .update({ is_primary: true })
+        .eq("id", remaining[0].id);
+    }
+  }
+
+  revalidatePath(`/sites/${siteId}`);
+  return {};
+}
+
+// ─── setSitePrimaryPhoto ──────────────────────────────────────────────────────
+
+export async function setSitePrimaryPhoto(
+  photoId: string,
+  siteId: string
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+
+  // Clear existing primary flag for this site
+  await supabase
+    .from("site_photos")
+    .update({ is_primary: false })
+    .eq("site_id", siteId);
+
+  // Set new primary
+  const { error } = await supabase
+    .from("site_photos")
+    .update({ is_primary: true })
+    .eq("id", photoId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/sites/${siteId}`);
+  return {};
+}
+
+// ─── redirectAfterCreate ─────────────────────────────────────────────────────
+// Call this from the client after a successful createSite to navigate to detail.
+
+export async function redirectToSite(siteId: string): Promise<never> {
+  redirect(`/sites/${siteId}`);
+}
+
+// ─── getSitePreview ──────────────────────────────────────────────────────────
+// Fetches a lightweight subset of site fields + up to 4 photos for the preview
+// modal. Uses the regular Supabase client so RLS is enforced.
+
+type SitePreviewData = {
+  id: string;
+  name: string;
+  site_code: string;
+  city: string;
+  state: string;
+  address: string;
+  media_type: string;
+  illumination: string | null;
+  width_ft: number | null;
+  height_ft: number | null;
+  total_sqft: number | null;
+  base_rate_paise: number | null;
+  status: string;
+  facing: string | null;
+  traffic_side: string | null;
+  landmark: string | null;
+};
+
+type SitePreviewPhoto = {
+  id: string;
+  photo_url: string;
+  photo_type: string;
+  is_primary: boolean;
+};
+
+type SitePreviewResult =
+  | { error: string; site?: undefined; photos?: undefined }
+  | { site: SitePreviewData; photos: SitePreviewPhoto[]; error?: undefined };
+
+export async function getSitePreview(siteId: string): Promise<SitePreviewResult> {
+  const supabase = await createClient();
+
+  const [{ data: site }, { data: photos }] = await Promise.all([
+    supabase
+      .from("sites")
+      .select(
+        "id, name, site_code, city, state, address, media_type, illumination, width_ft, height_ft, total_sqft, base_rate_paise, status, facing, traffic_side, landmark"
+      )
+      .eq("id", siteId)
+      .single(),
+    supabase
+      .from("site_photos")
+      .select("id, photo_url, photo_type, is_primary")
+      .eq("site_id", siteId)
+      .order("is_primary", { ascending: false })
+      .order("sort_order")
+      .limit(4),
+  ]);
+
+  if (!site) return { error: "Site not found" };
+  return { site: site as SitePreviewData, photos: (photos ?? []) as SitePreviewPhoto[] };
+}

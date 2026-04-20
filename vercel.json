@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/generate-alerts",
+      "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/auto-complete-campaigns",
+      "schedule": "30 19 * * *"
+    }
+  ]
+}
