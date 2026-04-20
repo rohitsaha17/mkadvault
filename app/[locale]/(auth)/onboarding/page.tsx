@@ -2,6 +2,7 @@
 // Two options: Create a new organisation, or wait for an admin invite.
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { OnboardingView } from "./OnboardingView";
 
 export const metadata = {
@@ -19,13 +20,23 @@ export default async function OnboardingPage() {
     redirect("/login");
   }
 
-  // Already has an org → go to dashboard
-  // Use a direct query since RLS may return nothing for no-org users
-  // We check via auth metadata or a service-role query
-  // Actually — profiles RLS requires org_id match, but for the user's own
-  // row the "user_can_update_own_profile" SELECT path should work.
-  // Let's use a lightweight approach: the proxy already checks this,
-  // so if we got here the user has no org. Render the view.
+  // Defensive check: if this user already belongs to an org, send them
+  // straight to the dashboard. The proxy also enforces this, but relying on
+  // it alone was letting stale cookies / edge cases leave users stuck on
+  // the onboarding screen. We use the admin client because profile-row RLS
+  // for users without org context can hide the user's own row depending on
+  // the SELECT policy — the admin client sidesteps that for this read-only
+  // check keyed on the authenticated user's id.
+  const admin = createAdminClient();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("org_id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profile?.org_id) {
+    redirect("/dashboard");
+  }
 
   return <OnboardingView userName={user.user_metadata?.full_name || user.email?.split("@")[0] || "there"} />;
 }
