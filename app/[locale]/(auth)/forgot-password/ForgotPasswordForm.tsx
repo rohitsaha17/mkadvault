@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,9 +35,42 @@ export function ForgotPasswordForm() {
 
   if (state && "success" in state) {
     return (
-      <div className="flex flex-col items-center gap-3 py-6 text-center">
-        <CheckCircle2 className="h-12 w-12 text-primary" />
-        <p className="text-sm text-foreground">{state.success}</p>
+      <div className="flex flex-col items-center gap-4 py-8 text-center">
+        {/* Animated tick: halo pulse → circle pop → check-stroke draws */}
+        <div className="relative flex h-20 w-20 items-center justify-center">
+          <span
+            aria-hidden
+            className="success-tick-halo absolute inset-0 rounded-full bg-primary/30"
+          />
+          <svg
+            viewBox="0 0 52 52"
+            className="success-tick-circle relative h-20 w-20 drop-shadow-[0_0_16px_color-mix(in_oklch,var(--primary)_50%,transparent)]"
+            aria-hidden
+          >
+            <circle
+              cx="26"
+              cy="26"
+              r="24"
+              fill="var(--primary)"
+            />
+            <path
+              className="success-tick-check"
+              d="M14 27 L23 36 L39 18"
+              fill="none"
+              stroke="var(--primary-foreground)"
+              strokeWidth="4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+
+        <div className="success-tick-message space-y-1">
+          <h3 className="text-base font-semibold text-foreground">
+            {t("resetLinkSentTitle")}
+          </h3>
+          <p className="text-sm text-muted-foreground">{state.success}</p>
+        </div>
       </div>
     );
   }

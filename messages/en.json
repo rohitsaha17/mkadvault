@@ -81,6 +81,7 @@
     "forgotPasswordTitle": "Reset your password",
     "forgotPasswordSubtitle": "Enter your email and we'll send you a reset link.",
     "sendResetLink": "Send reset link",
+    "resetLinkSentTitle": "Check your inbox",
     "backToLogin": "Back to log in",
     "noAccount": "Don't have an account?",
     "hasAccount": "Already have an account?",

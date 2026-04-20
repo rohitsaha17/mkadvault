@@ -235,3 +235,38 @@
       radial-gradient(ellipse 80% 60% at 50% -10%, color-mix(in oklch, var(--primary) 25%, transparent), transparent 70%);
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Success tick animation — used for confirmation states (e.g. reset link sent).
+   The circle pops in, then the checkmark path draws on, then a soft pulsing
+   halo appears behind the icon.
+   ───────────────────────────────────────────────────────────────────────── */
+@keyframes success-pop {
+  0%   { transform: scale(0);   opacity: 0; }
+  60%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1);   opacity: 1; }
+}
+
+@keyframes success-draw {
+  0%   { stroke-dashoffset: 48; }
+  100% { stroke-dashoffset: 0; }
+}
+
+@keyframes success-halo {
+  0%   { transform: scale(0.6); opacity: 0.6; }
+  100% { transform: scale(2.2); opacity: 0;   }
+}
+
+@keyframes success-fade-up {
+  0%   { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0);   }
+}
+
+.success-tick-circle  { animation: success-pop  0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.success-tick-check   {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: success-draw 0.35s ease-out 0.35s both;
+}
+.success-tick-halo    { animation: success-halo 1.4s ease-out 0.2s infinite; }
+.success-tick-message { animation: success-fade-up 0.4s ease-out 0.55s both; }
