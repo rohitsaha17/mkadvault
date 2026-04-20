@@ -3,10 +3,10 @@ import { setRequestLocale, getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { Users, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/supabase/session";
 import { AlertPreferences } from "@/components/settings/AlertPreferences";
 import { OrgSettingsForm } from "@/components/settings/OrgSettingsForm";
 import { ProfileForm } from "@/components/settings/ProfileForm";
-import { SeedDataButton } from "@/components/settings/SeedDataButton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import type { AlertPreference, Organization, Profile } from "@/lib/types/database";
 
@@ -19,30 +19,34 @@ export default async function SettingsPage({
   setRequestLocale(locale);
 
   const t = await getTranslations("settings");
+
+  // Session (user + profile) is cached per-request — reused from layout
+  const session = await getSession();
+  if (!session) return <p className="p-6 text-sm text-muted-foreground">Not authenticated.</p>;
+  if (!session.profile) return <p className="p-6 text-sm text-muted-foreground">Profile not found.</p>;
+
+  const { user, profile } = session;
   const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return <p className="p-6 text-sm text-muted-foreground">Not authenticated.</p>;
-
-  const { data: profile } = await supabase
+  // The settings page needs the full profile (phone isn't on the cached one)
+  const { data: fullProfile } = await supabase
     .from("profiles")
     .select("id, org_id, full_name, phone, role, avatar_url")
     .eq("id", user.id)
     .single();
-
-  if (!profile) return <p className="p-6 text-sm text-muted-foreground">Profile not found.</p>;
+  if (!fullProfile) return <p className="p-6 text-sm text-muted-foreground">Profile not found.</p>;
 
   // Load org + alert preferences in parallel
   const [orgResult, prefsResult] = await Promise.all([
     supabase
       .from("organizations")
       .select("id, name, address, city, state, pin_code, gstin, pan, phone, email, logo_url")
-      .eq("id", profile.org_id)
+      .eq("id", profile.org_id!)
       .single(),
     supabase
       .from("alert_preferences")
       .select("*")
-      .eq("organization_id", profile.org_id)
+      .eq("organization_id", profile.org_id!)
       .eq("user_id", user.id),
   ]);
 
@@ -65,7 +69,7 @@ export default async function SettingsPage({
           <div className="mb-5 border-b border-border pb-3">
             <h2 className="text-base font-semibold text-foreground">{t("yourProfile")}</h2>
           </div>
-          <ProfileForm profile={profile as unknown as Profile} email={user.email ?? ""} />
+          <ProfileForm profile={fullProfile as unknown as Profile} email={user.email ?? ""} />
         </section>
 
         {/* ── Organization ─────────────────────────────────────────────── */}
@@ -105,15 +109,6 @@ export default async function SettingsPage({
           <AlertPreferences preferences={alertPrefs} />
         </section>
 
-        {/* ── Sample Data (admin only) ─────────────────────────────────── */}
-        {isAdmin && (
-          <section className="rounded-2xl border border-border bg-card card-elevated p-6">
-            <div className="mb-5 border-b border-border pb-3">
-              <h2 className="text-base font-semibold text-foreground">Sample Data</h2>
-            </div>
-            <SeedDataButton />
-          </section>
-        )}
       </div>
     </div>
   );
