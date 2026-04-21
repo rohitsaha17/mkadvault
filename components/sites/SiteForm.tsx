@@ -272,12 +272,11 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
             <FormField
               label="Site Code"
               error={errors.site_code?.message}
-              hint="Unique identifier within your organisation"
-              required
+              hint="Optional — auto-generated from the city if left blank"
             >
               <Input
                 {...register("site_code")}
-                placeholder="e.g. MUM-BKC-001"
+                placeholder="Auto-generated if blank (e.g. MUM-4F2A)"
                 className={cn(errors.site_code && "border-destructive focus-visible:ring-destructive/40")}
               />
             </FormField>

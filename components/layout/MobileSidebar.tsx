@@ -53,9 +53,10 @@ interface MobileSidebarProps {
   open: boolean;
   onClose: () => void;
   profile: Profile | null;
+  email?: string | null;
 }
 
-export function MobileSidebar({ open, onClose, profile }: MobileSidebarProps) {
+export function MobileSidebar({ open, onClose, profile, email }: MobileSidebarProps) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
@@ -129,6 +130,7 @@ export function MobileSidebar({ open, onClose, profile }: MobileSidebarProps) {
         <div className="border-t border-sidebar-border p-3">
           <UserMenu
             profile={profile}
+            email={email}
             side="top"
             align="start"
             triggerClassName="w-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"

@@ -8,7 +8,9 @@ import { z } from "zod";
 export const siteSchema = z.object({
   // ── Step 1: Basic Info ─────────────────────────────────────────────────
   name: z.string().min(1, "Site name is required"),
-  site_code: z.string().min(1, "Site code is required").max(50),
+  // Site code is optional — if blank the server action auto-generates one
+  // from the city prefix + short random suffix (e.g. "MUM-4F2A").
+  site_code: z.string().max(50).optional(),
   media_type: z.enum([
     "billboard", "hoarding", "dooh", "kiosk",
     "wall_wrap", "unipole", "bus_shelter", "custom",

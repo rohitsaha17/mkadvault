@@ -8,6 +8,26 @@ import { siteSchema } from "@/lib/validations/site";
 
 type ActionResult = { error: string } | { success: true; siteId: string };
 
+// Some Supabase projects haven't had migration 021 applied yet, so the
+// `custom_dimensions` column may be missing from the PostgREST schema cache.
+// Detect that specific error and let the caller retry without the column.
+function isCustomDimensionsMissing(err: { message?: string; code?: string } | null): boolean {
+  if (!err) return false;
+  return (
+    (err.code === "PGRST204" || err.code === "42703") &&
+    /custom_dimensions/i.test(err.message ?? "")
+  );
+}
+
+// Auto-generate a site code when the user leaves it blank. Format:
+// "{CITY3}-{4 random alphanum}" e.g. "MUM-4F2A". Uniqueness is enforced
+// by the DB unique index; collisions are vanishingly rare with 36^4 space.
+function generateSiteCode(city: string): string {
+  const prefix = (city || "SITE").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "SITE";
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${prefix}-${suffix}`;
+}
+
 // ─── createSite ───────────────────────────────────────────────────────────────
 
 export async function createSite(values: unknown): Promise<ActionResult> {
@@ -52,49 +72,66 @@ export async function createSite(values: unknown): Promise<ActionResult> {
   // landowner_id only applies to owned sites (enforced at DB via CHECK constraint)
   const landowner_id = d.ownership_model === "owned" ? d.landowner_id ?? null : null;
 
-  const { data: site, error } = await supabase
+  // Auto-generate site code if the user left it blank.
+  const finalSiteCode = d.site_code?.trim() ? d.site_code.trim() : generateSiteCode(d.city);
+
+  const basePayload = {
+    organization_id: profile.org_id,
+    created_by: user.id,
+    updated_by: user.id,
+    name: d.name,
+    site_code: finalSiteCode,
+    media_type: d.media_type,
+    structure_type: d.structure_type,
+    status: d.status,
+    address: d.address,
+    city: d.city,
+    state: d.state,
+    pincode: d.pincode ?? null,
+    landmark: d.landmark ?? null,
+    latitude: d.latitude ?? null,
+    longitude: d.longitude ?? null,
+    width_ft: d.width_ft ?? null,
+    height_ft: d.height_ft ?? null,
+    illumination: d.illumination ?? null,
+    facing: d.facing ?? null,
+    traffic_side: d.traffic_side ?? null,
+    visibility_distance_m: d.visibility_distance_m ? Math.round(d.visibility_distance_m) : null,
+    ownership_model: d.ownership_model,
+    landowner_id,
+    base_rate_paise,
+    municipal_permission_number: d.municipal_permission_number ?? null,
+    municipal_permission_expiry: d.municipal_permission_expiry ?? null,
+    notes: d.notes ?? null,
+  };
+
+  const cleanedDimensions = (d.custom_dimensions ?? []).filter(
+    (x) => x.label?.trim() && x.value?.trim()
+  );
+
+  // First attempt: include custom_dimensions. If the column is missing from
+  // the PostgREST schema cache (migration 021 not applied), retry without it.
+  let insertRes = await supabase
     .from("sites")
-    .insert({
-      organization_id: profile.org_id,
-      created_by: user.id,
-      updated_by: user.id,
-      name: d.name,
-      site_code: d.site_code,
-      media_type: d.media_type,
-      structure_type: d.structure_type,
-      status: d.status,
-      address: d.address,
-      city: d.city,
-      state: d.state,
-      pincode: d.pincode ?? null,
-      landmark: d.landmark ?? null,
-      latitude: d.latitude ?? null,
-      longitude: d.longitude ?? null,
-      width_ft: d.width_ft ?? null,
-      height_ft: d.height_ft ?? null,
-      illumination: d.illumination ?? null,
-      facing: d.facing ?? null,
-      traffic_side: d.traffic_side ?? null,
-      visibility_distance_m: d.visibility_distance_m ? Math.round(d.visibility_distance_m) : null,
-      ownership_model: d.ownership_model,
-      landowner_id,
-      base_rate_paise,
-      municipal_permission_number: d.municipal_permission_number ?? null,
-      municipal_permission_expiry: d.municipal_permission_expiry ?? null,
-      notes: d.notes ?? null,
-      // Drop any empty rows before persisting. The column is JSONB NOT NULL
-      // DEFAULT '[]'::jsonb, so an empty array is always safe.
-      custom_dimensions: (d.custom_dimensions ?? []).filter(
-        (x) => x.label?.trim() && x.value?.trim()
-      ),
-    })
+    .insert({ ...basePayload, custom_dimensions: cleanedDimensions })
     .select("id")
     .single();
+
+  if (insertRes.error && isCustomDimensionsMissing(insertRes.error)) {
+    console.warn("[sites] custom_dimensions column missing — retrying insert without it");
+    insertRes = await supabase
+      .from("sites")
+      .insert(basePayload)
+      .select("id")
+      .single();
+  }
+
+  const { data: site, error } = insertRes;
 
   if (error) {
     // Friendly message for duplicate site_code
     if (error.code === "23505") {
-      return { error: `Site code "${d.site_code}" already exists. Use a unique code.` };
+      return { error: `Site code "${finalSiteCode}" already exists. Use a unique code.` };
     }
     return { error: error.message };
   }
@@ -136,43 +173,55 @@ export async function updateSite(
 
   const landowner_id = d.ownership_model === "owned" ? d.landowner_id ?? null : null;
 
-  const { error } = await supabase
+  const finalSiteCode = d.site_code?.trim() ? d.site_code.trim() : generateSiteCode(d.city);
+
+  const basePayload = {
+    updated_by: user.id,
+    landowner_id,
+    name: d.name,
+    site_code: finalSiteCode,
+    media_type: d.media_type,
+    structure_type: d.structure_type,
+    status: d.status,
+    address: d.address,
+    city: d.city,
+    state: d.state,
+    pincode: d.pincode ?? null,
+    landmark: d.landmark ?? null,
+    latitude: d.latitude ?? null,
+    longitude: d.longitude ?? null,
+    width_ft: d.width_ft ?? null,
+    height_ft: d.height_ft ?? null,
+    illumination: d.illumination ?? null,
+    facing: d.facing ?? null,
+    traffic_side: d.traffic_side ?? null,
+    visibility_distance_m: d.visibility_distance_m ? Math.round(d.visibility_distance_m) : null,
+    ownership_model: d.ownership_model,
+    base_rate_paise,
+    municipal_permission_number: d.municipal_permission_number ?? null,
+    municipal_permission_expiry: d.municipal_permission_expiry ?? null,
+    notes: d.notes ?? null,
+  };
+
+  const cleanedDimensions = (d.custom_dimensions ?? []).filter(
+    (x) => x.label?.trim() && x.value?.trim()
+  );
+
+  let updateRes = await supabase
     .from("sites")
-    .update({
-      updated_by: user.id,
-      landowner_id,
-      name: d.name,
-      site_code: d.site_code,
-      media_type: d.media_type,
-      structure_type: d.structure_type,
-      status: d.status,
-      address: d.address,
-      city: d.city,
-      state: d.state,
-      pincode: d.pincode ?? null,
-      landmark: d.landmark ?? null,
-      latitude: d.latitude ?? null,
-      longitude: d.longitude ?? null,
-      width_ft: d.width_ft ?? null,
-      height_ft: d.height_ft ?? null,
-      illumination: d.illumination ?? null,
-      facing: d.facing ?? null,
-      traffic_side: d.traffic_side ?? null,
-      visibility_distance_m: d.visibility_distance_m ? Math.round(d.visibility_distance_m) : null,
-      ownership_model: d.ownership_model,
-      base_rate_paise,
-      municipal_permission_number: d.municipal_permission_number ?? null,
-      municipal_permission_expiry: d.municipal_permission_expiry ?? null,
-      notes: d.notes ?? null,
-      custom_dimensions: (d.custom_dimensions ?? []).filter(
-        (x) => x.label?.trim() && x.value?.trim()
-      ),
-    })
+    .update({ ...basePayload, custom_dimensions: cleanedDimensions })
     .eq("id", siteId);
+
+  if (updateRes.error && isCustomDimensionsMissing(updateRes.error)) {
+    console.warn("[sites] custom_dimensions column missing — retrying update without it");
+    updateRes = await supabase.from("sites").update(basePayload).eq("id", siteId);
+  }
+
+  const { error } = updateRes;
 
   if (error) {
     if (error.code === "23505") {
-      return { error: `Site code "${d.site_code}" already exists. Use a unique code.` };
+      return { error: `Site code "${finalSiteCode}" already exists. Use a unique code.` };
     }
     return { error: error.message };
   }

@@ -77,12 +77,13 @@ const NAV_SECTIONS = [
 
 interface SidebarProps {
   profile: Profile | null;
+  email?: string | null;
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function Sidebar({ profile, onCollapsedChange }: SidebarProps) {
+export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
@@ -207,6 +208,7 @@ export function Sidebar({ profile, onCollapsedChange }: SidebarProps) {
         {collapsed ? (
           <UserMenu
             profile={profile}
+            email={email}
             side="right"
             align="end"
             triggerClassName="w-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
@@ -230,6 +232,7 @@ export function Sidebar({ profile, onCollapsedChange }: SidebarProps) {
         ) : (
           <UserMenu
             profile={profile}
+            email={email}
             side="top"
             align="start"
             triggerClassName="w-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"

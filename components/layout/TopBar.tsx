@@ -33,9 +33,10 @@ const ROUTE_TITLES: Record<string, string> = {
 
 interface TopBarProps {
   profile: Profile | null;
+  email?: string | null;
 }
 
-export function TopBar({ profile }: TopBarProps) {
+export function TopBar({ profile, email }: TopBarProps) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
 
@@ -152,6 +153,7 @@ export function TopBar({ profile }: TopBarProps) {
           {/* User dropdown */}
           <UserMenu
             profile={profile}
+            email={email}
             triggerClassName="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Avatar className="h-9 w-9 ring-2 ring-border hover:ring-primary/40 transition-colors">
@@ -168,6 +170,7 @@ export function TopBar({ profile }: TopBarProps) {
         open={mobileOpen}
         onClose={() => setMobileOpen(false)}
         profile={profile}
+        email={email}
       />
     </>
   );

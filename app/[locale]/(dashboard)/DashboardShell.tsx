@@ -9,22 +9,23 @@ import type { Profile } from "@/lib/types/database";
 
 interface DashboardShellProps {
   profile: Profile | null;
+  email?: string | null;
   locale: string;
   children: React.ReactNode;
 }
 
-export function DashboardShell({ profile, children }: DashboardShellProps) {
+export function DashboardShell({ profile, email, children }: DashboardShellProps) {
   // Track collapsed state here so TopBar and main content can respond if needed
   const [, setSidebarCollapsed] = useState(false);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Sidebar — fixed left column, hidden on mobile */}
-      <Sidebar profile={profile} onCollapsedChange={setSidebarCollapsed} />
+      <Sidebar profile={profile} email={email} onCollapsedChange={setSidebarCollapsed} />
 
       {/* Right column: top header + scrollable page content */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <TopBar profile={profile} />
+        <TopBar profile={profile} email={email} />
         {/* Subtle gradient backdrop behind content to add depth */}
         <main className="relative flex-1 overflow-y-auto">
           <div

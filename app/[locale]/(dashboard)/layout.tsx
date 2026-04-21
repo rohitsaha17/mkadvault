@@ -22,7 +22,11 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   return (
-    <DashboardShell profile={session.profile as Profile | null} locale={locale}>
+    <DashboardShell
+      profile={session.profile as Profile | null}
+      email={session.user.email}
+      locale={locale}
+    >
       {children}
     </DashboardShell>
   );
