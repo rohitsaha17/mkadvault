@@ -4,7 +4,35 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { siteSchema } from "@/lib/validations/site";
+
+// Ensures the given Storage bucket exists. Uses the service-role admin
+// client because creating buckets requires elevated privileges. No-op if
+// the bucket is already present. Silently ignores "already exists" races.
+async function ensureBucket(bucketId: string): Promise<{ error?: string }> {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return {
+      error: `Storage bucket "${bucketId}" is missing and the app isn't configured to auto-create it. Ask an admin to run migration 023_create_storage_buckets.sql or create the bucket in Supabase.`,
+    };
+  }
+  try {
+    const admin = createAdminClient();
+    const { error } = await admin.storage.createBucket(bucketId, {
+      public: false,
+      fileSizeLimit: 10 * 1024 * 1024, // 10MB safety ceiling
+    });
+    // "Bucket already exists" is expected on subsequent calls — treat as success.
+    if (error && !/already exists/i.test(error.message)) {
+      return { error: error.message };
+    }
+    return {};
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : `Could not create bucket ${bucketId}`,
+    };
+  }
+}
 
 type ActionResult = { error: string } | { success: true; siteId: string };
 
@@ -326,11 +354,25 @@ export async function uploadSitePhoto(
   const ext = file.name.split(".").pop() ?? "jpg";
   const storagePath = `${profile.org_id}/${siteId}/${Date.now()}.${ext}`;
 
-  const { error: uploadError } = await supabase.storage
+  // Upload with auto-retry if the bucket hasn't been created yet in this
+  // Supabase project. Migration 023_create_storage_buckets.sql provisions
+  // the buckets, but we don't want a fresh env to blow up before that
+  // migration is applied — so we create the bucket on the fly using the
+  // admin client and retry once.
+  let uploadRes = await supabase.storage
     .from("site-photos")
     .upload(storagePath, file);
 
-  if (uploadError) return { error: uploadError.message };
+  if (uploadRes.error && /bucket not found/i.test(uploadRes.error.message)) {
+    console.warn("[sites] site-photos bucket missing — auto-creating");
+    const ensured = await ensureBucket("site-photos");
+    if (ensured.error) return { error: ensured.error };
+    uploadRes = await supabase.storage
+      .from("site-photos")
+      .upload(storagePath, file);
+  }
+
+  if (uploadRes.error) return { error: uploadRes.error.message };
 
   // Check if this is the first photo (make it primary)
   const { count } = await supabase
