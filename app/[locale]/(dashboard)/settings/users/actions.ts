@@ -76,6 +76,20 @@ export async function inviteUser(data: {
 
   const admin = createAdminClient();
 
+  // Where to send the invitee after they click the email link. Supabase's
+  // default is the project's Site URL (usually "/"), which would skip our
+  // /auth/callback handler and therefore skip the accept-invite welcome
+  // screen. Point it explicitly at /auth/callback so the PKCE code is
+  // exchanged and `needs_password_setup` is detected.
+  //
+  // NEXT_PUBLIC_APP_URL is used in production; in local dev we fall back
+  // to the request's own origin via NEXT_PUBLIC_SITE_URL or localhost.
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    "http://localhost:3000";
+  const redirectTo = `${appUrl.replace(/\/$/, "")}/auth/callback`;
+
   // Send the invite email — this creates the auth.users row and fires the
   // handle_new_user trigger which inserts a profile row with the same id.
   //
@@ -89,6 +103,7 @@ export async function inviteUser(data: {
         full_name: data.full_name,
         needs_password_setup: true,
       },
+      redirectTo,
     });
 
   if (inviteError || !inviteData.user) {
@@ -192,7 +207,16 @@ export async function resendInvite(
   if (!gate.ok) return { error: gate.error };
 
   const admin = createAdminClient();
-  const { error } = await admin.auth.admin.inviteUserByEmail(email);
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    "http://localhost:3000";
+  const redirectTo = `${appUrl.replace(/\/$/, "")}/auth/callback`;
+
+  const { error } = await admin.auth.admin.inviteUserByEmail(email, {
+    data: { needs_password_setup: true },
+    redirectTo,
+  });
   if (error) return { error: error.message };
   return { success: true };
 }
