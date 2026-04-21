@@ -78,9 +78,17 @@ export async function inviteUser(data: {
 
   // Send the invite email — this creates the auth.users row and fires the
   // handle_new_user trigger which inserts a profile row with the same id.
+  //
+  // We stamp `needs_password_setup: true` into user_metadata so the auth
+  // callback can detect an invite acceptance and route the user through
+  // the /accept-invite flow (welcome screen + password set) instead of
+  // dropping them straight on /dashboard.
   const { data: inviteData, error: inviteError } =
     await admin.auth.admin.inviteUserByEmail(data.email, {
-      data: { full_name: data.full_name },
+      data: {
+        full_name: data.full_name,
+        needs_password_setup: true,
+      },
     });
 
   if (inviteError || !inviteData.user) {

@@ -8,6 +8,7 @@ import createIntlMiddleware from "next-intl/middleware";
 import { type NextRequest, NextResponse } from "next/server";
 import { routing } from "./i18n/routing";
 import { createMiddlewareClient } from "./lib/supabase/middleware";
+import { createAdminClient } from "./lib/supabase/admin";
 
 // next-intl middleware handles locale detection and URL rewriting
 const intlMiddleware = createIntlMiddleware(routing);
@@ -33,6 +34,11 @@ const AUTH_PATHS = ["/login", "/register", "/forgot-password"];
 // Onboarding page — requires auth but no org
 const ONBOARDING_PATH = "/onboarding";
 
+// Accept-invite page — requires auth. Unlike onboarding we still want it
+// reachable even when the user already has an org_id (invitees are stamped
+// with org_id at invite time, but still need to set a password).
+const ACCEPT_INVITE_PATH = "/accept-invite";
+
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -43,9 +49,10 @@ export default async function proxy(request: NextRequest) {
   const isLocaleSegment = locales.includes(firstSegment);
   const realPath = isLocaleSegment ? pathname.slice(firstSegment.length + 1) || "/" : pathname;
 
-  const isProtected   = PROTECTED_PREFIXES.some((p) => realPath === p || realPath.startsWith(`${p}/`));
-  const isAuthPage    = AUTH_PATHS.some((p) => realPath === p || realPath.startsWith(`${p}/`));
-  const isOnboarding  = realPath === ONBOARDING_PATH || realPath.startsWith(`${ONBOARDING_PATH}/`);
+  const isProtected    = PROTECTED_PREFIXES.some((p) => realPath === p || realPath.startsWith(`${p}/`));
+  const isAuthPage     = AUTH_PATHS.some((p) => realPath === p || realPath.startsWith(`${p}/`));
+  const isOnboarding   = realPath === ONBOARDING_PATH || realPath.startsWith(`${ONBOARDING_PATH}/`);
+  const isAcceptInvite = realPath === ACCEPT_INVITE_PATH || realPath.startsWith(`${ACCEPT_INVITE_PATH}/`);
 
   // ─── 1. Refresh Supabase session ────────────────────────────────────────────
   // This MUST run on every request so the auth token stays current.
@@ -72,7 +79,7 @@ export default async function proxy(request: NextRequest) {
   };
 
   // ─── 2. Auth-based redirects ─────────────────────────────────────────────────
-  if (isProtected && !user) {
+  if ((isProtected || isAcceptInvite) && !user) {
     // Not logged in → send to login, preserving the locale prefix if any
     const loginPath = isLocaleSegment ? `/${firstSegment}/login` : "/login";
     return redirectTo(loginPath);
@@ -84,10 +91,33 @@ export default async function proxy(request: NextRequest) {
     return redirectTo(dashboardPath);
   }
 
+  // Invitees who still need to set a password must stay on /accept-invite
+  // until they complete it. Block access to other protected routes.
+  if (user && isProtected) {
+    const needsPasswordSetup =
+      user.user_metadata?.needs_password_setup === true;
+    if (needsPasswordSetup) {
+      const acceptPath = isLocaleSegment
+        ? `/${firstSegment}/accept-invite`
+        : "/accept-invite";
+      return redirectTo(acceptPath);
+    }
+  }
+
   // ─── 2a. Profile check: org, active status, role ────────────────────────────
   // Fetch profile once for all checks: onboarding redirect, deactivation, roles.
+  //
+  // IMPORTANT: we use the admin (service-role) client here. Routing decisions
+  // must not be at the mercy of RLS quirks — if a policy regression or a
+  // missing migration hides the user's own row from the authenticated client,
+  // the proxy would leave a logged-in user stuck on /onboarding even when
+  // their profile already has an org_id (the exact bug we were debugging).
+  // The admin client bypasses RLS, so the routing decision is always based
+  // on the true profile state. This is safe: we only read, and we key on
+  // `user.id` which is already verified by `auth.getUser()` above.
   if (user && (isProtected || isOnboarding)) {
-    const { data: profile } = await supabase
+    const admin = createAdminClient();
+    const { data: profile } = await admin
       .from("profiles")
       .select("org_id, role, roles, is_active")
       .eq("id", user.id)
