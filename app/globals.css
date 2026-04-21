@@ -288,3 +288,51 @@
 @media (prefers-reduced-motion: reduce) {
   .page-transition > * { animation: none; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Tactile click feedback — instant visual response on press, before any
+   network round-trip completes. Covers <a>, <button>, and anything with
+   role="button" or role="link". Works alongside the NextTopLoader which
+   provides the top progress bar for multi-hundred-ms navigations.
+   ───────────────────────────────────────────────────────────────────────── */
+a,
+button,
+[role="button"],
+[role="link"],
+[role="menuitem"],
+[role="tab"],
+[role="option"] {
+  transition: transform 120ms ease, opacity 120ms ease, background-color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a:not([aria-disabled="true"]):active,
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active,
+[role="link"]:not([aria-disabled="true"]):active,
+[role="menuitem"]:not([aria-disabled="true"]):active,
+[role="tab"]:not([aria-disabled="true"]):active,
+[role="option"]:not([aria-disabled="true"]):active {
+  transform: scale(0.985);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a, button, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"] {
+    transition: none;
+  }
+  a:active, button:active, [role="button"]:active, [role="link"]:active,
+  [role="menuitem"]:active, [role="tab"]:active, [role="option"]:active {
+    transform: none;
+  }
+}
+
+/* While any navigation is pending (next/link data fetching), NextTopLoader
+   adds `html.nprogress-busy`. Dim the page slightly and disable text
+   selection so the click feels "in progress" rather than stuck. */
+html.nprogress-busy {
+  cursor: progress;
+}
+html.nprogress-busy main {
+  opacity: 0.78;
+  transition: opacity 140ms ease;
+}

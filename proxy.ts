@@ -128,28 +128,45 @@ export default async function proxy(request: NextRequest) {
     };
     let profile: ProxyProfile | null = null;
 
+    // Helper that queries profiles and, if the `roles` column is missing
+    // (migration 020 not applied to this DB yet), retries without it so the
+    // proxy doesn't crash the entire request pipeline.
+    const fetchProfile = async (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client: any
+    ): Promise<ProxyProfile | null> => {
+      const res = await client
+        .from("profiles")
+        .select("org_id, role, roles, is_active")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (res.error && /roles/i.test(res.error.message)) {
+        const fb = await client
+          .from("profiles")
+          .select("org_id, role, is_active")
+          .eq("id", user.id)
+          .maybeSingle();
+        return (fb.data as ProxyProfile | null) ?? null;
+      }
+      return (res.data as ProxyProfile | null) ?? null;
+    };
+
     const hasServiceRoleKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (hasServiceRoleKey) {
       try {
         const admin = createAdminClient();
-        const res = await admin
-          .from("profiles")
-          .select("org_id, role, roles, is_active")
-          .eq("id", user.id)
-          .maybeSingle();
-        profile = (res.data as ProxyProfile | null) ?? null;
+        profile = await fetchProfile(admin);
       } catch (err) {
         console.error("[proxy] admin profile lookup failed, falling back:", err);
       }
     }
 
     if (!profile) {
-      const res = await supabase
-        .from("profiles")
-        .select("org_id, role, roles, is_active")
-        .eq("id", user.id)
-        .maybeSingle();
-      profile = (res.data as ProxyProfile | null) ?? null;
+      try {
+        profile = await fetchProfile(supabase);
+      } catch (err) {
+        console.error("[proxy] authenticated profile lookup failed:", err);
+      }
     }
 
     // Null profile = the handle_new_user trigger hasn't fired yet (can happen

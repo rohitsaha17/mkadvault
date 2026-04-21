@@ -50,11 +50,30 @@ export const getSession = cache(async (): Promise<Session> => {
 
   if (!user) return null;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, org_id, role, roles, full_name, avatar_url, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
+  // Try the full select first. If migration 020 hasn't been applied to this
+  // database yet, the `roles` column won't exist and Postgres returns a 42703
+  // error (column does not exist), which Supabase propagates. In that case
+  // we retry without `roles` so the app still boots — otherwise every page
+  // load ends in "This page couldn't load".
+  type ProfileRow = Omit<SessionProfile, "roles"> & { roles?: string[] | null };
+  let profile: ProfileRow | null = null;
+  {
+    const res = await supabase
+      .from("profiles")
+      .select("id, org_id, role, roles, full_name, avatar_url, is_active")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (res.error && /roles/i.test(res.error.message)) {
+      const fallback = await supabase
+        .from("profiles")
+        .select("id, org_id, role, full_name, avatar_url, is_active")
+        .eq("id", user.id)
+        .maybeSingle();
+      profile = (fallback.data as ProfileRow | null) ?? null;
+    } else {
+      profile = (res.data as ProfileRow | null) ?? null;
+    }
+  }
 
   // Normalise: if the DB returned a row with no `roles` populated (e.g.
   // because migration 020 hasn't run yet against this instance), fall back
@@ -63,10 +82,9 @@ export const getSession = cache(async (): Promise<Session> => {
     ? {
         ...(profile as SessionProfile),
         roles:
-          Array.isArray((profile as SessionProfile).roles) &&
-          (profile as SessionProfile).roles.length > 0
-            ? (profile as SessionProfile).roles
-            : [(profile as SessionProfile).role ?? "viewer"],
+          Array.isArray(profile.roles) && profile.roles.length > 0
+            ? profile.roles
+            : [profile.role ?? "viewer"],
       }
     : null;
 

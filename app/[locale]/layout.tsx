@@ -4,6 +4,7 @@
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 import { Toaster } from "sonner";
+import NextTopLoader from "nextjs-toploader";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { routing } from "@/i18n/routing";
@@ -39,6 +40,18 @@ export default async function LocaleLayout({
     <NextIntlClientProvider locale={locale} messages={messages}>
       <ThemeProvider>
         <TooltipProvider>
+          {/* Top-of-page navigation progress bar — gives instant feedback
+              when the user clicks a Link/router.push. Without this, App
+              Router navigations can feel unresponsive for 100–400ms while
+              the server renders the next page. */}
+          <NextTopLoader
+            color="hsl(var(--primary))"
+            height={2}
+            showSpinner={false}
+            shadow="0 0 10px hsl(var(--primary)), 0 0 5px hsl(var(--primary))"
+            easing="ease"
+            speed={220}
+          />
           {children}
           {/* Global toast notifications — position top-right */}
           <Toaster richColors position="top-right" />
