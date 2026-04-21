@@ -8,6 +8,13 @@ import { getSession } from "@/lib/supabase/session";
 import { DashboardShell } from "./DashboardShell";
 import type { Profile } from "@/lib/types/database";
 
+// Always render the dashboard shell per-request with fresh cookies.
+// Without this, Next.js may serve an RSC snapshot generated at build time
+// (or an earlier unauthenticated fetch during prefetch) which causes the
+// "This page couldn't load" flash on first post-login navigation.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function DashboardLayout({
   children,
   params,

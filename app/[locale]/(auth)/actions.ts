@@ -3,6 +3,7 @@
 // Zod validates on the server side as a second layer (client already validates).
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
@@ -75,6 +76,11 @@ export async function loginAction(
     }
     return { error: error.message };
   }
+
+  // Invalidate the router cache so the first post-login navigation doesn't
+  // replay a stale unauthenticated RSC snapshot (which was causing the
+  // "This page couldn't load" flash before a manual reload).
+  revalidatePath("/", "layout");
 
   // Redirect to dashboard after successful login
   redirect("/dashboard");

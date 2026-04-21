@@ -28,8 +28,11 @@ const PROTECTED_PREFIXES = [
   "/settings",
 ];
 
-// Auth pages (redirect away if already logged in)
-const AUTH_PATHS = ["/login", "/register", "/forgot-password"];
+// Auth pages (redirect away if already logged in).
+// NOTE: /forgot-password is intentionally NOT in this list — a logged-in
+// user clicking "Change Password" in UserMenu needs to reach the page so
+// they can request a reset email for their own account.
+const AUTH_PATHS = ["/login", "/register"];
 
 // Onboarding page — requires auth but no org
 const ONBOARDING_PATH = "/onboarding";
