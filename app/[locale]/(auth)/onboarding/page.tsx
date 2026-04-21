@@ -20,20 +20,34 @@ export default async function OnboardingPage() {
     redirect("/login");
   }
 
-  // Defensive check: if this user already belongs to an org, send them
-  // straight to the dashboard. The proxy also enforces this, but we
-  // double-check here in case the proxy's cookies are stale. We use the
-  // admin client so RLS regressions can never hide the user's own row
-  // (which is exactly how users were getting stuck on onboarding even
-  // after their profile was stamped with org_id).
-  const admin = createAdminClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("org_id")
-    .eq("id", user.id)
-    .maybeSingle();
+  // Defensive check: if this user already belongs to an org, send them to
+  // the dashboard. Use the admin client when available so RLS regressions
+  // can never hide the user's own row; fall back to the authenticated
+  // client if the service-role key isn't configured.
+  let orgId: string | null = null;
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = createAdminClient();
+      const { data } = await admin
+        .from("profiles")
+        .select("org_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      orgId = data?.org_id ?? null;
+    } catch (err) {
+      console.error("[onboarding] admin lookup failed, falling back:", err);
+    }
+  }
+  if (!orgId) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("org_id")
+      .eq("id", user.id)
+      .maybeSingle();
+    orgId = data?.org_id ?? null;
+  }
 
-  if (profile?.org_id) {
+  if (orgId) {
     redirect("/dashboard");
   }
 

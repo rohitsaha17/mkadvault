@@ -116,23 +116,48 @@ export default async function proxy(request: NextRequest) {
   // on the true profile state. This is safe: we only read, and we key on
   // `user.id` which is already verified by `auth.getUser()` above.
   if (user && (isProtected || isOnboarding)) {
-    const admin = createAdminClient();
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("org_id, role, roles, is_active")
-      .eq("id", user.id)
-      .maybeSingle();
+    // Try the admin client first (bypasses RLS). If the env var is missing
+    // in this deployment or the request fails for any reason, fall back to
+    // the authenticated client so the site still works. We log but never
+    // throw — a proxy crash here would brick the whole app.
+    type ProxyProfile = {
+      org_id: string | null;
+      role: string;
+      roles: string[] | null;
+      is_active: boolean | null;
+    };
+    let profile: ProxyProfile | null = null;
+
+    const hasServiceRoleKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (hasServiceRoleKey) {
+      try {
+        const admin = createAdminClient();
+        const res = await admin
+          .from("profiles")
+          .select("org_id, role, roles, is_active")
+          .eq("id", user.id)
+          .maybeSingle();
+        profile = (res.data as ProxyProfile | null) ?? null;
+      } catch (err) {
+        console.error("[proxy] admin profile lookup failed, falling back:", err);
+      }
+    }
+
+    if (!profile) {
+      const res = await supabase
+        .from("profiles")
+        .select("org_id, role, roles, is_active")
+        .eq("id", user.id)
+        .maybeSingle();
+      profile = (res.data as ProxyProfile | null) ?? null;
+    }
 
     // Null profile = the handle_new_user trigger hasn't fired yet (can happen
     // right after signup/invite). Send them to onboarding rather than looping
     // them to /login?error=Account+deactivated.
-    if (!profile) {
+    if (!profile && !isOnboarding) {
       const onboardPath = isLocaleSegment ? `/${firstSegment}/onboarding` : "/onboarding";
-      if (isOnboarding) {
-        // Already on onboarding — don't redirect, let the page render.
-      } else {
-        return redirectTo(onboardPath);
-      }
+      return redirectTo(onboardPath);
     }
 
     const hasOrg = !!profile?.org_id;
