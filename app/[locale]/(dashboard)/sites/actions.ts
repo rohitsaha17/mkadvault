@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { siteSchema } from "@/lib/validations/site";
+import { getSignedUrls } from "@/lib/supabase/signed-urls";
 
 // Ensures the given Storage bucket exists. Uses the service-role admin
 // client because creating buckets requires elevated privileges. No-op if
@@ -483,6 +484,63 @@ export async function redirectToSite(siteId: string): Promise<never> {
   redirect(`/sites/${siteId}`);
 }
 
+// ─── getSitePhotosWithSignedUrls ────────────────────────────────────────────
+// Fetches every photo for a site plus short-lived signed URLs. Used by the
+// photo lightbox (opened from the sites list thumbnail and from the detail
+// page gallery) so the gallery can be populated on-demand without the list
+// page having to pre-sign URLs for every photo on every site.
+//
+// Returns { photos, signedUrls, siteName } where signedUrls is a map of
+// {storagePath → signedUrl}. Paths that couldn't be signed are simply
+// omitted from the map — the client falls back to a placeholder.
+
+type SitePhotoLite = {
+  id: string;
+  photo_url: string;
+  photo_type: string;
+  is_primary: boolean;
+  sort_order: number;
+};
+
+type SitePhotosResult =
+  | { error: string; photos?: undefined; signedUrls?: undefined; siteName?: undefined }
+  | {
+      photos: SitePhotoLite[];
+      signedUrls: Record<string, string>;
+      siteName: string;
+      error?: undefined;
+    };
+
+export async function getSitePhotosWithSignedUrls(
+  siteId: string,
+): Promise<SitePhotosResult> {
+  const supabase = await createClient();
+
+  // Fetch the site name (for the lightbox title) and all photos in parallel.
+  const [{ data: site }, { data: photoRows }] = await Promise.all([
+    supabase.from("sites").select("name").eq("id", siteId).maybeSingle(),
+    supabase
+      .from("site_photos")
+      .select("id, photo_url, photo_type, is_primary, sort_order")
+      .eq("site_id", siteId)
+      .order("is_primary", { ascending: false })
+      .order("sort_order")
+      .limit(50),
+  ]);
+
+  if (!site) return { error: "Site not found" };
+
+  const photos = (photoRows ?? []) as SitePhotoLite[];
+
+  // Sign all storage paths in a single batch call.
+  const signedUrls = await getSignedUrls(
+    "site-photos",
+    photos.map((p) => p.photo_url),
+  );
+
+  return { photos, signedUrls, siteName: site.name as string };
+}
+
 // ─── getSitePreview ──────────────────────────────────────────────────────────
 // Fetches a lightweight subset of site fields + up to 4 photos for the preview
 // modal. Uses the regular Supabase client so RLS is enforced.
@@ -514,8 +572,15 @@ type SitePreviewPhoto = {
 };
 
 type SitePreviewResult =
-  | { error: string; site?: undefined; photos?: undefined }
-  | { site: SitePreviewData; photos: SitePreviewPhoto[]; error?: undefined };
+  | { error: string; site?: undefined; photos?: undefined; signedUrls?: undefined }
+  | {
+      site: SitePreviewData;
+      photos: SitePreviewPhoto[];
+      // Map of {storagePath → signedUrl}. site-photos is a private bucket,
+      // so the preview modal can't construct public URLs — it must use these.
+      signedUrls: Record<string, string>;
+      error?: undefined;
+    };
 
 export async function getSitePreview(siteId: string): Promise<SitePreviewResult> {
   const supabase = await createClient();
@@ -538,5 +603,10 @@ export async function getSitePreview(siteId: string): Promise<SitePreviewResult>
   ]);
 
   if (!site) return { error: "Site not found" };
-  return { site: site as SitePreviewData, photos: (photos ?? []) as SitePreviewPhoto[] };
+  const photoList = (photos ?? []) as SitePreviewPhoto[];
+  const signedUrls = await getSignedUrls(
+    "site-photos",
+    photoList.map((p) => p.photo_url),
+  );
+  return { site: site as SitePreviewData, photos: photoList, signedUrls };
 }

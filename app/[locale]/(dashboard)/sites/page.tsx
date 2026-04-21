@@ -20,6 +20,8 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { SortableTableHead } from "@/components/shared/SortableTableHead";
 import { SiteFilters } from "@/components/sites/SiteFilters";
 import { DeleteSiteButton } from "@/components/sites/DeleteSiteButton";
+import { SiteThumbnailButton } from "@/components/sites/SiteThumbnailButton";
+import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { ListExportMenu } from "@/components/shared/ListExportMenu";
 import { sanitizeSearch } from "@/lib/utils";
 import type { Site } from "@/lib/types/database";
@@ -106,6 +108,35 @@ export default async function SitesPage({ params, searchParams }: Props) {
 
   const { data: sitesData, count, error } = await query;
   const sites = (sitesData ?? []) as unknown as Site[];
+
+  // ── Fetch primary photos for the visible sites and sign them ───────────────
+  // One query for all site IDs on this page; then one batch createSignedUrls
+  // call. Keeps list-page TTFB low even for pages with 20 photos.
+  const siteIds = sites.map((s) => s.id);
+  const { data: primaryPhotoRows } = siteIds.length > 0
+    ? await supabase
+        .from("site_photos")
+        .select("site_id, photo_url, is_primary, sort_order")
+        .in("site_id", siteIds)
+        .order("is_primary", { ascending: false })
+        .order("sort_order")
+    : { data: [] as { site_id: string; photo_url: string; is_primary: boolean; sort_order: number }[] };
+
+  // Pick the "best" photo per site: primary first, then lowest sort_order.
+  // Because we ordered above, the first row per site_id wins.
+  const primaryPhotoBySite: Record<string, string> = {};
+  for (const row of primaryPhotoRows ?? []) {
+    if (!primaryPhotoBySite[row.site_id]) {
+      primaryPhotoBySite[row.site_id] = row.photo_url;
+    }
+  }
+  const photoPaths = Object.values(primaryPhotoBySite);
+  const photoSignedUrls = await getSignedUrls("site-photos", photoPaths);
+
+  // Ordered list of siteIds + a name lookup so the thumbnail lightbox can
+  // navigate prev/next between sites without re-querying the DB.
+  const orderedSiteIds = sites.map((s) => s.id);
+  const siteNameById = Object.fromEntries(sites.map((s) => [s.id, s.name])) as Record<string, string>;
 
   // ── Fetch distinct cities for the filter dropdown ──────────────────────────
   const { data: cityRows } = await supabase
@@ -214,9 +245,10 @@ export default async function SitesPage({ params, searchParams }: Props) {
       {!error && sites && sites.length > 0 && (
         <>
           <div className="rounded-2xl border border-border bg-card card-elevated overflow-hidden overflow-x-auto">
-            <Table className="min-w-[760px]">
+            <Table className="min-w-[820px]">
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[60px]">Photo</TableHead>
                   <SortableTableHead column="site_code" label="Code" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
                   <SortableTableHead column="name" label="Name" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
                   <SortableTableHead column="media_type" label="Type" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
@@ -228,8 +260,20 @@ export default async function SitesPage({ params, searchParams }: Props) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sites.map((site) => (
+                {sites.map((site, idx) => {
+                  const primaryPath = primaryPhotoBySite[site.id];
+                  const signedUrl = primaryPath ? photoSignedUrls[primaryPath] ?? null : null;
+                  return (
                   <TableRow key={site.id}>
+                    <TableCell>
+                      <SiteThumbnailButton
+                        signedUrl={signedUrl}
+                        siteName={site.name}
+                        siteIds={orderedSiteIds}
+                        siteIndex={idx}
+                        siteNameById={siteNameById}
+                      />
+                    </TableCell>
                     <TableCell className="font-mono text-[11px] text-muted-foreground">
                       {site.site_code}
                     </TableCell>
@@ -268,7 +312,8 @@ export default async function SitesPage({ params, searchParams }: Props) {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

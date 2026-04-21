@@ -1,6 +1,8 @@
 "use client";
 // SitePhotoGallery — displays uploaded photos and provides upload/delete/primary
-// controls. Calls server actions for mutations; gets signed URLs from Supabase Storage.
+// controls. Clicking a photo opens SitePhotoLightbox (full-size view with
+// prev/next arrows + keyboard nav). Calls server actions for mutations; gets
+// signed URLs from Supabase Storage.
 import { useState, useRef, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -13,23 +15,29 @@ import {
   setSitePrimaryPhoto,
 } from "@/app/[locale]/(dashboard)/sites/actions";
 import type { SitePhoto } from "@/lib/types/database";
+import { SitePhotoLightbox } from "./SitePhotoLightbox";
 
 interface Props {
   siteId: string;
   photos: SitePhoto[];
-  // Supabase Storage public base URL — pass from server component
-  storageBaseUrl: string;
+  // Map of {storagePath → signedUrl} for each existing photo. The site-photos
+  // bucket is PRIVATE, so we can't construct public URLs — the parent server
+  // component generates signed URLs via lib/supabase/signed-urls.ts.
+  signedUrls: Record<string, string>;
 }
 
-export function SitePhotoGallery({ siteId, photos: initialPhotos, storageBaseUrl }: Props) {
+export function SitePhotoGallery({ siteId, photos: initialPhotos, signedUrls }: Props) {
   const router = useRouter();
   const [photos, setPhotos] = useState(initialPhotos);
   const [isPending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  function getPhotoUrl(storagePath: string) {
-    return `${storageBaseUrl}/site-photos/${storagePath}`;
+  // Lightbox state — which photo index is open (null = closed).
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  function getPhotoUrl(storagePath: string): string | null {
+    return signedUrls[storagePath] ?? null;
   }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -68,7 +76,7 @@ export function SitePhotoGallery({ siteId, photos: initialPhotos, storageBaseUrl
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  function handleDelete(photoId: string, _photoName: string) {
+  function handleDelete(photoId: string) {
     startTransition(async () => {
       const result = await deleteSitePhoto(photoId, siteId);
       if (result.error) {
@@ -93,6 +101,12 @@ export function SitePhotoGallery({ siteId, photos: initialPhotos, storageBaseUrl
       toast.success("Primary photo updated");
     });
   }
+
+  // Photos in the order they'll be shown — primary first, matches the
+  // ordering we pass to the lightbox so `lightboxIndex` lines up.
+  const sortedPhotos = [...photos].sort(
+    (a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0),
+  );
 
   return (
     <div className="space-y-4">
@@ -137,46 +151,71 @@ export function SitePhotoGallery({ siteId, photos: initialPhotos, storageBaseUrl
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-          {photos
-            .sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0))
-            .map((photo) => (
+          {sortedPhotos.map((photo, idx) => (
               <div
                 key={photo.id}
                 className="relative group rounded-lg overflow-hidden border border-border aspect-video bg-muted"
               >
-                <Image
-                  src={getPhotoUrl(photo.photo_url)}
-                  alt="Site photo"
-                  fill
-                  className="object-cover"
-                  sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
-                />
+                {/* Click the image to open the full-size lightbox. The
+                    overlay action buttons are still reachable because they
+                    stop propagation on click. */}
+                <button
+                  type="button"
+                  onClick={() => setLightboxIndex(idx)}
+                  aria-label="Open photo"
+                  className="absolute inset-0 z-[1]"
+                >
+                  {getPhotoUrl(photo.photo_url) ? (
+                    <Image
+                      src={getPhotoUrl(photo.photo_url)!}
+                      alt="Site photo"
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
+                      unoptimized
+                    />
+                  ) : (
+                    // Signed URL not yet available (e.g. freshly uploaded photo
+                    // before router.refresh completes). Show placeholder.
+                    <div className="flex items-center justify-center h-full text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                  )}
+                </button>
 
                 {/* Primary badge */}
                 {photo.is_primary && (
-                  <div className="absolute top-1.5 left-1.5 bg-yellow-400 text-yellow-900 text-xs font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                  <div className="pointer-events-none absolute top-1.5 left-1.5 z-[2] bg-yellow-400 text-yellow-900 text-xs font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
                     <Star className="h-3 w-3 fill-current" />
                     Primary
                   </div>
                 )}
 
                 {/* Hover actions */}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                <div className="pointer-events-none absolute inset-0 z-[2] bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                   {!photo.is_primary && (
                     <button
+                      type="button"
                       title="Set as primary"
-                      onClick={() => handleSetPrimary(photo.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSetPrimary(photo.id);
+                      }}
                       disabled={isPending}
-                      className="bg-white/90 rounded-md p-1.5 text-foreground hover:bg-white transition"
+                      className="pointer-events-auto bg-white/90 rounded-md p-1.5 text-foreground hover:bg-white transition"
                     >
                       <Star className="h-4 w-4" />
                     </button>
                   )}
                   <button
+                    type="button"
                     title="Remove photo"
-                    onClick={() => handleDelete(photo.id, photo.photo_url)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(photo.id);
+                    }}
                     disabled={isPending}
-                    className="bg-red-500/90 rounded-md p-1.5 text-white hover:bg-red-600 transition"
+                    className="pointer-events-auto bg-red-500/90 rounded-md p-1.5 text-white hover:bg-red-600 transition"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -184,6 +223,20 @@ export function SitePhotoGallery({ siteId, photos: initialPhotos, storageBaseUrl
               </div>
             ))}
         </div>
+      )}
+
+      {/* Lightbox — mounted lazily once the user clicks a photo. We only
+          have this one site here, so no prev/next site navigation. */}
+      {lightboxIndex !== null && (
+        <SitePhotoLightbox
+          open={lightboxIndex !== null}
+          onOpenChange={(o) => {
+            if (!o) setLightboxIndex(null);
+          }}
+          siteIds={[siteId]}
+          initialSiteIndex={0}
+          initialPhotoIndex={lightboxIndex}
+        />
       )}
     </div>
   );

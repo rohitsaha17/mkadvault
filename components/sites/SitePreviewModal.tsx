@@ -109,6 +109,9 @@ function PreviewSkeleton() {
 export function SitePreviewModal({ siteId, children }: SitePreviewModalProps) {
   const [site, setSite] = useState<SiteData | null>(null);
   const [photos, setPhotos] = useState<PhotoData[]>([]);
+  // Signed URLs keyed by storage path — the site-photos bucket is private,
+  // so we can't construct public URLs here.
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,6 +128,7 @@ export function SitePreviewModal({ siteId, children }: SitePreviewModalProps) {
         } else {
           setSite(result.site as SiteData);
           setPhotos((result.photos ?? []) as PhotoData[]);
+          setSignedUrls(result.signedUrls ?? {});
         }
       } catch {
         setError("Failed to load site preview. Please try again.");
@@ -216,14 +220,23 @@ export function SitePreviewModal({ siteId, children }: SitePreviewModalProps) {
                   Photos
                 </p>
                 <div className="grid grid-cols-2 gap-2">
-                  {photos.map((photo) => (
-                    <img
-                      key={photo.id}
-                      src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/site-photos/${photo.photo_url}`}
-                      alt={`${site.name} — ${humanize(photo.photo_type)}`}
-                      className="aspect-video w-full rounded-lg object-cover"
-                    />
-                  ))}
+                  {photos.map((photo) => {
+                    const url = signedUrls[photo.photo_url];
+                    return url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={photo.id}
+                        src={url}
+                        alt={`${site.name} — ${humanize(photo.photo_type)}`}
+                        className="aspect-video w-full rounded-lg object-cover"
+                      />
+                    ) : (
+                      <div
+                        key={photo.id}
+                        className="aspect-video w-full rounded-lg bg-muted"
+                      />
+                    );
+                  })}
                 </div>
               </div>
             )}
