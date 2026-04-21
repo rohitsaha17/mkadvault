@@ -1,8 +1,9 @@
 "use client";
-// AcceptInviteForm — welcomes the invited user, asks them to confirm the
-// email the invite was sent to, and sets their password. We also clear the
-// `needs_password_setup` flag so the proxy + auth callback stop routing
-// them here.
+// AcceptInviteForm — welcomes the invited user and asks them to set a
+// password. The email is already known (we authenticated them via the
+// invite link), so we display it read-only rather than asking them to
+// re-type it. We also clear the `needs_password_setup` flag so the proxy
+// + auth callback stop routing them here.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -16,13 +17,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
-// Email field is mostly a confirmation prompt — we pass the real invited
-// email as the `email` prop and compare case-insensitively. It's a UX
-// safety check ("did you open the right invite email?") rather than a
-// security boundary (Supabase has already authenticated the session).
+// We only ask for a password + confirm. The email is already proven by
+// the active Supabase session (the invite link did the verification).
 const schema = z
   .object({
-    email: z.string().email("Enter a valid email"),
     password: z.string().min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string(),
   })
@@ -49,19 +47,9 @@ export function AcceptInviteForm({ email, fullName, orgName }: Props) {
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { email: "" },
   });
 
   async function onSubmit(values: FormValues) {
-    // Email match check — invite is tied to the Supabase session, but we
-    // want the user to confirm they're accepting the right invite.
-    if (values.email.trim().toLowerCase() !== email.toLowerCase()) {
-      toast.error(
-        "That email doesn't match the invite. Please enter the email your invite was sent to."
-      );
-      return;
-    }
-
     setIsSubmitting(true);
     try {
       const supabase = createClient();
@@ -110,27 +98,19 @@ export function AcceptInviteForm({ email, fullName, orgName }: Props) {
           {orgName
             ? `You've been invited to join ${orgName}.`
             : "You've been invited to join your team."}{" "}
-          Confirm your email and set a password to get started.
+          Set a password to get started.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {/* Email confirmation */}
-        <div className="space-y-1.5">
-          <Label htmlFor="email">Your email</Label>
-          <Input
-            id="email"
-            type="email"
-            autoComplete="email"
-            placeholder="Enter the email your invite was sent to"
-            disabled={isSubmitting}
-            {...register("email")}
-          />
-          {errors.email && (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
-          )}
+      {/* Read-only email display — confirms which invite they're accepting */}
+      {email && (
+        <div className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+          <span className="text-muted-foreground">Signed in as </span>
+          <span className="font-medium text-foreground">{email}</span>
         </div>
+      )}
 
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* New Password */}
         <div className="space-y-1.5">
           <Label htmlFor="password">Create a password</Label>

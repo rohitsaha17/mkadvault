@@ -3,13 +3,15 @@
 //
 // Flow:
 //   1. Admin invites user → user_metadata.needs_password_setup = true
-//   2. User clicks magic-link email → /auth/callback exchanges code
+//   2. User clicks invite email → /auth/callback verifies the token
 //   3. Callback detects needs_password_setup and redirects here
-//   4. User confirms the email they were invited under, sets a password
+//   4. User sets a password (email is already known from the session)
 //   5. We clear needs_password_setup and send them to /dashboard
 //
 // Server component: fetches the current user + their org name so we can
-// render a warm "Welcome to {org}" heading and show the invite email.
+// render a warm "Welcome to {org}" heading. Lookups are wrapped in
+// try/catch so a missing SUPABASE_SERVICE_ROLE_KEY or transient DB error
+// never crashes this page — the invite screen must always render.
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -36,29 +38,44 @@ export default async function AcceptInvitePage() {
     redirect("/dashboard");
   }
 
-  // Fetch the org name for the welcome message. Use admin client so RLS
-  // regressions can't break the lookup.
-  const admin = createAdminClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("org_id, full_name")
-    .eq("id", user.id)
-    .maybeSingle();
-
+  // Fetch profile + org name for the welcome message. Both lookups are
+  // best-effort: if anything fails we still render the form (with a
+  // generic greeting) so the user is never blocked from setting a password.
+  let fullName: string | null = null;
   let orgName: string | null = null;
-  if (profile?.org_id) {
-    const { data: org } = await admin
-      .from("organizations")
-      .select("name")
-      .eq("id", profile.org_id)
+
+  try {
+    // Prefer the admin client so RLS regressions don't hide the row, but
+    // fall back to the authenticated client if the service role key is
+    // missing from this environment.
+    const hasServiceRoleKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const client = hasServiceRoleKey ? createAdminClient() : supabase;
+
+    const { data: profile } = await client
+      .from("profiles")
+      .select("org_id, full_name")
+      .eq("id", user.id)
       .maybeSingle();
-    orgName = org?.name ?? null;
+
+    fullName = profile?.full_name ?? null;
+
+    if (profile?.org_id) {
+      const { data: org } = await client
+        .from("organizations")
+        .select("name")
+        .eq("id", profile.org_id)
+        .maybeSingle();
+      orgName = org?.name ?? null;
+    }
+  } catch (err) {
+    // Log but never throw — the form must render regardless.
+    console.error("[accept-invite] profile/org lookup failed:", err);
   }
 
   return (
     <AcceptInviteForm
       email={user.email ?? ""}
-      fullName={profile?.full_name ?? null}
+      fullName={fullName}
       orgName={orgName}
     />
   );
