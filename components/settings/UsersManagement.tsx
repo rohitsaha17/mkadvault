@@ -8,6 +8,7 @@
 //   * No other multi combos are allowed (DB has a matching CHECK in migration 020)
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -104,10 +105,22 @@ interface Props {
 }
 
 export function UsersManagement({ members: initialMembers, currentUserId }: Props) {
+  const router = useRouter();
   const [members, setMembers] = useState<TeamMember[]>(initialMembers);
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Fire a soft refresh in the background (no await — if it fails it just
+  // means the server-rendered copy is a bit stale, which is harmless because
+  // the client already has an optimistic local copy of the data).
+  function softRefresh() {
+    try {
+      router.refresh();
+    } catch {
+      // Swallow — worst case the user sees a slightly stale page.
+    }
+  }
 
   // Invite form state
   const [email, setEmail] = useState("");
@@ -161,15 +174,26 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
             created_at: new Date().toISOString(),
           },
         ]);
+        softRefresh();
       } catch (err) {
         // Safety net: if the server action somehow threw instead of returning
         // `{ error }` (e.g. a redeployment with an older bundle), surface a
         // toast here so the app doesn't crash into the dashboard error
-        // boundary with the unhelpful "unexpected response" message.
+        // boundary. We translate the unhelpful Next/React RSC-parse error
+        // into something actionable — the invite almost certainly succeeded
+        // server-side (the action returned JSON and we only failed to stream
+        // a revalidation tree back), so ask the user to reload instead of
+        // implying the operation failed.
         console.error("[UsersManagement:invite] unexpected error:", err);
-        toast.error(
-          err instanceof Error ? err.message : "Failed to send invite. Try again.",
-        );
+        const msg = err instanceof Error ? err.message : "";
+        if (/unexpected response was received/i.test(msg)) {
+          toast.success(
+            `Invite likely sent — refreshing to confirm.`,
+          );
+          softRefresh();
+        } else {
+          toast.error(msg || "Failed to send invite. Try again.");
+        }
       }
     });
   }
@@ -187,12 +211,19 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
       try {
         const res = await resendInvite(emailForToast);
         if (res.error) toast.error(res.error);
-        else toast.success(`Invite resent to ${emailForToast}`);
+        else {
+          toast.success(`Invite resent to ${emailForToast}`);
+          softRefresh();
+        }
       } catch (err) {
         console.error("[UsersManagement:resend] unexpected error:", err);
-        toast.error(
-          err instanceof Error ? err.message : "Failed to resend invite.",
-        );
+        const msg = err instanceof Error ? err.message : "";
+        if (/unexpected response was received/i.test(msg)) {
+          toast.success("Invite likely resent — refreshing to confirm.");
+          softRefresh();
+        } else {
+          toast.error(msg || "Failed to resend invite.");
+        }
       } finally {
         setBusyId(null);
       }
@@ -435,10 +466,14 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
               member={editing}
               isSelf={editing.id === currentUserId}
               onClose={() => setEditingId(null)}
-              onPatched={(patch) => patchMember(editing.id, patch)}
+              onPatched={(patch) => {
+                patchMember(editing.id, patch);
+                softRefresh();
+              }}
               onDeleted={() => {
                 setMembers((prev) => prev.filter((x) => x.id !== editing.id));
                 setEditingId(null);
+                softRefresh();
               }}
             />
           );

@@ -7,7 +7,17 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { revalidatePath } from "next/cache";
+// NOTE: we deliberately do NOT import revalidatePath here.
+// Reason: every action in this file is called from a client component that
+// already updates its local state optimistically (see UsersManagement.tsx
+// and EditUserDialog.tsx — they push rows, patch fields, drop deleted rows).
+// Calling revalidatePath forces Next.js to append a re-rendered RSC tree to
+// the action response body. If *anything* in that re-render fails (an async
+// cookie read, a transient Supabase hiccup, a listUsers timeout), the action
+// response becomes malformed and React throws
+//   "An unexpected response was received from the server."
+// By returning plain JSON from the action, we eliminate that entire class of
+// failure. The client calls router.refresh() on success for a fresh render.
 import type { UserRole } from "@/lib/types/database";
 import { USER_ROLES, isExecutiveAccountsCombo } from "@/lib/constants";
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
@@ -150,7 +160,6 @@ export async function inviteUser(data: {
 
       if (profileError) return { error: profileError.message };
 
-      revalidatePath("/settings/users");
       return { success: true };
     } catch (err) {
       if (isNextInternalThrow(err)) throw err;
@@ -192,7 +201,6 @@ export async function updateUserRoles(
 
     if (error) return { error: error.message };
 
-    revalidatePath("/settings/users");
     return { success: true };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
@@ -236,7 +244,6 @@ export async function setUserActive(
 
     if (error) return { error: error.message };
 
-    revalidatePath("/settings/users");
     return { success: true };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
@@ -386,7 +393,6 @@ export async function deleteUser(
       };
     }
 
-    revalidatePath("/settings/users");
     return { success: true };
   } catch (err) {
     // Absolute last-ditch safety net — Server Actions that throw return
@@ -431,7 +437,6 @@ export async function updateUserProfile(
       .eq("org_id", gate.orgId);
     if (error) return { error: error.message };
 
-    revalidatePath("/settings/users");
     return { success: true };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
@@ -487,7 +492,6 @@ export async function setUserPassword(
       };
     }
 
-    revalidatePath("/settings/users");
     return { success: true };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;

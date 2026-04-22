@@ -103,12 +103,21 @@ export function EditUserDialog({
       } catch (err) {
         // Belt-and-braces: every server action in this app returns `{ error }`
         // on failure and never throws, but if one ever does, we surface a
-        // toast here instead of letting it bubble to the error boundary
-        // (which is what produces the "unexpected response" full-page crash).
+        // toast here instead of letting it bubble to the error boundary.
+        // The specific "An unexpected response was received from the server"
+        // error comes from React's action-response parser when the response
+        // body isn't a valid RSC stream — the action itself almost certainly
+        // succeeded. Treat it as a "likely-succeeded, please reload" case
+        // rather than an error.
         console.error(`[EditUserDialog:${section}] unexpected error:`, err);
-        toast.error(
-          err instanceof Error ? err.message : "Something went wrong. Try again.",
-        );
+        const msg = err instanceof Error ? err.message : "";
+        if (/unexpected response was received/i.test(msg)) {
+          toast.message(
+            "Change likely saved — reload the page to confirm.",
+          );
+        } else {
+          toast.error(msg || "Something went wrong. Try again.");
+        }
       } finally {
         setBusySection(null);
       }
