@@ -5,7 +5,7 @@ import { Link, usePathname } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import {
   LayoutDashboard, MapPin, Home, Building2, FileText,
-  Users, Megaphone, Receipt, FileSpreadsheet, BarChart3,
+  Users, Megaphone, Receipt, Wallet, FileSpreadsheet, BarChart3,
   Bell, Settings, Sparkles, ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,7 @@ const NAV_SECTIONS = [
       { key: "campaigns", href: "/campaigns", icon: Megaphone },
       { key: "proposals", href: "/proposals", icon: FileSpreadsheet },
       { key: "billing", href: "/billing", icon: Receipt },
+      { key: "expenses", href: "/expenses", icon: Wallet },
     ],
   },
   {

@@ -770,6 +770,73 @@ export interface AlertPreference {
 
 export type AlertPreferenceUpsert = Omit<AlertPreference, "id" | "created_at" | "updated_at"> & { id?: string };
 
+// ─── site_expenses (payment requests) ────────────────────────────────────────
+
+export type ExpenseCategory =
+  | "electricity"
+  | "rent"
+  | "maintenance"
+  | "cleaning"
+  | "light_change"
+  | "repair"
+  | "permit_fee"
+  | "printing"
+  | "mounting"
+  | "fuel_transport"
+  | "other";
+
+export type ExpenseStatus = "pending" | "approved" | "paid" | "rejected";
+
+export type ExpensePayeeType =
+  | "landowner"
+  | "agency"
+  | "vendor"
+  | "contractor"
+  | "employee"
+  | "other";
+
+export interface SiteExpense {
+  id: string;
+  organization_id: string;
+  site_id: string | null;
+
+  category: ExpenseCategory;
+  description: string;
+  amount_paise: number;
+
+  payee_type: ExpensePayeeType;
+  payee_id: string | null;
+  payee_name: string;
+  payee_contact: string | null;
+  payee_bank_details: Record<string, unknown> | null;
+
+  status: ExpenseStatus;
+
+  needed_by: string | null;
+
+  paid_at: string | null;
+  paid_by: string | null;
+  payment_mode: PaymentMode | null;
+  payment_reference: string | null;
+  tds_paise: number | null;
+
+  receipt_doc_urls: string[];
+  payment_proof_urls: string[];
+
+  notes: string | null;
+
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+}
+
+export type SiteExpenseInsert = Omit<
+  SiteExpense,
+  "id" | "created_at" | "updated_at" | "deleted_at"
+> & { id?: string };
+
 // ─── Supabase Database type (for use with createClient<Database>()) ──────────
 // Extend this as more tables are added.
 

@@ -59,6 +59,7 @@
     "clients": "Clients",
     "campaigns": "Campaigns",
     "billing": "Billing",
+    "expenses": "Payment Requests",
     "invoices": "Invoices",
     "payables": "Payables",
     "agingReport": "Aging Report",

@@ -17,6 +17,7 @@ import {
   Users,
   Megaphone,
   Receipt,
+  Wallet,
   FileSpreadsheet,
   BarChart3,
   Bell,
@@ -61,6 +62,7 @@ const NAV_SECTIONS = [
       { key: "campaigns", href: "/campaigns", icon: Megaphone },
       { key: "proposals", href: "/proposals", icon: FileSpreadsheet },
       { key: "billing", href: "/billing", icon: Receipt },
+      { key: "expenses", href: "/expenses", icon: Wallet },
     ],
   },
   {

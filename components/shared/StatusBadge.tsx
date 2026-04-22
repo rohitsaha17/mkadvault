@@ -56,6 +56,11 @@ const STATUS_TONE: Record<string, Tone> = {
   active: "success",
   terminated: "danger",
   pending_renewal: "warning",
+  // Expense / payment-request statuses (pending + approved are not covered
+  // above; `paid` / `cancelled` / `rejected` already land on sensible tones)
+  pending: "warning",
+  approved: "info",
+  rejected: "danger",
 };
 
 interface StatusBadgeProps {

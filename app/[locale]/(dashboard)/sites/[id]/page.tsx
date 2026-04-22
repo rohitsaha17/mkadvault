@@ -8,21 +8,42 @@ import {
   MapPin,
   Ruler,
   Building,
-  FileText,
   Edit,
-  User,
   ScrollText,
   Megaphone,
   Plus,
+  LineChart,
+  Receipt,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import type { Site, SitePhoto } from "@/lib/types/database";
+import type {
+  Site,
+  SitePhoto,
+  UserRole,
+  ExpenseCategory,
+  ExpenseStatus,
+  PaymentMode,
+} from "@/lib/types/database";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { SitePhotoGallery } from "@/components/sites/SitePhotoGallery";
+import { SiteAnalyticsPanel } from "@/components/sites/SiteAnalyticsPanel";
 import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { DeleteSiteButton } from "@/components/sites/DeleteSiteButton";
+import { NewExpenseDialog } from "@/components/expenses/NewExpenseDialog";
+import {
+  ExpensesList,
+  type ExpenseRow,
+} from "@/components/expenses/ExpensesList";
+import { getSiteAnalytics } from "@/lib/analytics/site-analytics";
 import { format } from "date-fns";
+
+const FINANCE_ROLES: UserRole[] = [
+  "super_admin",
+  "admin",
+  "manager",
+  "accounts",
+];
 
 interface Props {
   params: Promise<{ locale: string; id: string }>;
@@ -55,9 +76,35 @@ export default async function SiteDetailPage({ params }: Props) {
   if (error || !siteData) notFound();
   const site = siteData as unknown as Site;
 
+  // Caller's roles — gate the "Mark paid / approve / reject" actions in the
+  // embedded expenses list.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: callerProfile } = user
+    ? await supabase
+        .from("profiles")
+        .select("role, roles")
+        .eq("id", user.id)
+        .single()
+    : { data: null };
+  const callerRoles: UserRole[] =
+    Array.isArray(callerProfile?.roles) && callerProfile!.roles!.length > 0
+      ? (callerProfile!.roles as UserRole[])
+      : callerProfile?.role
+      ? [callerProfile.role as UserRole]
+      : [];
+  const canSettle = callerRoles.some((r) => FINANCE_ROLES.includes(r));
+
   // Fetch related data in parallel
-  const [photosResult, landownerResult, contractsResult, campaignSitesResult] =
-    await Promise.all([
+  const [
+    photosResult,
+    landownerResult,
+    contractsResult,
+    campaignSitesResult,
+    analytics,
+    expensesResult,
+  ] = await Promise.all([
       supabase
         .from("site_photos")
         .select("id, site_id, organization_id, photo_url, photo_type, is_primary, sort_order, created_at, updated_at, created_by")
@@ -88,6 +135,19 @@ export default async function SiteDetailPage({ params }: Props) {
         .eq("site_id", id)
         .order("start_date", { ascending: false })
         .limit(50),
+      // Site analytics (last 365 days window)
+      getSiteAnalytics(id),
+      // Site expenses (latest 30)
+      supabase
+        .from("site_expenses")
+        .select(
+          `id, category, description, amount_paise, status, payee_name, payee_type,
+           needed_by, paid_at, payment_mode, receipt_doc_urls, payment_proof_urls, created_at`,
+        )
+        .eq("site_id", id)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(30),
     ]);
 
   const photos = (photosResult.data ?? []) as unknown as SitePhoto[];
@@ -100,6 +160,27 @@ export default async function SiteDetailPage({ params }: Props) {
     id: string; campaign_id: string; start_date: string; end_date: string; status: string; site_rate_paise: number | null;
     campaigns: { id: string; campaign_name: string; start_date: string; end_date: string; status: string; client_id: string; clients: { company_name: string } | null } | null;
   }>;
+
+  // Expenses — cast to the ExpensesList row shape, attaching the current site.
+  const rawExpenses = (expensesResult.data ?? []) as Array<{
+    id: string;
+    category: ExpenseCategory;
+    description: string;
+    amount_paise: number;
+    status: ExpenseStatus;
+    payee_name: string;
+    payee_type: string;
+    needed_by: string | null;
+    paid_at: string | null;
+    payment_mode: PaymentMode | null;
+    receipt_doc_urls: string[] | null;
+    payment_proof_urls: string[] | null;
+    created_at: string;
+  }>;
+  const expenses: ExpenseRow[] = rawExpenses.map((e) => ({
+    ...e,
+    site: { id, name: site.name, site_code: site.site_code },
+  }));
 
   // Resolve counterparty names for contracts
   const landownerIds = [...new Set(contracts.filter(c => c.landowner_id).map(c => c.landowner_id!))];
@@ -163,6 +244,41 @@ export default async function SiteDetailPage({ params }: Props) {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left column — key details */}
         <div className="space-y-6 lg:col-span-2">
+          {/* Analytics & Insights */}
+          <Section
+            title="Analytics & Insights"
+            icon={<LineChart className="h-4 w-4" />}
+          >
+            <SiteAnalyticsPanel analytics={analytics} />
+          </Section>
+
+          {/* Expenses / Payment requests */}
+          <Section
+            title="Expenses & Payment requests"
+            icon={<Receipt className="h-4 w-4" />}
+            action={
+              <NewExpenseDialog
+                sites={[
+                  {
+                    id,
+                    name: site.name,
+                    site_code: site.site_code,
+                  },
+                ]}
+                defaultSiteId={id}
+                triggerLabel="New request"
+                triggerSize="sm"
+              />
+            }
+          >
+            <ExpensesList
+              expenses={expenses}
+              canSettle={canSettle}
+              hideSiteColumn
+              emptyMessage="No payment requests for this site yet."
+            />
+          </Section>
+
           {/* Photos */}
           <Section title="Photos" icon={<Building className="h-4 w-4" />}>
             <SitePhotoGallery
