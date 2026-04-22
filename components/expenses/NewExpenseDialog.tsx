@@ -163,29 +163,35 @@ export function NewExpenseDialog({
       </Button>
 
       {open && (
+        // Modal uses a flex column layout so header (shrink-0) + scrollable
+        // body (flex-1 overflow-y-auto) + footer (shrink-0) stay visible at
+        // once — the submit button never falls below the fold, which was the
+        // original viewability complaint. Outer padding is smaller on mobile
+        // so the card fills the screen properly on phones.
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-2 sm:items-center sm:p-4"
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card shadow-xl"
+            className="flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl sm:max-h-[calc(100dvh-2rem)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3 sticky top-0 bg-card z-10">
-              <div>
+            {/* Header — shrink-0 so it never scrolls away */}
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-card px-5 py-3">
+              <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-foreground">
                   New payment request
                 </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Ask accounts to pay for a site expense (electricity, rent,
-                  cleaning, etc.)
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Ask finance to pay a site expense — electricity, rent,
+                  cleaning, mounting, etc.
                 </p>
               </div>
               <Button
                 type="button"
                 size="icon"
                 variant="ghost"
-                className="h-7 w-7"
+                className="h-7 w-7 shrink-0"
                 onClick={() => setOpen(false)}
                 aria-label="Close"
               >
@@ -193,192 +199,189 @@ export function NewExpenseDialog({
               </Button>
             </div>
 
+            {/* Form — flex-1 so body scrolls and footer stays pinned */}
             <form
               ref={formRef}
               onSubmit={handleSubmit}
-              className="space-y-4 p-5 text-sm"
+              className="flex min-h-0 flex-1 flex-col text-sm"
             >
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Site" hint="Optional — leave blank for overhead">
-                  <PartySelect
-                    name="site_id"
-                    defaultValue={defaultSiteId ?? ""}
-                    options={sites.map((s) => ({
-                      id: s.id,
-                      label: s.site_code ? `${s.name} (${s.site_code})` : s.name,
-                    }))}
-                  />
-                </Field>
+              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Site" hint="Optional — leave blank for overhead">
+                    <PartySelect
+                      name="site_id"
+                      defaultValue={defaultSiteId ?? ""}
+                      options={sites.map((s) => ({
+                        id: s.id,
+                        label: s.site_code ? `${s.name} (${s.site_code})` : s.name,
+                      }))}
+                    />
+                  </Field>
 
-                <Field label="Category" required>
-                  <select
-                    name="category"
-                    required
-                    defaultValue="electricity"
-                    className={selectClass}
-                  >
-                    {EXPENSE_CATEGORIES.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-
-              <Field label="Description" required>
-                <Input
-                  name="description"
-                  required
-                  maxLength={500}
-                  placeholder="e.g. DISCOM bill for April 2026"
-                />
-              </Field>
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Amount (₹)" required>
-                  <Input
-                    name="amount_rupees"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    placeholder="0.00"
-                  />
-                </Field>
-                <Field label="Needed by">
-                  <Input type="date" name="needed_by" />
-                </Field>
-              </div>
-
-              <div className="pt-2 border-t border-border/60">
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Payee
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Payee type" required>
+                  <Field label="Category" required>
                     <select
-                      name="payee_type"
+                      name="category"
                       required
-                      defaultValue="vendor"
+                      defaultValue="electricity"
                       className={selectClass}
                     >
-                      {EXPENSE_PAYEE_TYPES.map((p) => (
-                        <option key={p.value} value={p.value}>
-                          {p.label}
+                      {EXPENSE_CATEGORIES.map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
                         </option>
                       ))}
                     </select>
                   </Field>
-                  <Field label="Payee name" required>
+                </div>
+
+                <Field label="Description" required>
+                  <Input
+                    name="description"
+                    required
+                    maxLength={500}
+                    placeholder="e.g. DISCOM bill for April 2026"
+                  />
+                </Field>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Amount (₹)" required>
                     <Input
-                      name="payee_name"
+                      name="amount_rupees"
+                      type="number"
+                      step="0.01"
+                      min="0"
                       required
-                      maxLength={200}
-                      placeholder="e.g. Rajesh Electrician"
+                      placeholder="0.00"
                     />
                   </Field>
-                </div>
-                <div className="mt-3">
-                  <Field label="Phone / contact">
-                    <Input
-                      name="payee_contact"
-                      maxLength={200}
-                      placeholder="Phone / email"
-                    />
+                  <Field label="Needed by">
+                    <Input type="date" name="needed_by" />
                   </Field>
                 </div>
-                <details className="mt-3 rounded-lg border border-border/60 px-3 py-2">
-                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                    Bank / UPI details (optional)
-                  </summary>
-                  <div className="mt-3 grid grid-cols-2 gap-3">
-                    <Field label="Bank name">
-                      <Input name="bank" maxLength={100} />
+
+                <div className="pt-2 border-t border-border/60">
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Payee
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field label="Payee type" required>
+                      <select
+                        name="payee_type"
+                        required
+                        defaultValue="vendor"
+                        className={selectClass}
+                      >
+                        {EXPENSE_PAYEE_TYPES.map((p) => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
                     </Field>
-                    <Field label="IFSC">
-                      <Input name="ifsc" maxLength={20} />
-                    </Field>
-                    <Field label="Account number">
-                      <Input name="account_number" maxLength={40} />
-                    </Field>
-                    <Field label="UPI ID">
-                      <Input name="upi" maxLength={80} placeholder="name@bank" />
+                    <Field label="Payee name" required>
+                      <Input
+                        name="payee_name"
+                        required
+                        maxLength={200}
+                        placeholder="e.g. Rajesh Electrician"
+                      />
                     </Field>
                   </div>
-                </details>
-              </div>
+                  <div className="mt-3">
+                    <Field label="Phone / contact">
+                      <Input
+                        name="payee_contact"
+                        maxLength={200}
+                        placeholder="Phone / email"
+                      />
+                    </Field>
+                  </div>
+                  <details className="mt-3 rounded-lg border border-border/60 px-3 py-2">
+                    <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                      Bank / UPI details (optional)
+                    </summary>
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field label="Bank name">
+                        <Input name="bank" maxLength={100} />
+                      </Field>
+                      <Field label="IFSC">
+                        <Input name="ifsc" maxLength={20} />
+                      </Field>
+                      <Field label="Account number">
+                        <Input name="account_number" maxLength={40} />
+                      </Field>
+                      <Field label="UPI ID">
+                        <Input name="upi" maxLength={80} placeholder="name@bank" />
+                      </Field>
+                    </div>
+                  </details>
+                </div>
 
-              <div className="pt-2 border-t border-border/60">
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Supporting documents
-                </h3>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp,.heic"
-                  onChange={handleFileSelected}
-                  disabled={uploading}
-                  className={cn(
-                    "block w-full text-sm text-muted-foreground",
-                    "file:mr-3 file:rounded-md file:border-0 file:bg-muted",
-                    "file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
-                    "hover:file:bg-muted/80 disabled:opacity-60",
+                <div className="pt-2 border-t border-border/60">
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Supporting receipts / bills
+                  </h3>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,.heic"
+                    onChange={handleFileSelected}
+                    disabled={uploading}
+                    className={cn(
+                      "block w-full text-sm text-muted-foreground",
+                      "file:mr-3 file:rounded-md file:border-0 file:bg-muted",
+                      "file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
+                      "hover:file:bg-muted/80 disabled:opacity-60",
+                    )}
+                  />
+                  {uploading && (
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Uploading…
+                    </p>
                   )}
-                />
-                {uploading && (
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Uploading…
-                  </p>
-                )}
-                {docs.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {docs.map((d, idx) => (
-                      <li
-                        key={d.path}
-                        className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs"
-                      >
-                        <span className="truncate font-medium text-foreground">
-                          {d.name}
-                        </span>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-6 w-6"
-                          aria-label="Remove"
-                          onClick={() => removeDoc(idx)}
+                  {docs.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {docs.map((d, idx) => (
+                        <li
+                          key={d.path}
+                          className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs"
                         >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Max 10 MB per file. Supported: PDF, JPG, PNG, WEBP, HEIC.
-                </p>
+                          <span className="truncate font-medium text-foreground">
+                            {d.name}
+                          </span>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6"
+                            aria-label="Remove"
+                            onClick={() => removeDoc(idx)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Max 10 MB per file. Supported: PDF, JPG, PNG, WEBP, HEIC.
+                  </p>
+                </div>
+
+                <Field label="Notes">
+                  <Textarea
+                    name="notes"
+                    rows={2}
+                    maxLength={2000}
+                    placeholder="Optional notes for accounts…"
+                  />
+                </Field>
               </div>
 
-              <Field label="Notes">
-                <Textarea
-                  name="notes"
-                  rows={2}
-                  maxLength={2000}
-                  placeholder="Optional notes for accounts…"
-                />
-              </Field>
-
-              <div className="flex gap-2 pt-2 border-t border-border">
-                <Button
-                  type="submit"
-                  disabled={isPending || uploading}
-                  className="gap-1.5"
-                >
-                  {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Create request
-                </Button>
+              {/* Footer — pinned below the scrollable body so Create / Cancel
+                  are always visible regardless of form length or screen size. */}
+              <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-card px-5 py-3 sm:flex-row sm:items-center sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
@@ -388,6 +391,14 @@ export function NewExpenseDialog({
                   }}
                 >
                   Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isPending || uploading}
+                  className="gap-1.5"
+                >
+                  {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Create request
                 </Button>
               </div>
             </form>

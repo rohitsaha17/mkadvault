@@ -62,7 +62,7 @@ const NAV_SECTIONS = [
       { key: "campaigns", href: "/campaigns", icon: Megaphone },
       { key: "proposals", href: "/proposals", icon: FileSpreadsheet },
       { key: "billing", href: "/billing", icon: Receipt },
-      { key: "expenses", href: "/expenses", icon: Wallet },
+      { key: "finance", href: "/finance", icon: Wallet },
     ],
   },
   {

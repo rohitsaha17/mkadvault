@@ -24,6 +24,18 @@ import {
 import type { UserRole } from "@/lib/types/database";
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 
+// After any expense mutation, re-render every Finance page so the new
+// state is reflected everywhere (overview KPIs, requests list, approvals
+// queue, payments history, receipts vault). Each page is cheap to
+// re-render because they all hit site_expenses.
+function revalidateFinance() {
+  revalidatePath("/finance");
+  revalidatePath("/finance/requests");
+  revalidatePath("/finance/approvals");
+  revalidatePath("/finance/payments");
+  revalidatePath("/finance/receipts");
+}
+
 // ── Auth helpers ────────────────────────────────────────────────────────────
 type AuthCtx = {
   userId: string;
@@ -147,7 +159,7 @@ export async function createExpense(
 
     if (error) return { error: error.message };
 
-    revalidatePath("/expenses");
+    revalidateFinance();
     if (v.site_id) revalidatePath(`/sites/${v.site_id}`);
     return { success: true, id: data.id };
   } catch (err) {
@@ -189,7 +201,7 @@ export async function setExpenseStatus(
 
     if (error) return { error: error.message };
 
-    revalidatePath("/expenses");
+    revalidateFinance();
     if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
     return { success: true };
   } catch (err) {
@@ -251,7 +263,7 @@ export async function markExpensePaid(
 
     if (error) return { error: error.message };
 
-    revalidatePath("/expenses");
+    revalidateFinance();
     if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
     return { success: true };
   } catch (err) {
@@ -298,7 +310,7 @@ export async function deleteExpense(
 
     if (error) return { error: error.message };
 
-    revalidatePath("/expenses");
+    revalidateFinance();
     if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
     return { success: true };
   } catch (err) {
