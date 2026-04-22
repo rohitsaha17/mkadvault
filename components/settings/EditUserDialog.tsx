@@ -100,6 +100,15 @@ export function EditUserDialog({
     startTransition(async () => {
       try {
         await fn();
+      } catch (err) {
+        // Belt-and-braces: every server action in this app returns `{ error }`
+        // on failure and never throws, but if one ever does, we surface a
+        // toast here instead of letting it bubble to the error boundary
+        // (which is what produces the "unexpected response" full-page crash).
+        console.error(`[EditUserDialog:${section}] unexpected error:`, err);
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong. Try again.",
+        );
       } finally {
         setBusySection(null);
       }

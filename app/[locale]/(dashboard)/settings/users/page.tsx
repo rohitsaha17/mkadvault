@@ -83,7 +83,9 @@ export default async function UsersPage({
     );
   }
 
-  // Fetch all profiles in this org
+  // Fetch all profiles in this org. This is the canonical member list —
+  // even if the admin auth lookup below fails we can still render something
+  // useful (names + roles) rather than crashing the whole page.
   const { data: profilesData } = await supabase
     .from("profiles")
     .select("id, full_name, role, roles, is_active, phone, created_at")
@@ -92,15 +94,39 @@ export default async function UsersPage({
 
   const profilesList = profilesData ?? [];
 
-  // Fetch auth emails and last sign-in via admin client (service role)
-  const admin = createAdminClient();
-  const { data: authData } = await admin.auth.admin.listUsers({ perPage: 200 });
+  // Fetch auth emails and last sign-in via admin client (service role).
+  // This call is the historical source of "An unexpected response was
+  // received from the server" errors — GoTrue sometimes throws 5xx, and if
+  // SUPABASE_SERVICE_ROLE_KEY isn't set the admin client fails mid-request.
+  // Wrap defensively: on failure we still render the page with profile
+  // rows only (email/last-sign-in columns will just show "—").
   const authMap = new Map<string, { email: string | null; last_sign_in_at: string | null }>();
-  for (const u of authData?.users ?? []) {
-    authMap.set(u.id, {
-      email: u.email ?? null,
-      last_sign_in_at: u.last_sign_in_at ?? null,
-    });
+  let authFetchError: string | null = null;
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    authFetchError =
+      "SUPABASE_SERVICE_ROLE_KEY is not set on the server — email and last-sign-in details can't be shown.";
+  } else {
+    try {
+      const admin = createAdminClient();
+      const { data: authData, error: authErr } = await admin.auth.admin.listUsers({ perPage: 200 });
+      if (authErr) {
+        authFetchError = `Couldn't load auth details: ${authErr.message}`;
+      } else {
+        for (const u of authData?.users ?? []) {
+          authMap.set(u.id, {
+            email: u.email ?? null,
+            last_sign_in_at: u.last_sign_in_at ?? null,
+          });
+        }
+      }
+    } catch (err) {
+      // Swallow any throw from the admin SDK so this page never blows up.
+      console.error("[settings/users] listUsers failed:", err);
+      authFetchError =
+        err instanceof Error
+          ? `Couldn't load auth details: ${err.message}`
+          : "Couldn't load auth details.";
+    }
   }
 
   const members: TeamMember[] = profilesList.map((p) => {
@@ -139,6 +165,12 @@ export default async function UsersPage({
         title="Team Members"
         description="Invite new users, change their role, and manage access to your organization."
       />
+
+      {authFetchError && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+          {authFetchError}
+        </div>
+      )}
 
       <UsersManagement members={members} currentUserId={user.id} />
     </div>

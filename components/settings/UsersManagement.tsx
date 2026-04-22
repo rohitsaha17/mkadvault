@@ -125,35 +125,52 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
       toast.error("Pick at least one role");
       return;
     }
+    // Capture the values before the async block so we can still use them in
+    // the optimistic-row push below even if the user starts typing again
+    // while the request is in flight.
+    const emailAtSubmit = email.trim();
+    const nameAtSubmit = fullName.trim();
+    const rolesAtSubmit = selectedRoles;
     startTransition(async () => {
-      const res = await inviteUser({
-        email: email.trim(),
-        full_name: fullName.trim(),
-        roles: selectedRoles,
-      });
-      if (res.error) {
-        toast.error(res.error);
-        return;
+      try {
+        const res = await inviteUser({
+          email: emailAtSubmit,
+          full_name: nameAtSubmit,
+          roles: rolesAtSubmit,
+        });
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(`Invite sent to ${emailAtSubmit}`);
+        setEmail("");
+        setFullName("");
+        setSelectedRoles(["viewer"]);
+        setShowInvite(false);
+        setMembers((prev) => [
+          ...prev,
+          {
+            id: `pending-${Date.now()}`,
+            full_name: nameAtSubmit,
+            email: emailAtSubmit,
+            role: rolesAtSubmit[0],
+            roles: rolesAtSubmit,
+            is_active: true,
+            phone: null,
+            last_sign_in_at: null,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } catch (err) {
+        // Safety net: if the server action somehow threw instead of returning
+        // `{ error }` (e.g. a redeployment with an older bundle), surface a
+        // toast here so the app doesn't crash into the dashboard error
+        // boundary with the unhelpful "unexpected response" message.
+        console.error("[UsersManagement:invite] unexpected error:", err);
+        toast.error(
+          err instanceof Error ? err.message : "Failed to send invite. Try again.",
+        );
       }
-      toast.success(`Invite sent to ${email}`);
-      setEmail("");
-      setFullName("");
-      setSelectedRoles(["viewer"]);
-      setShowInvite(false);
-      setMembers((prev) => [
-        ...prev,
-        {
-          id: `pending-${Date.now()}`,
-          full_name: fullName.trim(),
-          email: email.trim(),
-          role: selectedRoles[0],
-          roles: selectedRoles,
-          is_active: true,
-          phone: null,
-          last_sign_in_at: null,
-          created_at: new Date().toISOString(),
-        },
-      ]);
     });
   }
 
@@ -165,11 +182,20 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
   function handleResend(member: TeamMember) {
     if (!member.email) return;
     setBusyId(member.id);
+    const emailForToast = member.email;
     startTransition(async () => {
-      const res = await resendInvite(member.email!);
-      setBusyId(null);
-      if (res.error) toast.error(res.error);
-      else toast.success(`Invite resent to ${member.email}`);
+      try {
+        const res = await resendInvite(emailForToast);
+        if (res.error) toast.error(res.error);
+        else toast.success(`Invite resent to ${emailForToast}`);
+      } catch (err) {
+        console.error("[UsersManagement:resend] unexpected error:", err);
+        toast.error(
+          err instanceof Error ? err.message : "Failed to resend invite.",
+        );
+      } finally {
+        setBusyId(null);
+      }
     });
   }
 
