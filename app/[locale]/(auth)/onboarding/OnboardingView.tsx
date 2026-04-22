@@ -17,7 +17,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createOrganization } from "./actions";
-import { logoutAction } from "../actions";
+
+// Fast, fire-and-forget logout — hard-nav to /login immediately,
+// clear the session in the background via the JSON API route. Same
+// pattern UserMenu uses.
+function doLogout() {
+  try {
+    fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+  } catch {
+    // Ignore — we're navigating away anyway.
+  }
+  window.location.assign("/login");
+}
 
 // ── Role options ─────────────────────────────────────────────────────────────
 
@@ -129,7 +140,7 @@ export function OnboardingView({ userName }: Props) {
 
         <div className="mt-6 text-center">
           <button
-            onClick={() => logoutAction()}
+            onClick={() => doLogout()}
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             Sign out
@@ -176,7 +187,7 @@ export function OnboardingView({ userName }: Props) {
           <Button variant="outline" onClick={() => setView("choose")}>
             Go Back
           </Button>
-          <Button variant="outline" onClick={() => logoutAction()}>
+          <Button variant="outline" onClick={() => doLogout()}>
             Sign Out
           </Button>
         </div>

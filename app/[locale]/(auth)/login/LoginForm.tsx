@@ -6,7 +6,7 @@
 // both this flow and the user-management flow; moving to JSON routes
 // made the error class go away everywhere we applied it.
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -29,7 +29,6 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export function LoginForm() {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [isPending, setIsPending] = useState(false);
 
@@ -53,6 +52,7 @@ export function LoginForm() {
 
   async function onSubmit(values: LoginFormValues) {
     setIsPending(true);
+    let shouldResetPending = true;
     try {
       let res: Response;
       try {
@@ -87,13 +87,22 @@ export function LoginForm() {
         return;
       }
 
-      // Refresh so server components re-read the newly-signed-in cookies,
-      // then push to dashboard. router.refresh() first ensures the
-      // dashboard's server-rendered tree sees the fresh session.
-      router.refresh();
-      router.push("/dashboard");
+      // Hard-navigate to /dashboard so the browser shows its own
+      // navigation indicator INSTANTLY (no waiting for RSC payload
+      // streaming). router.push would feel laggy because the URL only
+      // updates once the dashboard's server components finish
+      // rendering; window.location.assign fires the navigation
+      // immediately. The new request carries the freshly-set Supabase
+      // cookies, so /dashboard renders as the authed user without any
+      // refresh dance.
+      shouldResetPending = false;
+      window.location.assign("/dashboard");
     } finally {
-      setIsPending(false);
+      // Only clear pending on error paths — on success we're
+      // navigating away and resetting would flash the button from
+      // spinner back to "Log in" for a frame before the new page
+      // loads.
+      if (shouldResetPending) setIsPending(false);
     }
   }
 

@@ -34,8 +34,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { logoutAction } from "@/app/[locale]/(auth)/actions";
 import type { Profile } from "@/lib/types/database";
+
+// Fire-and-forget logout. Navigate to /login IMMEDIATELY with a hard
+// browser nav (window.location.assign) so the user sees the page
+// change instantly; the /api/auth/logout POST runs in the background
+// and clears the Supabase session. Worst case (API fails), the
+// cookies expire on their own and the next request is unauthenticated
+// anyway. This replaced a Server Action that was introducing a 500-
+// 1500ms blocking RSC round-trip between click and visible nav.
+function doLogout() {
+  try {
+    // Don't await — navigation happens on the next line.
+    fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+  } catch {
+    // Ignore — we're leaving anyway.
+  }
+  window.location.assign("/login");
+}
 
 interface UserMenuProps {
   profile: Profile | null;
@@ -130,7 +146,7 @@ export function UserMenu({
         {/* ── Logout ────────────────────────────────────────────────────── */}
         <DropdownMenuItem
           variant="destructive"
-          onClick={() => logoutAction()}
+          onClick={doLogout}
         >
           <LogOut />
           <span>{t("logout")}</span>
