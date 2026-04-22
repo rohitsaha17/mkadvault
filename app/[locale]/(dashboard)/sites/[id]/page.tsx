@@ -393,8 +393,6 @@ export default async function SiteDetailPage({ params }: Props) {
                   const counterparty = c.contract_type === "agency"
                     ? agencyMap.get(c.agency_id ?? "") ?? "Unknown Agency"
                     : landownerMap.get(c.landowner_id ?? "") ?? "Unknown Landowner";
-                  const counterpartyLink = c.contract_type === "agency"
-                    ? `/agencies/${c.agency_id}` : `/landowners/${c.landowner_id}`;
                   return (
                     <Link
                       key={c.id}
