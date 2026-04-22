@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
 import type { Client } from "@/lib/types/database";
 
 interface Props { existing?: Client }
@@ -225,7 +226,10 @@ export function ClientForm({ existing }: Props) {
               <Input {...register("billing_city")} placeholder="Mumbai" />
             </F>
             <F label="State" error={errors.billing_state?.message}>
-              <Input {...register("billing_state")} placeholder="Maharashtra" />
+              <IndianStateSelect
+                {...register("billing_state")}
+                error={!!errors.billing_state}
+              />
             </F>
             <F label="Pin Code" error={errors.billing_pin_code?.message}>
               <Input {...register("billing_pin_code")} placeholder="400001" />

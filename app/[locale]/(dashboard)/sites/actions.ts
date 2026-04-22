@@ -451,6 +451,166 @@ export async function deleteSitePhoto(
   return {};
 }
 
+// ─── createSitesFromImport ────────────────────────────────────────────────────
+// Bulk-create sites from the proposal-import review UI. Each row has been
+// reviewed and (potentially) edited by the user, so the data here is
+// treated as authoritative. For rows where the extractor attached an
+// image from storage (a path under "_imports/..."), we copy the blob to
+// the new site's permanent photo path and register it as the primary
+// photo.
+//
+// Returns the IDs of the sites actually created, plus the indices of
+// rows that were skipped due to validation errors — so the caller can
+// surface them to the user and let them retry individual rows.
+
+export interface ImportSiteInput {
+  name: string;
+  site_code?: string | null;
+  media_type: "billboard" | "hoarding" | "dooh" | "kiosk" | "wall_wrap" | "unipole" | "bus_shelter" | "custom";
+  structure_type: "permanent" | "temporary" | "digital";
+  address: string;
+  city: string;
+  state: string;
+  pincode?: string | null;
+  landmark?: string | null;
+  width_ft: number;
+  height_ft: number;
+  illumination: "frontlit" | "backlit" | "digital" | "nonlit";
+  facing?: "N" | "S" | "E" | "W" | "NE" | "NW" | "SE" | "SW" | null;
+  traffic_side: "lhs" | "rhs" | "both";
+  visibility_distance_m?: number | null;
+  base_rate_inr?: number | null;
+  notes?: string | null;
+  // Storage path under site-photos for the imported image. Null means no
+  // photo attached to this site.
+  image_storage_path?: string | null;
+}
+
+export interface ImportResult {
+  createdSiteIds: string[];
+  errors: { index: number; message: string }[];
+}
+
+export async function createSitesFromImport(
+  rows: ImportSiteInput[]
+): Promise<ImportResult | { error: string }> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("org_id")
+    .eq("id", user.id)
+    .single();
+  if (!profile?.org_id) return { error: "No organisation found" };
+  const orgId = profile.org_id as string;
+
+  const createdSiteIds: string[] = [];
+  const errors: { index: number; message: string }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+
+    // Only accept images that live under this org's `_imports/` prefix —
+    // prevents a crafted request from copying arbitrary storage files.
+    const safeImagePath =
+      row.image_storage_path && row.image_storage_path.startsWith(`${orgId}/_imports/`)
+        ? row.image_storage_path
+        : null;
+
+    const finalSiteCode = row.site_code?.trim()
+      ? row.site_code.trim()
+      : generateSiteCode(row.city);
+
+    const basePayload = {
+      organization_id: orgId,
+      created_by: user.id,
+      updated_by: user.id,
+      name: row.name,
+      site_code: finalSiteCode,
+      media_type: row.media_type,
+      structure_type: row.structure_type,
+      status: "available" as const,
+      address: row.address,
+      city: row.city,
+      state: row.state,
+      pincode: row.pincode ?? null,
+      landmark: row.landmark ?? null,
+      width_ft: row.width_ft,
+      height_ft: row.height_ft,
+      illumination: row.illumination,
+      facing: row.facing ?? null,
+      traffic_side: row.traffic_side,
+      visibility_distance_m: row.visibility_distance_m
+        ? Math.round(row.visibility_distance_m)
+        : null,
+      ownership_model: "rented" as const, // Import defaults to "rented" — user can change later
+      base_rate_paise:
+        typeof row.base_rate_inr === "number" ? Math.round(row.base_rate_inr * 100) : null,
+      notes: row.notes ?? null,
+    };
+
+    let insertRes = await supabase
+      .from("sites")
+      .insert(basePayload)
+      .select("id")
+      .single();
+
+    // Retry without the column if a deployment is pre-migration-021.
+    if (insertRes.error && isCustomDimensionsMissing(insertRes.error)) {
+      insertRes = await supabase.from("sites").insert(basePayload).select("id").single();
+    }
+
+    if (insertRes.error || !insertRes.data) {
+      errors.push({
+        index: i,
+        message:
+          insertRes.error?.code === "23505"
+            ? `Site code "${finalSiteCode}" already exists.`
+            : insertRes.error?.message ?? "Failed to create site.",
+      });
+      continue;
+    }
+
+    const newSiteId = insertRes.data.id as string;
+    createdSiteIds.push(newSiteId);
+
+    // Move the image from the _imports/ staging path to the site's
+    // permanent path. We use the admin client because the user's RLS
+    // insert policy on site_photos doesn't help with storage copies.
+    if (safeImagePath) {
+      const admin = createAdminClient();
+      const ext = safeImagePath.split(".").pop() ?? "png";
+      const finalPath = `${orgId}/${newSiteId}/${Date.now()}.${ext}`;
+      const { error: copyErr } = await admin.storage
+        .from("site-photos")
+        .copy(safeImagePath, finalPath);
+
+      if (copyErr) {
+        console.warn("[import] image copy failed", copyErr);
+      } else {
+        await admin.storage.from("site-photos").remove([safeImagePath]);
+        await supabase.from("site_photos").insert({
+          organization_id: orgId,
+          site_id: newSiteId,
+          created_by: user.id,
+          photo_url: finalPath,
+          photo_type: "day",
+          is_primary: true,
+          sort_order: 0,
+        });
+      }
+    }
+  }
+
+  revalidatePath("/sites");
+  return { createdSiteIds, errors };
+}
+
 // ─── setSitePrimaryPhoto ──────────────────────────────────────────────────────
 
 export async function setSitePrimaryPhoto(

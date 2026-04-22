@@ -2,6 +2,7 @@ import { setRequestLocale } from "next-intl/server";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
+import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { ProposalWizard } from "@/components/proposals/ProposalWizard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import type { Client, Organization, Proposal, ProposalSite } from "@/lib/types/database";
@@ -36,7 +37,7 @@ export default async function EditProposalPage({
     supabase.from("sites").select("id, site_code, name, media_type, status, city, state, address, width_ft, height_ft, total_sqft, base_rate_paise, illumination, facing, visibility_distance_m").is("deleted_at", null).order("city").order("name"),
     supabase.from("site_photos").select("site_id, photo_url").eq("is_primary", true),
     supabase.from("clients").select("id, company_name").is("deleted_at", null).order("company_name"),
-    supabase.from("organizations").select("name, address, city, state, pin_code, gstin, phone, email, logo_url").eq("id", profile.org_id).single(),
+    supabase.from("organizations").select("name, address, city, state, pin_code, gstin, phone, email, logo_url, proposal_terms_template").eq("id", profile.org_id).single(),
   ]);
 
   if (!proposalData) notFound();
@@ -44,14 +45,18 @@ export default async function EditProposalPage({
   const proposal = proposalData as unknown as Proposal;
   const existingSites = (proposalSitesData ?? []) as unknown as ProposalSite[];
 
-  // Convert bucket-relative paths to full public URLs so the PDF renderer
-  // and <img> previews can load them. See proposals/new/page.tsx for the
-  // full rationale (same fix).
-  const storagePublicBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/site-photos`;
+  // `site-photos` bucket is private — use signed URLs so the preview and
+  // PDF renderer can actually load them. See proposals/new/page.tsx for
+  // the same fix.
+  const paths = (photosData ?? [])
+    .map((p) => p.photo_url)
+    .filter((u): u is string => !!u && !/^https?:\/\//i.test(u));
+  const signedMap = await getSignedUrls("site-photos", paths);
   const photoMap = new Map<string, string>();
   for (const p of photosData ?? []) {
     const isAlreadyUrl = /^https?:\/\//i.test(p.photo_url);
-    photoMap.set(p.site_id, isAlreadyUrl ? p.photo_url : `${storagePublicBase}/${p.photo_url}`);
+    const resolved = isAlreadyUrl ? p.photo_url : signedMap[p.photo_url];
+    if (resolved) photoMap.set(p.site_id, resolved);
   }
 
   const sites: SiteForProposal[] = (sitesData ?? []).map((s) => ({
@@ -74,7 +79,24 @@ export default async function EditProposalPage({
   }));
 
   const clients = (clientsData ?? []) as Pick<Client, "id" | "company_name">[];
-  const org = orgData as (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
+  const orgRaw = orgData as
+    | (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email">
+        & { logo_url?: string | null; proposal_terms_template?: string | null })
+    | null;
+  const org = orgRaw
+    ? {
+        name: orgRaw.name,
+        address: orgRaw.address,
+        city: orgRaw.city,
+        state: orgRaw.state,
+        pin_code: orgRaw.pin_code,
+        gstin: orgRaw.gstin,
+        phone: orgRaw.phone,
+        email: orgRaw.email,
+        logo_url: orgRaw.logo_url ?? null,
+      }
+    : null;
+  const orgTermsTemplate = orgRaw?.proposal_terms_template ?? null;
 
   return (
     <div className="space-y-6">
@@ -87,6 +109,7 @@ export default async function EditProposalPage({
         sites={sites}
         clients={clients}
         org={org}
+        orgTermsTemplate={orgTermsTemplate}
         existingProposal={proposal}
         existingSites={existingSites}
         editProposalId={id}

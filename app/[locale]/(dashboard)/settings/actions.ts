@@ -61,6 +61,9 @@ export async function updateOrganization(data: {
   pan?: string;
   phone?: string;
   email?: string;
+  // Org-wide default text for proposal / rate-card Terms & Conditions.
+  // Empty string clears the template.
+  proposal_terms_template?: string;
 }): Promise<{ error?: string }> {
   const supabase = await createClient();
 
@@ -78,13 +81,22 @@ export async function updateOrganization(data: {
     return { error: "Only admins can update organization settings" };
   }
 
+  // Normalize the terms template — store null when blank so the wizard's
+  // "no template yet" branch fires cleanly.
+  const payload: Record<string, unknown> = { ...data };
+  if ("proposal_terms_template" in payload) {
+    const trimmed = (payload.proposal_terms_template as string | undefined)?.trim() ?? "";
+    payload.proposal_terms_template = trimmed === "" ? null : trimmed;
+  }
+
   const { error } = await supabase
     .from("organizations")
-    .update(data)
+    .update(payload)
     .eq("id", profile.org_id);
 
   if (error) return { error: error.message };
   revalidatePath("/settings");
+  revalidatePath("/proposals");
   return {};
 }
 

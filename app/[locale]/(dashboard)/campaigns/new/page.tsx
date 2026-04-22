@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { CampaignForm } from "@/components/campaigns/CampaignForm";
 import { PageHeader } from "@/components/shared/PageHeader";
-import type { Client, Site } from "@/lib/types/database";
+import type { Client, Site, PartnerAgency } from "@/lib/types/database";
 
 export const metadata = { title: "New Campaign" };
 
@@ -25,7 +25,12 @@ export default async function NewCampaignPage({
 
   const supabase = await createClient();
 
-  const [{ data: clientsData }, { data: sitesData }, { data: preselectedSiteData }] = await Promise.all([
+  const [
+    { data: clientsData },
+    { data: sitesData },
+    { data: preselectedSiteData },
+    { data: agenciesData },
+  ] = await Promise.all([
     supabase
       .from("clients")
       .select("id, company_name, brand_name")
@@ -45,9 +50,17 @@ export default async function NewCampaignPage({
           .is("deleted_at", null)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // Partner agencies — used by the Bill To selector so users can pick
+    // which agency is billed (or earns a commission) on this campaign.
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .is("deleted_at", null)
+      .order("agency_name"),
   ]);
 
   const clients = (clientsData ?? []) as unknown as Pick<Client, "id" | "company_name" | "brand_name">[];
+  const agencies = (agenciesData ?? []) as unknown as Pick<PartnerAgency, "id" | "agency_name">[];
   const availableSites = (sitesData ?? []) as unknown as Pick<Site, "id" | "site_code" | "name" | "city" | "base_rate_paise" | "total_sqft" | "media_type">[];
   const preselectedSite = preselectedSiteData as unknown as
     Pick<Site, "id" | "site_code" | "name" | "city" | "base_rate_paise" | "total_sqft" | "media_type">
@@ -75,6 +88,7 @@ export default async function NewCampaignPage({
       />
       <CampaignForm
         clients={clients}
+        agencies={agencies}
         sites={sites}
         preselectedClientId={client_id}
         preselectedSiteId={preselectedSite?.id}

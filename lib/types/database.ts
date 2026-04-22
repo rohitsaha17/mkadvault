@@ -51,6 +51,9 @@ export interface Organization {
   logo_url: string | null;
   settings: Record<string, unknown>;
   subscription_tier: SubscriptionTier;
+  // Org-wide default text pre-filled into the Terms & Conditions section
+  // of proposals and rate cards. Null/empty means no template set.
+  proposal_terms_template: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -267,6 +270,29 @@ export interface Contract {
 
   status: ContractStatus;
   contract_document_url: string | null;
+  // Counter-signed copy of the agreement (once both parties have executed).
+  signed_document_url: string | null;
+  // Free-form T&C clauses ({title, content}[]). Added in migration 025.
+  terms_clauses: { title: string; content: string }[];
+  notes: string | null;
+}
+
+export interface SignedAgreement {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+  title: string;
+  counterparty_type: "landowner" | "agency" | "client" | "other" | null;
+  landowner_id: string | null;
+  agency_id: string | null;
+  client_id: string | null;
+  site_id: string | null;
+  agreement_date: string | null;
+  document_url: string;
   notes: string | null;
 }
 
@@ -392,7 +418,9 @@ export interface Campaign {
   deleted_at: string | null;
 
   campaign_code: string | null;
-  client_id: string;
+  // For 'client' and 'client_on_behalf_of_agency' modes: the billed client.
+  // For 'agency' mode: optional reference to the agency's end customer.
+  client_id: string | null;
   campaign_name: string;
 
   start_date: string | null;
@@ -402,6 +430,16 @@ export interface Campaign {
   total_value_paise: number | null;
   pricing_type: PricingType;
   notes: string | null;
+
+  // ── Billing model (migration 024) ───────────────────────────────────────
+  billing_party_type: "client" | "agency" | "client_on_behalf_of_agency";
+  // Required when billing_party_type !== 'client'. null for direct-client deals.
+  billed_agency_id: string | null;
+  // Commission owed to the agency. Only populated for
+  // 'client_on_behalf_of_agency'. Percentage and fixed-paise are alternatives —
+  // app layer picks whichever is non-null (fixed wins if both are set).
+  agency_commission_percentage: number | null;
+  agency_commission_paise: number | null;
 }
 
 export type CampaignInsert = Omit<Campaign, "id" | "created_at" | "updated_at"> & { id?: string };

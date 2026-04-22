@@ -244,6 +244,31 @@ export async function duplicateProposal(id: string): Promise<{ error?: string; i
   return { id: copy.id };
 }
 
+// ─── Org-wide T&C template ───────────────────────────────────────────────────
+// Save the current textarea contents as this organization's default terms.
+// Next time someone opens the wizard with a blank terms_text, we pre-fill
+// from this column. Set to null/empty to clear the template.
+
+export async function saveOrgProposalTermsTemplate(
+  termsText: string,
+): Promise<{ error?: string }> {
+  const ctx = await getCtx();
+  if (!ctx) return { error: "Not authenticated" };
+
+  const trimmed = termsText.trim();
+  const { error } = await ctx.supabase
+    .from("organizations")
+    .update({ proposal_terms_template: trimmed === "" ? null : trimmed })
+    .eq("id", ctx.orgId);
+
+  if (error) return { error: error.message };
+  // Any page that reads the template (proposal new/edit + settings)
+  // should see the new default on next render.
+  revalidatePath("/proposals");
+  revalidatePath("/settings");
+  return {};
+}
+
 // ─── Update Status ────────────────────────────────────────────────────────────
 
 export async function updateProposalStatus(id: string, status: ProposalStatus): Promise<{ error?: string }> {

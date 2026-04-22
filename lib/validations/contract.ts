@@ -33,6 +33,17 @@ export const contractSchema = z.object({
   early_termination_clause: z.string().optional(),
 
   notes: z.string().optional(),
+
+  // Free-form T&C clauses — stored as JSONB on the contract row. Each clause
+  // is a titled paragraph. Order is preserved by array index.
+  terms_clauses: z
+    .array(
+      z.object({
+        title: z.string().min(1, "Clause title required").max(200),
+        content: z.string().min(1, "Clause content required"),
+      }),
+    )
+    .optional(),
 }).refine((d) => {
   if (d.contract_type === "landowner" && !d.landowner_id) return false;
   if (d.contract_type === "agency" && !d.agency_id) return false;
@@ -60,3 +71,17 @@ export const recordPaymentSchema = z.object({
 });
 
 export type RecordPaymentValues = z.infer<typeof recordPaymentSchema>;
+
+// Schema for a standalone signed agreement (not linked to a full contract)
+export const signedAgreementSchema = z.object({
+  title: z.string().min(1, "Title is required").max(200),
+  counterparty_type: z.enum(["landowner", "agency", "client", "other"]).optional(),
+  landowner_id: z.string().uuid().optional(),
+  agency_id: z.string().uuid().optional(),
+  client_id: z.string().uuid().optional(),
+  site_id: z.string().uuid().optional(),
+  agreement_date: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+export type SignedAgreementValues = z.infer<typeof signedAgreementSchema>;

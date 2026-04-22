@@ -2,6 +2,7 @@ import { setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
+import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { ProposalWizard } from "@/components/proposals/ProposalWizard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import type { Client, Organization } from "@/lib/types/database";
@@ -67,26 +68,27 @@ export default async function NewProposalPage({
       .order("company_name"),
     supabase
       .from("organizations")
-      .select("name, address, city, state, pin_code, gstin, phone, email, logo_url")
+      .select("name, address, city, state, pin_code, gstin, phone, email, logo_url, proposal_terms_template")
       .eq("id", profile.org_id)
       .single(),
   ]);
 
-  // Build photo map (site_id → full public URL).
+  // Build photo map (site_id → signed URL).
   //
-  // IMPORTANT: site_photos.photo_url stores a bucket-relative path
-  // (e.g. "{org_id}/{site_id}/{ts}.jpg"). The PDF renderer
-  // (@react-pdf/renderer) and the <img> preview both need a real URL.
-  // Passing the raw path caused the PDF document to throw on mount, which
-  // crashed Step 3 ("Preview & Export") with the generic "This page
-  // couldn't load" error — particularly visible when generating the rate
-  // card because it pre-selects every site (more images, more chances to
-  // fail).
-  const storagePublicBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/site-photos`;
+  // site_photos.photo_url stores a bucket-relative path like
+  // "{org_id}/{site_id}/{ts}.jpg". The `site-photos` bucket is PRIVATE
+  // (see migration 023), so we can't use the public-URL constructor —
+  // those requests 403. We mint short-lived signed URLs here so the
+  // preview `<img>` and the @react-pdf/renderer document can load them.
+  const paths = (photosData ?? [])
+    .map((p) => p.photo_url)
+    .filter((u): u is string => !!u && !/^https?:\/\//i.test(u));
+  const signedMap = await getSignedUrls("site-photos", paths);
   const photoMap = new Map<string, string>();
   for (const p of photosData ?? []) {
     const isAlreadyUrl = /^https?:\/\//i.test(p.photo_url);
-    photoMap.set(p.site_id, isAlreadyUrl ? p.photo_url : `${storagePublicBase}/${p.photo_url}`);
+    const resolved = isAlreadyUrl ? p.photo_url : signedMap[p.photo_url];
+    if (resolved) photoMap.set(p.site_id, resolved);
   }
 
   const sites: SiteForProposal[] = (sitesData ?? []).map((s) => ({
@@ -109,7 +111,24 @@ export default async function NewProposalPage({
   }));
 
   const clients = (clientsData ?? []) as Pick<Client, "id" | "company_name">[];
-  const org = orgData as (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
+  const orgRaw = orgData as
+    | (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email">
+        & { logo_url?: string | null; proposal_terms_template?: string | null })
+    | null;
+  const org = orgRaw
+    ? {
+        name: orgRaw.name,
+        address: orgRaw.address,
+        city: orgRaw.city,
+        state: orgRaw.state,
+        pin_code: orgRaw.pin_code,
+        gstin: orgRaw.gstin,
+        phone: orgRaw.phone,
+        email: orgRaw.email,
+        logo_url: orgRaw.logo_url ?? null,
+      }
+    : null;
+  const orgTermsTemplate = orgRaw?.proposal_terms_template ?? null;
 
   // Rate card mode: pre-select all available sites
   const preselectedSiteIds = mode === "rate_card"
@@ -131,6 +150,7 @@ export default async function NewProposalPage({
         sites={sites}
         clients={clients}
         org={org}
+        orgTermsTemplate={orgTermsTemplate}
         preselectedSiteIds={preselectedSiteIds}
         isRateCard={mode === "rate_card"}
       />

@@ -20,6 +20,7 @@ import type { Site, SitePhoto } from "@/lib/types/database";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { SitePhotoGallery } from "@/components/sites/SitePhotoGallery";
+import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { DeleteSiteButton } from "@/components/sites/DeleteSiteButton";
 import { format } from "date-fns";
 
@@ -116,8 +117,12 @@ export default async function SiteDetailPage({ params }: Props) {
   const landownerMap = new Map((landownersResult.data ?? []).map(l => [l.id, l.full_name]));
   const agencyMap = new Map((agenciesResult.data ?? []).map(a => [a.id, a.agency_name]));
 
-  // Supabase Storage base URL for photo URLs
-  const storageBaseUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public`;
+  // site-photos is a PRIVATE bucket — generate short-lived signed URLs for
+  // each photo so the browser can fetch them. Map is {storagePath → signedUrl}.
+  const photoSignedUrls = await getSignedUrls(
+    "site-photos",
+    photos.map((p) => p.photo_url),
+  );
 
   const mediaTypeLabel = site.media_type?.replace(/_/g, " ") ?? "—";
   const ownershipLabel = site.ownership_model ?? "—";
@@ -163,7 +168,7 @@ export default async function SiteDetailPage({ params }: Props) {
             <SitePhotoGallery
               siteId={id}
               photos={photos}
-              storageBaseUrl={storageBaseUrl}
+              signedUrls={photoSignedUrls}
             />
           </Section>
 

@@ -171,7 +171,7 @@ export default async function CampaignDetailPage({
           <CampaignDetailActions
             campaignId={id}
             campaignStatus={campaign.status}
-            clientId={campaign.client_id}
+            clientId={campaign.client_id ?? ""}
             currentEndDate={campaign.end_date}
           />
           {/* Direct edit for early stages; change request for confirmed+ */}

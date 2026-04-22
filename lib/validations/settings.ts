@@ -53,6 +53,14 @@ export const orgSettingsSchema = z.object({
     .regex(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, "Invalid PAN format (e.g. AABCU9603R)")
     .optional()
     .or(z.literal("")),
+  // Default T&C used by the proposal / rate-card wizard. Optional — users
+  // can set it here or via the "Save as organization default" button in
+  // the wizard. No length cap beyond a sane upper bound.
+  proposal_terms_template: z
+    .string()
+    .max(10000, "Terms are too long — keep under 10,000 characters")
+    .optional()
+    .or(z.literal("")),
 });
 
 export type OrgSettingsFormValues = z.infer<typeof orgSettingsSchema>;

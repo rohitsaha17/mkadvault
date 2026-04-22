@@ -5,7 +5,7 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { CampaignEditForm } from "@/components/campaigns/CampaignEditForm";
 import { PageHeader } from "@/components/shared/PageHeader";
-import type { Campaign, Client } from "@/lib/types/database";
+import type { Campaign, Client, PartnerAgency } from "@/lib/types/database";
 
 export const metadata = { title: "Edit Campaign" };
 
@@ -19,7 +19,7 @@ export default async function EditCampaignPage({
 
   const supabase = await createClient();
 
-  const [{ data: campData }, { data: clientsData }] = await Promise.all([
+  const [{ data: campData }, { data: clientsData }, { data: agenciesData }] = await Promise.all([
     supabase
       .from("campaigns")
       .select("*")
@@ -31,12 +31,18 @@ export default async function EditCampaignPage({
       .select("id, company_name, brand_name")
       .is("deleted_at", null)
       .order("company_name"),
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .is("deleted_at", null)
+      .order("agency_name"),
   ]);
 
   if (!campData) notFound();
 
   const campaign = campData as unknown as Campaign;
   const clients = (clientsData ?? []) as unknown as Pick<Client, "id" | "company_name" | "brand_name">[];
+  const agencies = (agenciesData ?? []) as unknown as Pick<PartnerAgency, "id" | "agency_name">[];
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -52,7 +58,7 @@ export default async function EditCampaignPage({
         title="Edit Campaign"
         description="Update campaign basics. To add/remove sites, use the campaign detail page."
       />
-      <CampaignEditForm existing={campaign} clients={clients} />
+      <CampaignEditForm existing={campaign} clients={clients} agencies={agencies} />
     </div>
   );
 }

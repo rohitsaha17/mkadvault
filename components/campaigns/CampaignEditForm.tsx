@@ -13,11 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { DurationSelector } from "@/components/shared/DurationSelector";
-import type { Campaign, Client } from "@/lib/types/database";
+import type { Campaign, Client, PartnerAgency } from "@/lib/types/database";
 
 interface Props {
   existing: Campaign;
   clients: Pick<Client, "id" | "company_name" | "brand_name">[];
+  agencies: Pick<PartnerAgency, "id" | "agency_name">[];
 }
 
 function F({ label, error, children, required }: {
@@ -48,7 +49,45 @@ function NativeSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   );
 }
 
-export function CampaignEditForm({ existing, clients }: Props) {
+// Same radio-card pattern used in CampaignForm — kept local so the two forms
+// can evolve independently without a shared component contract.
+function BillingModeOption({
+  value, current, title, desc, register,
+}: {
+  value: "client" | "agency" | "client_on_behalf_of_agency";
+  current: string | undefined;
+  title: string;
+  desc: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  register: any;
+}) {
+  const selected = current === value;
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer flex-col rounded-lg border p-3 text-sm transition",
+        selected
+          ? "border-primary bg-primary/5 ring-1 ring-primary"
+          : "border-border hover:border-primary/40 hover:bg-muted/40",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <input
+          type="radio"
+          value={value}
+          {...register("billing_party_type")}
+          className="mt-0.5 accent-primary"
+        />
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">{title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground leading-snug">{desc}</p>
+        </div>
+      </div>
+    </label>
+  );
+}
+
+export function CampaignEditForm({ existing, clients, agencies }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -56,7 +95,15 @@ export function CampaignEditForm({ existing, clients }: Props) {
     resolver: zodResolver(campaignBasicsSchema),
     defaultValues: {
       campaign_name: existing.campaign_name,
-      client_id: existing.client_id,
+      billing_party_type: existing.billing_party_type ?? "client",
+      client_id: existing.client_id ?? "",
+      billed_agency_id: existing.billed_agency_id ?? "",
+      agency_commission_percentage:
+        existing.agency_commission_percentage ?? undefined,
+      agency_commission_inr:
+        existing.agency_commission_paise != null
+          ? existing.agency_commission_paise / 100
+          : undefined,
       start_date: existing.start_date ?? "",
       end_date: existing.end_date ?? "",
       pricing_type: existing.pricing_type,
@@ -66,6 +113,7 @@ export function CampaignEditForm({ existing, clients }: Props) {
   });
 
   const pricingType = watch("pricing_type");
+  const billingType = watch("billing_party_type");
 
   function onSubmit(values: CampaignBasicsValues) {
     startTransition(async () => {
@@ -86,8 +134,46 @@ export function CampaignEditForm({ existing, clients }: Props) {
           className={cn(errors.campaign_name && "border-destructive focus-visible:ring-destructive/40")}
         />
       </F>
-      <F label="Client" error={errors.client_id?.message} required>
-        <NativeSelect {...register("client_id")} className={cn(errors.client_id && "border-destructive focus-visible:ring-destructive/40")}>
+
+      {/* Bill To — three modes. See CampaignForm.tsx / migration 024. */}
+      <div className="space-y-3">
+        <Label className="text-sm font-medium text-foreground">
+          Bill To <span className="text-destructive ml-0.5">*</span>
+        </Label>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <BillingModeOption
+            value="client"
+            current={billingType}
+            title="Client (direct)"
+            desc="Invoice the client. No agency involved."
+            register={register}
+          />
+          <BillingModeOption
+            value="agency"
+            current={billingType}
+            title="Agency (direct)"
+            desc="Invoice the agency. Client is optional — reference only."
+            register={register}
+          />
+          <BillingModeOption
+            value="client_on_behalf_of_agency"
+            current={billingType}
+            title="Client, agency commission"
+            desc="Invoice the client; pay the agency a commission separately."
+            register={register}
+          />
+        </div>
+      </div>
+
+      <F
+        label={billingType === "agency" ? "End Client (optional)" : "Client"}
+        error={errors.client_id?.message}
+        required={billingType !== "agency"}
+      >
+        <NativeSelect
+          {...register("client_id")}
+          className={cn(errors.client_id && "border-destructive focus-visible:ring-destructive/40")}
+        >
           <option value="">Select a client…</option>
           {clients.map((c) => (
             <option key={c.id} value={c.id}>
@@ -96,6 +182,52 @@ export function CampaignEditForm({ existing, clients }: Props) {
           ))}
         </NativeSelect>
       </F>
+
+      {(billingType === "agency" || billingType === "client_on_behalf_of_agency") && (
+        <F
+          label={billingType === "agency" ? "Billed Agency" : "Agency (earns commission)"}
+          error={errors.billed_agency_id?.message}
+          required
+        >
+          <NativeSelect
+            {...register("billed_agency_id")}
+            className={cn(errors.billed_agency_id && "border-destructive focus-visible:ring-destructive/40")}
+          >
+            <option value="">Select an agency…</option>
+            {agencies.map((a) => (
+              <option key={a.id} value={a.id}>{a.agency_name}</option>
+            ))}
+          </NativeSelect>
+        </F>
+      )}
+
+      {billingType === "client_on_behalf_of_agency" && (
+        <div className="grid grid-cols-2 gap-4 p-3 rounded-lg border border-dashed border-border bg-muted/30">
+          <F label="Commission %" error={errors.agency_commission_percentage?.message}>
+            <Input
+              {...register("agency_commission_percentage", { valueAsNumber: true })}
+              type="number"
+              step="0.01"
+              min={0}
+              max={100}
+              placeholder="e.g. 15"
+            />
+          </F>
+          <F label="or Fixed Commission (₹)" error={errors.agency_commission_inr?.message}>
+            <Input
+              {...register("agency_commission_inr", { valueAsNumber: true })}
+              type="number"
+              step="0.01"
+              min={0}
+              placeholder="0.00"
+            />
+          </F>
+          <p className="text-xs text-muted-foreground col-span-2 -mt-1">
+            Enter a percentage, OR a flat rupee amount. Fixed wins if both are set.
+          </p>
+        </div>
+      )}
+
       <DurationSelector
         startDate={watch("start_date") ?? ""}
         endDate={watch("end_date") ?? ""}

@@ -1,5 +1,13 @@
 "use client";
-// PPTX export using pptxgenjs — browser-side only, no SSR needed
+// PPTX export using pptxgenjs — browser-side only, no SSR needed.
+//
+// Image handling: we fetch each site photo ourselves and convert it to a
+// base64 data URI *before* calling pptxgenjs.addImage. This guarantees the
+// image bytes are actually embedded in the downloaded .pptx file.
+// Otherwise, pptxgenjs tries to fetch the signed URL at write-time and a
+// network hiccup, CORS glitch, or URL expiry silently drops the photo —
+// which is what was happening when the user reported "image is still not
+// getting stored".
 import { useState } from "react";
 import { Loader2, Presentation } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,6 +39,25 @@ function displayRate(paise: number | null, showRates: string): string {
   return inr(paise);
 }
 
+// Fetch a remote image and return it as a base64 data URI so pptxgenjs
+// can embed the bytes directly. Returns null on failure so the slide
+// falls back to a placeholder instead of crashing the whole export.
+async function urlToDataUri(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
   const [loading, setLoading] = useState(false);
 
@@ -40,6 +67,20 @@ export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
       // Dynamic import so pptxgenjs is never bundled server-side
       const pptxgenjs = (await import("pptxgenjs")).default;
       const prs = new pptxgenjs();
+
+      // Pre-fetch every photo in parallel and convert to data URIs.
+      // Doing this up-front (rather than at addImage time) means a slow
+      // image never blocks slide layout and a failed image doesn't abort
+      // the whole PPTX build.
+      const photoUrls = sites
+        .map((s) => s.primary_photo_url)
+        .filter((u): u is string => !!u);
+      const photoData = await Promise.all(photoUrls.map(urlToDataUri));
+      const photoDataByUrl = new Map<string, string>();
+      photoUrls.forEach((url, i) => {
+        const data = photoData[i];
+        if (data) photoDataByUrl.set(url, data);
+      });
 
       prs.layout = "LAYOUT_WIDE";
       prs.title = proposal.proposal_name;
@@ -104,22 +145,29 @@ export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
           fontSize: 10, color: "64748b", fontFace: "Calibri",
         });
 
-        // Photo (if available)
-        if (proposal.show_photos && site.primary_photo_url) {
-          try {
-            slide.addImage({
-              path: site.primary_photo_url,
-              x: 0.4, y: 1.35, w: 5.5, h: 3.5,
-              sizing: { type: "contain", w: 5.5, h: 3.5 },
-            });
-          } catch {
-            // Photo load failed — skip silently
-          }
+        // Photo (if available). We embed the pre-fetched base64 data URI
+        // so the image is permanently inside the .pptx file — not a URL
+        // reference that could 404 later when the signed URL expires.
+        //
+        // LAYOUT_WIDE slide is 13.333" × 7.5". Image dominates the left
+        // two-thirds (8.4" × 5.3") so the site really lands for the
+        // viewer. Details column sits on the right in the remaining 4".
+        const photoData = site.primary_photo_url
+          ? photoDataByUrl.get(site.primary_photo_url)
+          : null;
+        const hasPhoto = proposal.show_photos && !!photoData;
+
+        if (hasPhoto && photoData) {
+          slide.addImage({
+            data: photoData,
+            x: 0.4, y: 1.35, w: 8.4, h: 5.3,
+            sizing: { type: "contain", w: 8.4, h: 5.3 },
+          });
         }
 
-        // Details box (right side)
-        const detailX = proposal.show_photos && site.primary_photo_url ? 6.2 : 0.4;
-        const detailW = proposal.show_photos && site.primary_photo_url ? 6 : 12;
+        // Details box (right side when photo present, full-width otherwise)
+        const detailX = hasPhoto ? 9.1 : 0.4;
+        const detailW = hasPhoto ? 3.9 : 12;
 
         const details: { label: string; value: string }[] = [
           { label: "Media Type", value: site.media_type?.replace(/_/g, " ") ?? "—" },
@@ -141,14 +189,14 @@ export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
         }
 
         details.forEach((d, i) => {
-          const yPos = 1.5 + i * 0.55;
+          const yPos = 1.5 + i * 0.65;
           slide.addText(d.label.toUpperCase(), {
-            x: detailX, y: yPos, w: detailW, h: 0.22,
-            fontSize: 7, color: "94a3b8", fontFace: "Calibri",
+            x: detailX, y: yPos, w: detailW, h: 0.25,
+            fontSize: 8, color: "94a3b8", fontFace: "Calibri",
           });
           slide.addText(d.value, {
-            x: detailX, y: yPos + 0.22, w: detailW, h: 0.28,
-            fontSize: 11, bold: true, color: "1e293b", fontFace: "Calibri",
+            x: detailX, y: yPos + 0.25, w: detailW, h: 0.35,
+            fontSize: 12, bold: true, color: "1e293b", fontFace: "Calibri",
           });
         });
 

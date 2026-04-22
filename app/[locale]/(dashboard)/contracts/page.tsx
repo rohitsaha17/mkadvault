@@ -14,7 +14,7 @@ import {
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { Plus, AlertTriangle, Pencil, FileText } from "lucide-react";
+import { Plus, AlertTriangle, Pencil, FileText, FileSignature } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { inr, fmt } from "@/lib/utils";
 import type { Contract, Landowner, PartnerAgency, Site } from "@/lib/types/database";
@@ -136,12 +136,20 @@ export default async function ContractsPage({
         title={t("title")}
         description={t("description")}
         actions={
-          <Link href="/contracts/new">
-            <Button size="sm" className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              New Contract
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/contracts/signed">
+              <Button size="sm" variant="outline" className="gap-1.5">
+                <FileSignature className="h-4 w-4" />
+                Signed agreements
+              </Button>
+            </Link>
+            <Link href="/contracts/new">
+              <Button size="sm" className="gap-1.5">
+                <Plus className="h-4 w-4" />
+                New Contract
+              </Button>
+            </Link>
+          </div>
         }
       />
 

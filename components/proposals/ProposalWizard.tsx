@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn, inr } from "@/lib/utils";
-import { createProposal, updateProposal } from "@/app/[locale]/(dashboard)/proposals/actions";
+import { createProposal, updateProposal, saveOrgProposalTermsTemplate } from "@/app/[locale]/(dashboard)/proposals/actions";
 import { ProposalExportButtons } from "./ProposalExportButtons";
+import { ImportFromFileDialog } from "./ImportFromFileDialog";
 import type { Proposal, ProposalSite, Client, Organization } from "@/lib/types/database";
 import type { SiteForProposal } from "@/app/[locale]/(dashboard)/proposals/new/page";
 
@@ -46,6 +47,10 @@ interface Props {
   sites: SiteForProposal[];
   clients: Pick<Client, "id" | "company_name">[];
   org: (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
+  // Org-wide T&C template (from organizations.proposal_terms_template).
+  // When a fresh proposal is opened with no existing terms, we pre-fill
+  // from this. Null/empty means the org hasn't set a default yet.
+  orgTermsTemplate?: string | null;
   preselectedSiteIds?: string[];
   isRateCard?: boolean;
   existingProposal?: Proposal;
@@ -88,6 +93,7 @@ export function ProposalWizard({
   sites,
   clients,
   org,
+  orgTermsTemplate = null,
   preselectedSiteIds = [],
   isRateCard = false,
   existingProposal,
@@ -96,9 +102,24 @@ export function ProposalWizard({
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [isSavingTemplate, startSaveTemplate] = useTransition();
   const [step, setStep] = useState(1);
 
   // ── Config state ────────────────────────────────────────────────────────────
+  // Defaults for T&C:
+  //   • editing an existing proposal → use its saved terms_text / include_terms
+  //   • brand-new proposal + org has a template → pre-fill from template and
+  //     turn the toggle on, so users don't have to re-enable + re-type
+  //   • brand-new proposal + no template → empty, toggle off
+  const orgTemplateText = (orgTermsTemplate ?? "").trim();
+  const hasOrgTemplate = orgTemplateText.length > 0;
+  const defaultTermsText = existingProposal
+    ? (existingProposal.terms_text ?? "")
+    : orgTemplateText;
+  const defaultIncludeTerms = existingProposal
+    ? (existingProposal.include_terms ?? false)
+    : hasOrgTemplate;
+
   const [config, setConfig] = useState<ProposalConfig>({
     proposal_name: existingProposal?.proposal_name ?? (isRateCard ? "Rate Card" : ""),
     client_id: existingProposal?.client_id ?? "",
@@ -111,13 +132,31 @@ export function ProposalWizard({
     show_traffic_info: existingProposal?.show_traffic_info ?? true,
     show_availability: existingProposal?.show_availability ?? true,
     include_company_branding: existingProposal?.include_company_branding ?? true,
-    include_terms: existingProposal?.include_terms ?? false,
-    terms_text: existingProposal?.terms_text ?? "",
+    include_terms: defaultIncludeTerms,
+    terms_text: defaultTermsText,
     include_contact_details: existingProposal?.include_contact_details ?? true,
     custom_header_text: existingProposal?.custom_header_text ?? "",
     custom_footer_text: existingProposal?.custom_footer_text ?? "",
     notes: existingProposal?.notes ?? "",
   });
+
+  // ── Save current terms as the organization default ──────────────────────────
+  function handleSaveTermsAsDefault() {
+    const text = config.terms_text.trim();
+    if (!text) {
+      toast.error("Enter some terms text first");
+      return;
+    }
+    startSaveTemplate(async () => {
+      const result = await saveOrgProposalTermsTemplate(text);
+      if (result.error) toast.error(result.error);
+      else toast.success("Saved as organization default");
+    });
+  }
+
+  function handleResetTermsToOrgDefault() {
+    setConfig((c) => ({ ...c, terms_text: orgTemplateText }));
+  }
 
   // ── Selected sites state ─────────────────────────────────────────────────────
   const [selectedSites, setSelectedSites] = useState<SelectedSiteRow[]>(() => {
@@ -271,6 +310,37 @@ export function ProposalWizard({
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Import-from-file row — lets a user upload another agency's
+              deck, have the AI extract sites, review, and create them
+              in-place. Newly-created site IDs are added to the selection;
+              router.refresh hydrates the sites list on the server. */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border/80 bg-muted/30 px-3 py-2">
+            <div className="text-xs text-muted-foreground">
+              Have a PDF / PPTX rate card from another agency? Pull its sites in automatically.
+            </div>
+            <ImportFromFileDialog
+              onDone={(newIds) => {
+                if (newIds.length === 0) return;
+                // Queue the new site IDs for the proposal — they'll show
+                // in the reorder list after router.refresh lands the
+                // freshly-created `sites` rows in the page's server data.
+                setSelectedSites((prev) => {
+                  const known = new Set(prev.map((s) => s.site_id));
+                  const additions = newIds
+                    .filter((id) => !known.has(id))
+                    .map((id, i) => ({
+                      site_id: id,
+                      custom_rate_paise: null,
+                      custom_notes: "",
+                      display_order: prev.length + i,
+                    }));
+                  return [...prev, ...additions];
+                });
+                router.refresh();
+              }}
+            />
           </div>
 
           {/* Filters */}
@@ -487,14 +557,44 @@ export function ProposalWizard({
             </div>
             {config.include_terms && (
               <div className="space-y-1">
-                <Label className="text-xs">Terms & Conditions</Label>
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="text-xs">Terms & Conditions</Label>
+                  <div className="flex items-center gap-2 text-xs">
+                    {hasOrgTemplate && config.terms_text !== orgTemplateText && (
+                      <button
+                        type="button"
+                        onClick={handleResetTermsToOrgDefault}
+                        className="text-muted-foreground hover:text-foreground underline"
+                      >
+                        Reset to org default
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSaveTermsAsDefault}
+                      disabled={isSavingTemplate}
+                      className="text-primary hover:underline disabled:opacity-60"
+                    >
+                      {isSavingTemplate ? "Saving…" : "Save as organization default"}
+                    </button>
+                  </div>
+                </div>
                 <textarea
                   value={config.terms_text}
                   onChange={(e) => setConfig((c) => ({ ...c, terms_text: e.target.value }))}
-                  rows={4}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none"
-                  placeholder="Enter terms and conditions text…"
+                  rows={6}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  placeholder={
+                    hasOrgTemplate
+                      ? "Edit the organization's default terms, or enter proposal-specific T&C…"
+                      : "Enter terms and conditions text. Click ‘Save as organization default’ to reuse this on future proposals."
+                  }
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  {hasOrgTemplate
+                    ? "Pre-filled from your organization template. Edits here apply to this proposal only unless you save as the default."
+                    : "No organization template yet. Save this text as the default and it will pre-fill future proposals and rate cards."}
+                </p>
               </div>
             )}
             <div className="space-y-1">

@@ -1,7 +1,11 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { contractSchema, recordPaymentSchema } from "@/lib/validations/contract";
+import {
+  contractSchema,
+  recordPaymentSchema,
+  signedAgreementSchema,
+} from "@/lib/validations/contract";
 import { addMonths, addYears, format } from "date-fns";
 
 type ActionResult = { error: string } | { success: true; id: string };
@@ -146,6 +150,9 @@ export async function createContract(values: unknown): Promise<ActionResult> {
       lock_period_months: num(d.lock_period_months),
       early_termination_clause: str(d.early_termination_clause),
       notes: str(d.notes),
+      terms_clauses: (d.terms_clauses ?? []).filter(
+        (c) => c.title.trim() && c.content.trim(),
+      ),
       status: "active",
     })
     .select("id")
@@ -206,6 +213,9 @@ export async function updateContract(id: string, values: unknown): Promise<Actio
       lock_period_months: num(d.lock_period_months),
       early_termination_clause: str(d.early_termination_clause),
       notes: str(d.notes),
+      terms_clauses: (d.terms_clauses ?? []).filter(
+        (c) => c.title.trim() && c.content.trim(),
+      ),
     })
     .eq("id", id);
 
@@ -304,4 +314,119 @@ export async function uploadContractDocument(
 
   revalidatePath(`/contracts/${contractId}`);
   return { url: path };
+}
+
+// ─── uploadSignedContract ─────────────────────────────────────────────────────
+// Uploads the counter-signed copy of the agreement. Stored alongside the
+// draft under "contracts/{org}/{contractId}/signed-{ts}.{ext}". Path is
+// saved to contracts.signed_document_url.
+export async function uploadSignedContract(
+  contractId: string,
+  formData: FormData,
+): Promise<{ error?: string; url?: string }> {
+  const ctx = await getOrgAndUser();
+  if (!ctx) return { error: "Not authenticated" };
+
+  const file = formData.get("file") as File | null;
+  if (!file) return { error: "No file provided" };
+  if (file.size > 10 * 1024 * 1024) return { error: "File too large. Max 10MB." };
+
+  const ext = file.name.split(".").pop() ?? "pdf";
+  const path = `${ctx.orgId}/${contractId}/signed-${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await ctx.supabase.storage
+    .from("contracts")
+    .upload(path, file, { upsert: true });
+  if (uploadError) return { error: uploadError.message };
+
+  const { error: dbError } = await ctx.supabase
+    .from("contracts")
+    .update({ signed_document_url: path, updated_by: ctx.user.id })
+    .eq("id", contractId);
+  if (dbError) return { error: dbError.message };
+
+  revalidatePath(`/contracts/${contractId}`);
+  return { url: path };
+}
+
+// ─── createSignedAgreement ────────────────────────────────────────────────────
+// Standalone signed agreements (no full contract). The caller uploads the
+// scanned file along with a title + optional counterparty/site references.
+// Stored at "contracts/{org}/signed-agreements/{uuid}.{ext}".
+export async function createSignedAgreement(
+  formData: FormData,
+): Promise<{ error?: string; id?: string }> {
+  const ctx = await getOrgAndUser();
+  if (!ctx) return { error: "Not authenticated" };
+
+  const file = formData.get("file") as File | null;
+  if (!file) return { error: "Please attach the signed agreement file" };
+  if (file.size > 10 * 1024 * 1024) return { error: "File too large. Max 10MB." };
+
+  // Build the validated fields from the form.
+  const raw = {
+    title: (formData.get("title") as string | null) ?? "",
+    counterparty_type:
+      (formData.get("counterparty_type") as string | null) || undefined,
+    landowner_id: (formData.get("landowner_id") as string | null) || undefined,
+    agency_id: (formData.get("agency_id") as string | null) || undefined,
+    client_id: (formData.get("client_id") as string | null) || undefined,
+    site_id: (formData.get("site_id") as string | null) || undefined,
+    agreement_date:
+      (formData.get("agreement_date") as string | null) || undefined,
+    notes: (formData.get("notes") as string | null) || undefined,
+  };
+  const parsed = signedAgreementSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const d = parsed.data;
+
+  // Upload file first. If the DB insert later fails the file is left orphaned
+  // but harmless — the bucket is private and scoped to the org folder.
+  const ext = file.name.split(".").pop() ?? "pdf";
+  const objectPath = `${ctx.orgId}/signed-agreements/${crypto.randomUUID()}.${ext}`;
+  const { error: uploadError } = await ctx.supabase.storage
+    .from("contracts")
+    .upload(objectPath, file, { upsert: false });
+  if (uploadError) return { error: uploadError.message };
+
+  const { data: row, error } = await ctx.supabase
+    .from("signed_agreements")
+    .insert({
+      organization_id: ctx.orgId,
+      created_by: ctx.user.id,
+      updated_by: ctx.user.id,
+      title: d.title.trim(),
+      counterparty_type: d.counterparty_type ?? null,
+      landowner_id: d.landowner_id ?? null,
+      agency_id: d.agency_id ?? null,
+      client_id: d.client_id ?? null,
+      site_id: d.site_id ?? null,
+      agreement_date: d.agreement_date || null,
+      document_url: objectPath,
+      notes: str(d.notes),
+    })
+    .select("id")
+    .single();
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/contracts");
+  revalidatePath("/contracts/signed");
+  return { id: row.id };
+}
+
+// ─── deleteSignedAgreement (soft) ─────────────────────────────────────────────
+export async function deleteSignedAgreement(
+  id: string,
+): Promise<{ error?: string }> {
+  const ctx = await getOrgAndUser();
+  if (!ctx) return { error: "Not authenticated" };
+
+  const { error } = await ctx.supabase
+    .from("signed_agreements")
+    .update({ deleted_at: new Date().toISOString(), updated_by: ctx.user.id })
+    .eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/contracts/signed");
+  return {};
 }

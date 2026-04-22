@@ -40,7 +40,7 @@ export default async function SettingsPage({
   const [orgResult, prefsResult] = await Promise.all([
     supabase
       .from("organizations")
-      .select("id, name, address, city, state, pin_code, gstin, pan, phone, email, logo_url")
+      .select("id, name, address, city, state, pin_code, gstin, pan, phone, email, logo_url, proposal_terms_template")
       .eq("id", profile.org_id!)
       .single(),
     supabase

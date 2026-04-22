@@ -23,7 +23,9 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "ckyzwkwuasawizrffqvc.supabase.co",
-        pathname: "/storage/v1/object/public/**",
+        // Covers both public object URLs and signed URLs (/object/sign/...)
+        // since our buckets are private and we use createSignedUrls().
+        pathname: "/storage/v1/object/**",
       },
     ],
     formats: ["image/avif", "image/webp"],

@@ -14,10 +14,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, inr } from "@/lib/utils";
 import { DurationSelector } from "@/components/shared/DurationSelector";
-import type { Client, Site } from "@/lib/types/database";
+import type { Client, Site, PartnerAgency } from "@/lib/types/database";
 
 interface Props {
   clients: Pick<Client, "id" | "company_name" | "brand_name">[];
+  // Partner agencies — lets the user bill an agency, or earn a commission on
+  // a client invoice for an agency that referred the business.
+  agencies: Pick<PartnerAgency, "id" | "agency_name">[];
   sites: Pick<Site, "id" | "site_code" | "name" | "city" | "base_rate_paise" | "total_sqft" | "media_type">[];
   preselectedClientId?: string;
   // When launching the form from a site page, pre-add this site to the sites
@@ -40,6 +43,49 @@ const SERVICE_TYPES = [
   { value: "transport", label: "Transport" },
   { value: "other", label: "Other" },
 ] as const;
+
+// Radio-card control for picking a billing mode. Rendered as a native radio
+// input wrapped in a styled <label> so the whole card is clickable and
+// keyboard-accessible out of the box.
+function BillingModeOption({
+  value,
+  current,
+  title,
+  desc,
+  register,
+}: {
+  value: "client" | "agency" | "client_on_behalf_of_agency";
+  current: string | undefined;
+  title: string;
+  desc: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  register: any;
+}) {
+  const selected = current === value;
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer flex-col rounded-lg border p-3 text-sm transition",
+        selected
+          ? "border-primary bg-primary/5 ring-1 ring-primary"
+          : "border-border hover:border-primary/40 hover:bg-muted/40",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <input
+          type="radio"
+          value={value}
+          {...register("billing_party_type")}
+          className="mt-0.5 accent-primary"
+        />
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">{title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground leading-snug">{desc}</p>
+        </div>
+      </div>
+    </label>
+  );
+}
 
 function F({ label, error, children, required }: {
   label: string; error?: string; children: React.ReactNode; required?: boolean;
@@ -87,7 +133,7 @@ function calcSiteTotal(rateInr: number, rateType: string, startDate?: string, en
   return rateInr; // fallback if no dates
 }
 
-export function CampaignForm({ clients, sites, preselectedClientId, preselectedSiteId }: Props) {
+export function CampaignForm({ clients, agencies, sites, preselectedClientId, preselectedSiteId }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isDraftPending, startDraftTransition] = useTransition();
@@ -99,7 +145,9 @@ export function CampaignForm({ clients, sites, preselectedClientId, preselectedS
     resolver: zodResolver(createCampaignSchema),
     defaultValues: {
       campaign_name: "",
+      billing_party_type: "client",
       client_id: preselectedClientId ?? "",
+      billed_agency_id: "",
       pricing_type: "itemized",
       // If launched from a site page, pre-add that site with its base rate as
       // the display rate so the booking flow starts with one row already.
@@ -188,6 +236,9 @@ export function CampaignForm({ clients, sites, preselectedClientId, preselectedS
   }
 
   const selectedClient = clients.find((c) => c.id === watchedClientId);
+  const watchedBillingType = watch("billing_party_type");
+  const watchedAgencyId = watch("billed_agency_id");
+  const selectedAgency = agencies.find((a) => a.id === watchedAgencyId);
 
   // Helper to get effective dates for a site entry
   function getSiteDates(idx: number): { start?: string; end?: string } {
@@ -239,16 +290,144 @@ export function CampaignForm({ clients, sites, preselectedClientId, preselectedS
               className={cn(errors.campaign_name && "border-destructive focus-visible:ring-destructive/40")}
             />
           </F>
-          <F label="Client" error={errors.client_id?.message} required>
-            <NativeSelect {...register("client_id")} className={cn(errors.client_id && "border-destructive focus-visible:ring-destructive/40")}>
-              <option value="">Select a client…</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.company_name}{c.brand_name ? ` — ${c.brand_name}` : ""}
-                </option>
-              ))}
-            </NativeSelect>
-          </F>
+          {/* ── Bill To ─────────────────────────────────────────────────────
+              Three billing modes (see migration 024):
+                1. Direct to Client              → client gets invoiced.
+                2. Direct to Agency              → agency gets invoiced; client is
+                                                   only a reference (the agency's
+                                                   end customer).
+                3. Client on Behalf of Agency    → client gets invoiced, agency
+                                                   earns a commission billed separately.
+              The radio selection shows/hides the fields below so the user
+              sees only what's relevant for the selected mode.
+          */}
+          <div className="space-y-3">
+            <Label className="text-sm font-medium text-foreground">
+              Bill To <span className="text-destructive ml-0.5">*</span>
+            </Label>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <BillingModeOption
+                value="client"
+                current={watchedBillingType}
+                title="Client (direct)"
+                desc="Invoice the client. No agency involved."
+                register={register}
+              />
+              <BillingModeOption
+                value="agency"
+                current={watchedBillingType}
+                title="Agency (direct)"
+                desc="Invoice the agency. Client is optional — used as reference only."
+                register={register}
+              />
+              <BillingModeOption
+                value="client_on_behalf_of_agency"
+                current={watchedBillingType}
+                title="Client, agency commission"
+                desc="Invoice the client; pay the agency a commission separately."
+                register={register}
+              />
+            </div>
+          </div>
+
+          {/* End client picker — shown for 'client' and 'client_on_behalf_of_agency'.
+              For 'agency' we still show it as OPTIONAL so users can record
+              which end customer the agency is serving, but it's not required. */}
+          {(watchedBillingType === "client" ||
+            watchedBillingType === "client_on_behalf_of_agency" ||
+            watchedBillingType === "agency") && (
+            <F
+              label={
+                watchedBillingType === "agency"
+                  ? "End Client (optional)"
+                  : "Client"
+              }
+              error={errors.client_id?.message}
+              required={watchedBillingType !== "agency"}
+            >
+              <NativeSelect
+                {...register("client_id")}
+                className={cn(errors.client_id && "border-destructive focus-visible:ring-destructive/40")}
+              >
+                <option value="">Select a client…</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.company_name}{c.brand_name ? ` — ${c.brand_name}` : ""}
+                  </option>
+                ))}
+              </NativeSelect>
+            </F>
+          )}
+
+          {/* Agency picker — shown for 'agency' and 'client_on_behalf_of_agency'. */}
+          {(watchedBillingType === "agency" ||
+            watchedBillingType === "client_on_behalf_of_agency") && (
+            <F
+              label={
+                watchedBillingType === "agency"
+                  ? "Billed Agency"
+                  : "Agency (earns commission)"
+              }
+              error={errors.billed_agency_id?.message}
+              required
+            >
+              <NativeSelect
+                {...register("billed_agency_id")}
+                className={cn(errors.billed_agency_id && "border-destructive focus-visible:ring-destructive/40")}
+              >
+                <option value="">Select an agency…</option>
+                {agencies.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.agency_name}
+                  </option>
+                ))}
+              </NativeSelect>
+              {agencies.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  No partner agencies yet. Add one from{" "}
+                  <a href="/agencies/new" className="underline">
+                    Agencies
+                  </a>
+                  .
+                </p>
+              )}
+            </F>
+          )}
+
+          {/* Commission fields — only for client_on_behalf_of_agency. */}
+          {watchedBillingType === "client_on_behalf_of_agency" && (
+            <div className="grid grid-cols-2 gap-4 p-3 rounded-lg border border-dashed border-border bg-muted/30">
+              <F
+                label="Commission %"
+                error={errors.agency_commission_percentage?.message}
+              >
+                <Input
+                  {...register("agency_commission_percentage", { valueAsNumber: true })}
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={100}
+                  placeholder="e.g. 15"
+                />
+              </F>
+              <F
+                label="or Fixed Commission (₹)"
+                error={errors.agency_commission_inr?.message}
+              >
+                <Input
+                  {...register("agency_commission_inr", { valueAsNumber: true })}
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  placeholder="0.00"
+                />
+              </F>
+              <p className="text-xs text-muted-foreground col-span-2 -mt-1">
+                Enter a percentage of the campaign value, OR a flat rupee amount.
+                If both are set, the fixed amount takes precedence.
+              </p>
+            </div>
+          )}
           <DurationSelector
             startDate={watch("start_date") ?? ""}
             endDate={watch("end_date") ?? ""}
@@ -623,8 +802,35 @@ export function CampaignForm({ clients, sites, preselectedClientId, preselectedS
                     <p className="font-medium text-foreground">{values.campaign_name || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Client</p>
-                    <p className="font-medium text-foreground">{selectedClient?.company_name ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground">Bill To</p>
+                    <p className="font-medium text-foreground">
+                      {values.billing_party_type === "client" && (
+                        <>Client — {selectedClient?.company_name ?? "—"}</>
+                      )}
+                      {values.billing_party_type === "agency" && (
+                        <>
+                          Agency — {selectedAgency?.agency_name ?? "—"}
+                          {selectedClient && (
+                            <span className="text-muted-foreground font-normal">
+                              {" "}(for {selectedClient.company_name})
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {values.billing_party_type === "client_on_behalf_of_agency" && (
+                        <>
+                          Client — {selectedClient?.company_name ?? "—"}
+                          <span className="block text-xs text-muted-foreground font-normal">
+                            Commission to {selectedAgency?.agency_name ?? "—"}
+                            {values.agency_commission_inr
+                              ? ` — ${inrAmount(values.agency_commission_inr)} fixed`
+                              : values.agency_commission_percentage
+                                ? ` — ${values.agency_commission_percentage}%`
+                                : ""}
+                          </span>
+                        </>
+                      )}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Dates</p>
@@ -717,10 +923,31 @@ export function CampaignForm({ clients, sites, preselectedClientId, preselectedS
             onClick={() => {
               // Validate current step before advancing
               if (step === 0) {
-                const name = getValues("campaign_name");
-                if (!name?.trim()) {
+                const vals = getValues();
+                if (!vals.campaign_name?.trim()) {
                   toast.error("Campaign name is required");
                   return;
+                }
+                // Billing-mode gatekeeping — match the server-side zod rules
+                // so users don't get to Step 2 and then fail on submit.
+                const bpt = vals.billing_party_type;
+                if (bpt === "client" && !vals.client_id) {
+                  toast.error("Select a client");
+                  return;
+                }
+                if (bpt === "agency" && !vals.billed_agency_id) {
+                  toast.error("Select the agency to bill");
+                  return;
+                }
+                if (bpt === "client_on_behalf_of_agency") {
+                  if (!vals.client_id) {
+                    toast.error("Select the end client");
+                    return;
+                  }
+                  if (!vals.billed_agency_id) {
+                    toast.error("Select the agency earning the commission");
+                    return;
+                  }
                 }
               }
               // Steps 1 (Sites) and 2 (Services) have no required validation

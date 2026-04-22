@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { updateOrganization } from "@/app/[locale]/(dashboard)/settings/actions";
 import { orgSettingsSchema, type OrgSettingsFormValues } from "@/lib/validations/settings";
+import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
 import type { Organization } from "@/lib/types/database";
 
 interface Props {
@@ -34,6 +35,7 @@ export function OrgSettingsForm({ org }: Props) {
       email: org.email ?? "",
       gstin: org.gstin ?? "",
       pan: org.pan ?? "",
+      proposal_terms_template: org.proposal_terms_template ?? "",
     },
   });
 
@@ -71,7 +73,7 @@ export function OrgSettingsForm({ org }: Props) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="state">State</Label>
-          <Input id="state" {...register("state")} placeholder="Maharashtra" />
+          <IndianStateSelect id="state" {...register("state")} error={!!errors.state} />
           {errors.state && (
             <p className="text-xs text-destructive">{errors.state.message}</p>
           )}
@@ -109,6 +111,26 @@ export function OrgSettingsForm({ org }: Props) {
           <Input id="pan" {...register("pan")} placeholder="AABCU9603R" />
           {errors.pan && (
             <p className="text-xs text-destructive">{errors.pan.message}</p>
+          )}
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="proposal_terms_template">
+            Proposal / Rate-card Terms & Conditions
+          </Label>
+          <textarea
+            id="proposal_terms_template"
+            {...register("proposal_terms_template")}
+            rows={6}
+            placeholder="Payment terms, cancellation policy, creative approval process, etc. This text pre-fills the T&C section on every new proposal and rate card — editable per proposal."
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+          <p className="text-xs text-muted-foreground">
+            Leave blank to skip T&C by default. Users can still enter one-off terms per proposal.
+          </p>
+          {errors.proposal_terms_template && (
+            <p className="text-xs text-destructive">
+              {errors.proposal_terms_template.message}
+            </p>
           )}
         </div>
       </div>

@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
 import type { Site, Landowner } from "@/lib/types/database";
 
 // ─── Step definitions ─────────────────────────────────────────────────────────
@@ -348,10 +349,9 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
                 />
               </FormField>
               <FormField label="State" error={errors.state?.message} required>
-                <Input
+                <IndianStateSelect
                   {...register("state")}
-                  placeholder="e.g. Maharashtra"
-                  className={cn(errors.state && "border-destructive focus-visible:ring-destructive/40")}
+                  error={!!errors.state}
                 />
               </FormField>
             </div>

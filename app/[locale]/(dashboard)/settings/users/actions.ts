@@ -199,6 +199,145 @@ export async function setUserActive(
   return { success: true };
 }
 
+// ─── Hard-delete a user (permanent) ──────────────────────────────────────────
+// Guards:
+//   * Admin-gated
+//   * Cannot delete self
+//   * Target must be in the caller's org
+// Both active and deactivated users can be deleted — the UI is expected to
+// confirm this destructive action. Profile row is removed explicitly; then
+// the auth.users row is removed. Any `created_by` / `updated_by` FKs on
+// business records are migrated to ON DELETE SET NULL in migration 027, so
+// long-tenured users (who authored sites, campaigns, etc.) no longer fail
+// the delete with a FK violation.
+export async function deleteUser(
+  userId: string,
+): Promise<{ error?: string; success?: true }> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return { error: gate.error };
+
+  if (userId === gate.userId) {
+    return { error: "You cannot delete your own account" };
+  }
+
+  const admin = createAdminClient();
+
+  // Verify target is in this org — prevents cross-org deletion via a stale id.
+  const { data: target, error: lookupError } = await admin
+    .from("profiles")
+    .select("id, org_id")
+    .eq("id", userId)
+    .single();
+
+  if (lookupError || !target) return { error: "User not found" };
+  if (target.org_id !== gate.orgId) return { error: "User is not in your organization" };
+
+  // Delete profile row first (defensive — in case FK cascade is not set up).
+  const { error: profileError } = await admin
+    .from("profiles")
+    .delete()
+    .eq("id", userId)
+    .eq("org_id", gate.orgId);
+  if (profileError) {
+    // Postgres FK violation = 23503. Translate to a human message so the
+    // admin knows exactly what needs fixing (almost always: run migration 027).
+    if ("code" in profileError && profileError.code === "23503") {
+      return {
+        error:
+          "This user still owns business records (sites, campaigns, invoices, etc.) from a pre-migration DB. Apply migration 027 so ownership is auto-cleared on delete, then try again.",
+      };
+    }
+    return { error: profileError.message };
+  }
+
+  // Then delete the auth user. This fires cascade for any other FK references.
+  const { error: authError } = await admin.auth.admin.deleteUser(userId);
+  if (authError) {
+    if (/foreign key/i.test(authError.message)) {
+      return {
+        error:
+          "Cannot delete: this user still has linked records in auth schema. Apply migration 027 then try again.",
+      };
+    }
+    return { error: authError.message };
+  }
+
+  revalidatePath("/settings/users");
+  return { success: true };
+}
+
+// ─── Update profile fields (name, phone) ─────────────────────────────────────
+export async function updateUserProfile(
+  userId: string,
+  data: { full_name?: string; phone?: string | null },
+): Promise<{ error?: string; success?: true }> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return { error: gate.error };
+
+  const patch: Record<string, string | null> = {};
+  if (data.full_name !== undefined) {
+    const name = data.full_name.trim();
+    if (!name) return { error: "Full name cannot be empty" };
+    patch.full_name = name;
+  }
+  if (data.phone !== undefined) {
+    patch.phone = data.phone?.trim() || null;
+  }
+  if (Object.keys(patch).length === 0) return { success: true };
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("profiles")
+    .update(patch)
+    .eq("id", userId)
+    .eq("org_id", gate.orgId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/settings/users");
+  return { success: true };
+}
+
+// ─── Admin-reset a user's password ──────────────────────────────────────────
+// Super admins and admins can set a new password for any user in their org.
+// Guards:
+//   * Admin-gated
+//   * Target must be in the caller's org
+//   * Password must be at least 8 characters (Supabase's default minimum)
+// The user is NOT signed out of active sessions automatically — if you want
+// to force re-login, call admin.auth.admin.signOut(userId) after this.
+export async function setUserPassword(
+  userId: string,
+  newPassword: string,
+): Promise<{ error?: string; success?: true }> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return { error: gate.error };
+
+  if (!newPassword || newPassword.length < 8) {
+    return { error: "Password must be at least 8 characters" };
+  }
+
+  const admin = createAdminClient();
+
+  // Verify target is in the caller's org before touching the auth record.
+  const { data: target, error: lookupError } = await admin
+    .from("profiles")
+    .select("id, org_id")
+    .eq("id", userId)
+    .single();
+  if (lookupError || !target) return { error: "User not found" };
+  if (target.org_id !== gate.orgId) {
+    return { error: "User is not in your organization" };
+  }
+
+  const { error } = await admin.auth.admin.updateUserById(userId, {
+    password: newPassword,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/settings/users");
+  return { success: true };
+}
+
 // ─── Resend invite email ─────────────────────────────────────────────────────
 export async function resendInvite(
   email: string

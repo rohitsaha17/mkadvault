@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
 import type { PartnerAgency } from "@/lib/types/database";
 
 interface Props { existing?: PartnerAgency }
@@ -105,7 +106,7 @@ export function AgencyForm({ existing }: Props) {
             <Input {...register("city")} placeholder="Mumbai" />
           </F>
           <F label="State" error={errors.state?.message}>
-            <Input {...register("state")} placeholder="Maharashtra" />
+            <IndianStateSelect {...register("state")} error={!!errors.state} />
           </F>
         </div>
       </section>

@@ -1,15 +1,84 @@
 import { z } from "zod";
 
+// Who the campaign is billed to. See migration 024 for semantics:
+//   - client:                    bill client directly (default)
+//   - agency:                    bill agency directly
+//   - client_on_behalf_of_agency bill client, pay agency a commission
+export const BILLING_PARTY_TYPES = [
+  "client",
+  "agency",
+  "client_on_behalf_of_agency",
+] as const;
+export type BillingPartyType = (typeof BILLING_PARTY_TYPES)[number];
+
+// Shared billing-subfield schema. Cross-field rules applied via superRefine:
+//   - billing_party_type === 'client'  → client_id required, agency not required
+//   - billing_party_type === 'agency'  → agency required; client_id optional (end customer ref)
+//   - billing_party_type === 'client_on_behalf_of_agency' → both required, commission expected
+const billingFields = {
+  billing_party_type: z.enum(BILLING_PARTY_TYPES),
+  client_id: z.string().uuid().optional().or(z.literal("")),
+  billed_agency_id: z.string().uuid().optional().or(z.literal("")),
+  agency_commission_percentage: z
+    .number()
+    .min(0, "Must be 0 or more")
+    .max(100, "Cannot exceed 100%")
+    .optional(),
+  agency_commission_inr: z.number().min(0).optional(),
+};
+
+function applyBillingRules(
+  data: {
+    billing_party_type: BillingPartyType;
+    client_id?: string;
+    billed_agency_id?: string;
+  },
+  ctx: z.RefinementCtx,
+) {
+  if (data.billing_party_type === "client" && !data.client_id) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["client_id"],
+      message: "Select a client",
+    });
+  }
+  if (data.billing_party_type === "agency" && !data.billed_agency_id) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["billed_agency_id"],
+      message: "Select an agency",
+    });
+  }
+  if (data.billing_party_type === "client_on_behalf_of_agency") {
+    if (!data.client_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["client_id"],
+        message: "Select the end client",
+      });
+    }
+    if (!data.billed_agency_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["billed_agency_id"],
+        message: "Select the agency earning the commission",
+      });
+    }
+  }
+}
+
 // Step 1: Basic campaign info
-export const campaignBasicsSchema = z.object({
-  campaign_name: z.string().min(1, "Campaign name is required"),
-  client_id: z.string().uuid("Select a client"),
-  start_date: z.string().optional(),
-  end_date: z.string().optional(),
-  pricing_type: z.enum(["itemized", "bundled"]),
-  total_value_inr: z.number().positive("Must be positive").optional(),
-  notes: z.string().optional(),
-});
+export const campaignBasicsSchema = z
+  .object({
+    campaign_name: z.string().min(1, "Campaign name is required"),
+    ...billingFields,
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    pricing_type: z.enum(["itemized", "bundled"]),
+    total_value_inr: z.number().positive("Must be positive").optional(),
+    notes: z.string().optional(),
+  })
+  .superRefine(applyBillingRules);
 
 // Per-site entry in the campaign
 export const campaignSiteEntrySchema = z.object({
@@ -32,17 +101,19 @@ export const campaignServiceEntrySchema = z.object({
 });
 
 // Full campaign creation schema (all steps combined)
-export const createCampaignSchema = z.object({
-  campaign_name: z.string().min(1, "Campaign name is required"),
-  client_id: z.string().uuid("Select a client"),
-  start_date: z.string().optional(),
-  end_date: z.string().optional(),
-  pricing_type: z.enum(["itemized", "bundled"]),
-  total_value_inr: z.number().positive("Must be positive").optional(),
-  notes: z.string().optional(),
-  sites: z.array(campaignSiteEntrySchema),
-  services: z.array(campaignServiceEntrySchema),
-});
+export const createCampaignSchema = z
+  .object({
+    campaign_name: z.string().min(1, "Campaign name is required"),
+    ...billingFields,
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    pricing_type: z.enum(["itemized", "bundled"]),
+    total_value_inr: z.number().positive("Must be positive").optional(),
+    notes: z.string().optional(),
+    sites: z.array(campaignSiteEntrySchema),
+    services: z.array(campaignServiceEntrySchema),
+  })
+  .superRefine(applyBillingRules);
 
 export type CampaignBasicsValues = z.infer<typeof campaignBasicsSchema>;
 export type CampaignSiteEntry = z.infer<typeof campaignSiteEntrySchema>;
@@ -51,14 +122,21 @@ export type CreateCampaignValues = z.infer<typeof createCampaignSchema>;
 
 export const campaignBasicsDefaults: CampaignBasicsValues = {
   campaign_name: "",
+  billing_party_type: "client",
   client_id: "",
+  billed_agency_id: "",
   pricing_type: "itemized",
 };
 
-// Draft campaign schema — only campaign_name required
+// Draft campaign schema — only campaign_name required. Billing fields accepted
+// but not cross-validated; we save what we have and enforce on finalize.
 export const draftCampaignSchema = z.object({
   campaign_name: z.string().min(1, "Campaign name is required to save draft"),
+  billing_party_type: z.enum(BILLING_PARTY_TYPES).optional(),
   client_id: z.string().uuid().optional().or(z.literal("")),
+  billed_agency_id: z.string().uuid().optional().or(z.literal("")),
+  agency_commission_percentage: z.number().min(0).max(100).optional(),
+  agency_commission_inr: z.number().min(0).optional(),
   start_date: z.string().optional(),
   end_date: z.string().optional(),
   pricing_type: z.enum(["itemized", "bundled"]).optional(),

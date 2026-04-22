@@ -1,10 +1,10 @@
 "use client";
 import { useTransition } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { contractSchema, contractDefaults, type ContractFormValues } from "@/lib/validations/contract";
 import { createContract, updateContract } from "@/app/[locale]/(dashboard)/contracts/actions";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,7 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
     lock_period_months: existing.lock_period_months ?? undefined,
     early_termination_clause: existing.early_termination_clause ?? undefined,
     notes: existing.notes ?? undefined,
+    terms_clauses: existing.terms_clauses ?? [],
   } : {
     ...(contractDefaults as ContractFormValues),
     // Prefill site_id when the form was launched from a specific site page
@@ -88,6 +89,14 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
     resolver: zodResolver(contractSchema),
     defaultValues: defaults,
   });
+
+  // T&C clauses — free-form list of { title, content } pairs. Stored as JSONB
+  // on the contract row so no extra table lookups are needed.
+  const {
+    fields: clauseFields,
+    append: appendClause,
+    remove: removeClause,
+  } = useFieldArray({ control, name: "terms_clauses" });
 
   const contractType = watch("contract_type");
   const paymentModel = watch("payment_model");
@@ -350,6 +359,79 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
             rows={2}
           />
         </F>
+      </section>
+
+      {/* Terms & Conditions clauses */}
+      <section className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">
+        <div className="flex items-center justify-between gap-3 border-b border-border pb-2">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Terms & Conditions</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Add individual clauses — each with a title and the clause body. Stored with the contract.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => appendClause({ title: "", content: "" })}
+          >
+            <Plus className="h-4 w-4" />
+            Add clause
+          </Button>
+        </div>
+
+        {clauseFields.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No clauses yet. Click &quot;Add clause&quot; to include one (e.g. Payment Terms,
+            Indemnity, Renewal, etc.).
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {clauseFields.map((field, index) => (
+              <div
+                key={field.id}
+                className="rounded-lg border border-border bg-muted/30 p-3 space-y-2"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="mt-2 text-xs font-semibold text-muted-foreground shrink-0 w-6 text-right">
+                    {index + 1}.
+                  </span>
+                  <div className="flex-1 space-y-2">
+                    <Input
+                      placeholder="Clause title (e.g. Indemnity)"
+                      {...register(`terms_clauses.${index}.title` as const)}
+                      className={cn(
+                        errors.terms_clauses?.[index]?.title &&
+                          "border-destructive focus-visible:ring-destructive/40",
+                      )}
+                    />
+                    <Textarea
+                      placeholder="Clause content…"
+                      rows={3}
+                      {...register(`terms_clauses.${index}.content` as const)}
+                      className={cn(
+                        errors.terms_clauses?.[index]?.content &&
+                          "border-destructive focus-visible:ring-destructive/40",
+                      )}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => removeClause(index)}
+                    aria-label="Remove clause"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Notes */}

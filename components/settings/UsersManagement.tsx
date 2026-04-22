@@ -14,18 +14,16 @@ import {
   Loader2,
   UserPlus,
   ShieldCheck,
-  UserX,
-  UserCheck,
   Mail,
   Check,
+  Pencil,
 } from "lucide-react";
+import { EditUserDialog } from "@/components/settings/EditUserDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   inviteUser,
-  updateUserRoles,
-  setUserActive,
   resendInvite,
 } from "@/app/[locale]/(dashboard)/settings/users/actions";
 import type { UserRole } from "@/lib/types/database";
@@ -109,6 +107,7 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
   const [members, setMembers] = useState<TeamMember[]>(initialMembers);
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Invite form state
   const [email, setEmail] = useState("");
@@ -158,38 +157,9 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
     });
   }
 
-  function handleRolesChange(userId: string, newRoles: UserRole[]) {
-    setBusyId(userId);
-    startTransition(async () => {
-      const res = await updateUserRoles(userId, newRoles);
-      setBusyId(null);
-      if (res.error) {
-        toast.error(res.error);
-        return;
-      }
-      toast.success("Role updated");
-      setMembers((prev) =>
-        prev.map((m) =>
-          m.id === userId ? { ...m, role: newRoles[0], roles: newRoles } : m
-        )
-      );
-    });
-  }
-
-  function handleToggleActive(member: TeamMember) {
-    setBusyId(member.id);
-    startTransition(async () => {
-      const res = await setUserActive(member.id, !member.is_active);
-      setBusyId(null);
-      if (res.error) {
-        toast.error(res.error);
-        return;
-      }
-      toast.success(member.is_active ? "User deactivated" : "User reactivated");
-      setMembers((prev) =>
-        prev.map((m) => (m.id === member.id ? { ...m, is_active: !m.is_active } : m))
-      );
-    });
+  // Patch a member in-place after EditUserDialog saves a field.
+  function patchMember(id: string, patch: Partial<TeamMember>) {
+    setMembers((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
   }
 
   function handleResend(member: TeamMember) {
@@ -377,12 +347,17 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
                     </div>
                   </div>
 
-                  {/* Role badges + role editor popover (opens into inline chooser) */}
-                  <RolePicker
-                    value={memberRoles as UserRole[]}
-                    disabled={busy || isPendingRow}
-                    onChange={(next) => handleRolesChange(m.id, next)}
-                  />
+                  {/* Role badges (read-only — edit via the Edit dialog) */}
+                  <div className="flex flex-wrap items-center gap-1 shrink-0 min-h-6">
+                    {memberRoles.map((r) => (
+                      <span
+                        key={r}
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${ROLE_TONES[r as UserRole]}`}
+                      >
+                        {ROLE_LABEL[r as UserRole]}
+                      </span>
+                    ))}
+                  </div>
 
                   {/* Last sign in */}
                   <div className="hidden lg:block text-right shrink-0 w-32">
@@ -410,22 +385,11 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
                       size="sm"
                       variant="outline"
                       className="h-8 gap-1 text-xs"
-                      onClick={() => handleToggleActive(m)}
-                      disabled={busy || isSelf || isPendingRow}
+                      onClick={() => setEditingId(m.id)}
+                      disabled={isPendingRow}
                     >
-                      {busy ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : m.is_active ? (
-                        <>
-                          <UserX className="h-3 w-3" />
-                          Deactivate
-                        </>
-                      ) : (
-                        <>
-                          <UserCheck className="h-3 w-3" />
-                          Reactivate
-                        </>
-                      )}
+                      <Pencil className="h-3 w-3" />
+                      Edit
                     </Button>
                   </div>
                 </div>
@@ -434,113 +398,26 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
           )}
         </div>
       </section>
-    </div>
-  );
-}
 
-// ─── Inline role picker (per row) ────────────────────────────────────────────
-// Shows the current role pill(s). Clicking opens a small inline chooser
-// where the admin can toggle roles in/out using the same toggleRole() rules
-// as the invite form.
-function RolePicker({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: UserRole[];
-  disabled?: boolean;
-  onChange: (next: UserRole[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<UserRole[]>(value);
-
-  function openPicker() {
-    setDraft(value);
-    setOpen(true);
-  }
-  function apply() {
-    if (draft.length === 0) return;
-    setOpen(false);
-    // Only fire if actually changed
-    if (draft.length !== value.length || draft.some((r) => !value.includes(r))) {
-      onChange(draft);
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-2 shrink-0 relative">
-      <div className="flex flex-wrap items-center gap-1 min-h-6">
-        {value.map((r) => (
-          <span
-            key={r}
-            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${ROLE_TONES[r]}`}
-          >
-            {ROLE_LABEL[r]}
-          </span>
-        ))}
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-8 text-xs"
-        onClick={open ? apply : openPicker}
-        disabled={disabled}
-      >
-        {open ? "Save" : "Edit"}
-      </Button>
-
-      {open && (
-        <div className="absolute right-0 top-9 z-10 w-72 rounded-xl border border-border bg-popover p-2 shadow-lg ring-1 ring-border">
-          <p className="px-2 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Choose role(s)
-          </p>
-          <div className="space-y-1">
-            {ROLES.map((r) => {
-              const checked = draft.includes(r.value);
-              return (
-                <button
-                  type="button"
-                  key={r.value}
-                  onClick={() => setDraft((prev) => toggleRole(prev, r.value))}
-                  className={`w-full flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-                    checked ? "bg-primary/5" : "hover:bg-muted/50"
-                  }`}
-                >
-                  <span
-                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                      checked
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-muted-foreground/40"
-                    }`}
-                  >
-                    {checked && <Check className="h-3 w-3" />}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-xs font-medium text-foreground">{r.label}</span>
-                    <span className="block text-[10px] text-muted-foreground">{r.description}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex gap-1 mt-2 pt-2 border-t border-border">
-            <Button size="sm" className="flex-1 h-7 text-xs" onClick={apply} disabled={draft.length === 0}>
-              Save
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => {
-                setOpen(false);
-                setDraft(value);
+      {/* Edit dialog — one at a time */}
+      {editingId &&
+        (() => {
+          const editing = members.find((x) => x.id === editingId);
+          if (!editing) return null;
+          return (
+            <EditUserDialog
+              member={editing}
+              isSelf={editing.id === currentUserId}
+              onClose={() => setEditingId(null)}
+              onPatched={(patch) => patchMember(editing.id, patch)}
+              onDeleted={() => {
+                setMembers((prev) => prev.filter((x) => x.id !== editing.id));
+                setEditingId(null);
               }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
+            />
+          );
+        })()}
     </div>
   );
 }
+

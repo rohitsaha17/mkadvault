@@ -45,6 +45,17 @@ const ACCEPT_INVITE_PATH = "/accept-invite";
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Detect Server Action POSTs. Next.js sets the `next-action` header on
+  // every server-action invocation (both form submissions and `useActionState`
+  // calls). These requests stream an RSC payload as a response — if the intl
+  // middleware issues a rewrite or redirect for such a POST, the client-side
+  // action response parser fails with
+  //   "An unexpected response was received from the server."
+  // To avoid that, we keep the session-refresh work but SKIP intl middleware
+  // for server-action traffic.
+  const isServerAction =
+    request.method === "POST" && request.headers.has("next-action");
+
   // Strip locale prefix to get the real path for matching
   // e.g. "/hi/dashboard" → "/dashboard", "/login" → "/login"
   const locales = routing.locales as readonly string[];
@@ -237,6 +248,13 @@ export default async function proxy(request: NextRequest) {
   }
 
   // ─── 3. Run next-intl locale routing ────────────────────────────────────────
+  // For Server Action POSTs we must NOT let intl middleware rewrite the URL —
+  // that breaks the RSC action response stream on the client. Just return the
+  // session-refresh response so cookies are still rotated.
+  if (isServerAction) {
+    return supabaseResponse;
+  }
+
   const intlResponse = intlMiddleware(request);
 
   // Copy the Supabase session cookies onto the intl response so the browser

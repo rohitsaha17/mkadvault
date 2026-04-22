@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
 import type { Landowner } from "@/lib/types/database";
 
 interface Props { existing?: Landowner }
@@ -103,7 +104,7 @@ export function LandownerForm({ existing }: Props) {
             <Input {...register("city")} placeholder="Mumbai" />
           </F>
           <F label="State" error={errors.state?.message}>
-            <Input {...register("state")} placeholder="Maharashtra" />
+            <IndianStateSelect {...register("state")} error={!!errors.state} />
           </F>
           <F label="Pin Code" error={errors.pin_code?.message}>
             <Input {...register("pin_code")} placeholder="400001" />

@@ -34,6 +34,11 @@ export async function createCampaign(values: unknown): Promise<ActionResult> {
   const d = parsed.data;
 
   // Insert campaign
+  //
+  // billing_party_type drives who gets invoiced:
+  //   - 'client'                    → invoice the client
+  //   - 'agency'                    → invoice the agency; client_id kept as reference only
+  //   - 'client_on_behalf_of_agency' → invoice the client + log commission owed to agency
   const { data: campaign, error: campError } = await ctx.supabase
     .from("campaigns")
     .insert({
@@ -41,7 +46,20 @@ export async function createCampaign(values: unknown): Promise<ActionResult> {
       created_by: ctx.user.id,
       updated_by: ctx.user.id,
       campaign_name: d.campaign_name,
-      client_id: d.client_id,
+      client_id: d.client_id && d.client_id !== "" ? d.client_id : null,
+      billing_party_type: d.billing_party_type,
+      billed_agency_id:
+        d.billed_agency_id && d.billed_agency_id !== ""
+          ? d.billed_agency_id
+          : null,
+      agency_commission_percentage:
+        d.billing_party_type === "client_on_behalf_of_agency"
+          ? d.agency_commission_percentage ?? null
+          : null,
+      agency_commission_paise:
+        d.billing_party_type === "client_on_behalf_of_agency"
+          ? n(d.agency_commission_inr)
+          : null,
       start_date: str(d.start_date),
       end_date: str(d.end_date),
       status: "enquiry" as CampaignStatus,
@@ -148,7 +166,20 @@ export async function updateCampaign(id: string, values: unknown): Promise<Actio
     .update({
       updated_by: ctx.user.id,
       campaign_name: d.campaign_name,
-      client_id: d.client_id,
+      client_id: d.client_id && d.client_id !== "" ? d.client_id : null,
+      billing_party_type: d.billing_party_type,
+      billed_agency_id:
+        d.billed_agency_id && d.billed_agency_id !== ""
+          ? d.billed_agency_id
+          : null,
+      agency_commission_percentage:
+        d.billing_party_type === "client_on_behalf_of_agency"
+          ? d.agency_commission_percentage ?? null
+          : null,
+      agency_commission_paise:
+        d.billing_party_type === "client_on_behalf_of_agency"
+          ? n(d.agency_commission_inr)
+          : null,
       start_date: str(d.start_date),
       end_date: str(d.end_date),
       pricing_type: d.pricing_type,
@@ -507,6 +538,19 @@ export async function saveCampaignDraft(values: unknown): Promise<ActionResult> 
       updated_by: ctx.user.id,
       campaign_name: d.campaign_name,
       client_id: d.client_id && d.client_id !== "" ? d.client_id : null,
+      billing_party_type: d.billing_party_type ?? "client",
+      billed_agency_id:
+        d.billed_agency_id && d.billed_agency_id !== ""
+          ? d.billed_agency_id
+          : null,
+      agency_commission_percentage:
+        d.billing_party_type === "client_on_behalf_of_agency"
+          ? d.agency_commission_percentage ?? null
+          : null,
+      agency_commission_paise:
+        d.billing_party_type === "client_on_behalf_of_agency"
+          ? n(d.agency_commission_inr)
+          : null,
       start_date: str(d.start_date),
       end_date: str(d.end_date),
       status: "enquiry" as CampaignStatus,

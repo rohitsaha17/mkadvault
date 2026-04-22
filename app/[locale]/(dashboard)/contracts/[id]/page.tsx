@@ -6,9 +6,10 @@ import { createClient } from "@/lib/supabase/server";
 import { inr, fmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
-  ChevronLeft, AlertTriangle, FileText, Building2, Pencil, Calendar, CreditCard, Receipt,
+  ChevronLeft, AlertTriangle, FileText, Building2, Pencil, Calendar, CreditCard, Receipt, ScrollText,
 } from "lucide-react";
 import { PaymentScheduleTable } from "@/components/contracts/PaymentScheduleTable";
+import { ContractDocumentsCard } from "@/components/contracts/ContractDocumentsCard";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { Contract, Landowner, PartnerAgency, Site, ContractPayment } from "@/lib/types/database";
 
@@ -200,6 +201,31 @@ export default async function ContractDetailPage({
               </div>
             )}
           </Section>
+
+          {/* T&C clauses */}
+          {contract.terms_clauses && contract.terms_clauses.length > 0 && (
+            <Section title="Terms & Conditions" icon={<ScrollText className="h-4 w-4" />}>
+              <ol className="space-y-4">
+                {contract.terms_clauses.map((clause, i) => (
+                  <li key={i} className="border-l-2 border-border pl-3">
+                    <p className="text-sm font-semibold text-foreground">
+                      {i + 1}. {clause.title}
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                      {clause.content}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </Section>
+          )}
+
+          {/* Documents — draft + signed copy upload */}
+          <ContractDocumentsCard
+            contractId={id}
+            draftPath={contract.contract_document_url}
+            signedPath={contract.signed_document_url}
+          />
 
           {/* Notes */}
           {contract.notes && (

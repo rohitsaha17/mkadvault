@@ -4,6 +4,7 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
+import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, Edit, FileText, MapPin } from "lucide-react";
@@ -86,7 +87,10 @@ export default async function ProposalDetailPage({
   const proposalSites = (proposalSitesData ?? []) as unknown as (ProposalSite & { site: Site })[];
   const org = orgData as (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
 
-  // Fetch primary photos for proposal sites
+  // Fetch primary photos for proposal sites. The `site-photos` bucket is
+  // private, so we sign each path before passing it to the PDF renderer /
+  // preview. Without signed URLs, ProposalDocument's <Image> components
+  // would 403 and the render would crash.
   const siteIds = proposalSites.map((ps) => ps.site_id);
   let photoMap: Record<string, string> = {};
   if (siteIds.length > 0) {
@@ -95,8 +99,14 @@ export default async function ProposalDetailPage({
       .select("site_id, photo_url")
       .in("site_id", siteIds)
       .eq("is_primary", true);
+    const rawPaths = (photos ?? [])
+      .map((p) => p.photo_url)
+      .filter((u): u is string => !!u && !/^https?:\/\//i.test(u));
+    const signed = await getSignedUrls("site-photos", rawPaths);
     photoMap = (photos ?? []).reduce<Record<string, string>>((acc, p) => {
-      acc[p.site_id] = p.photo_url;
+      const isUrl = /^https?:\/\//i.test(p.photo_url);
+      const resolved = isUrl ? p.photo_url : signed[p.photo_url];
+      if (resolved) acc[p.site_id] = resolved;
       return acc;
     }, {});
   }
