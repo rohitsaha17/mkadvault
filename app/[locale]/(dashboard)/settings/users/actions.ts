@@ -205,65 +205,157 @@ export async function setUserActive(
 //   * Cannot delete self
 //   * Target must be in the caller's org
 // Both active and deactivated users can be deleted — the UI is expected to
-// confirm this destructive action. Profile row is removed explicitly; then
-// the auth.users row is removed. Any `created_by` / `updated_by` FKs on
-// business records are migrated to ON DELETE SET NULL in migration 027, so
-// long-tenured users (who authored sites, campaigns, etc.) no longer fail
-// the delete with a FK violation.
+// confirm this destructive action. The sequence is:
+//   1. Scan every `{ table, column }` in OWNED_BY_TABLES for rows still
+//      pointing at this user. If any are found AND migration 027 hasn't
+//      rewritten the FKs to ON DELETE SET NULL, we proactively NULL them
+//      with the service-role client so the subsequent auth-user delete
+//      doesn't blow up mid-way.
+//   2. Delete the profile row (defensive — it also CASCADE-deletes from
+//      auth.users, but we do it first so no stale row is left over if the
+//      auth delete later fails).
+//   3. Delete the auth.users row.
+// The whole thing is wrapped in a top-level try/catch so any unexpected
+// throw (network, missing service-role key, a CHECK constraint we hadn't
+// predicted) returns JSON `{ error }` to the client instead of propagating
+// and corrupting the RSC response — which is what produced the "unexpected
+// response was received from the server" error the user was seeing.
+const OWNED_BY_TABLES: { table: string; columns: string[] }[] = [
+  { table: "sites",                    columns: ["created_by", "updated_by"] },
+  { table: "site_photos",              columns: ["created_by"] },
+  { table: "landowners",               columns: ["created_by", "updated_by"] },
+  { table: "partner_agencies",         columns: ["created_by", "updated_by"] },
+  { table: "contracts",                columns: ["created_by", "updated_by"] },
+  { table: "contract_amendments",      columns: ["created_by"] },
+  { table: "contract_payments",        columns: ["created_by", "updated_by"] },
+  { table: "signed_agreements",        columns: ["created_by", "updated_by"] },
+  { table: "clients",                  columns: ["created_by", "updated_by"] },
+  { table: "campaigns",                columns: ["created_by", "updated_by"] },
+  { table: "proposals",                columns: ["created_by", "updated_by"] },
+  { table: "invoices",                 columns: ["created_by", "updated_by"] },
+  { table: "payments_received",        columns: ["created_by"] },
+  { table: "campaign_change_requests", columns: ["requested_by", "reviewed_by"] },
+  // 028 tables — harmless no-op if site_expenses doesn't exist yet in older DBs.
+  { table: "site_expenses",            columns: ["created_by", "updated_by", "paid_by"] },
+];
+
 export async function deleteUser(
   userId: string,
 ): Promise<{ error?: string; success?: true }> {
-  const gate = await requireAdmin();
-  if (!gate.ok) return { error: gate.error };
+  try {
+    const gate = await requireAdmin();
+    if (!gate.ok) return { error: gate.error };
 
-  if (userId === gate.userId) {
-    return { error: "You cannot delete your own account" };
-  }
+    if (userId === gate.userId) {
+      return { error: "You cannot delete your own account" };
+    }
 
-  const admin = createAdminClient();
-
-  // Verify target is in this org — prevents cross-org deletion via a stale id.
-  const { data: target, error: lookupError } = await admin
-    .from("profiles")
-    .select("id, org_id")
-    .eq("id", userId)
-    .single();
-
-  if (lookupError || !target) return { error: "User not found" };
-  if (target.org_id !== gate.orgId) return { error: "User is not in your organization" };
-
-  // Delete profile row first (defensive — in case FK cascade is not set up).
-  const { error: profileError } = await admin
-    .from("profiles")
-    .delete()
-    .eq("id", userId)
-    .eq("org_id", gate.orgId);
-  if (profileError) {
-    // Postgres FK violation = 23503. Translate to a human message so the
-    // admin knows exactly what needs fixing (almost always: run migration 027).
-    if ("code" in profileError && profileError.code === "23503") {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       return {
         error:
-          "This user still owns business records (sites, campaigns, invoices, etc.) from a pre-migration DB. Apply migration 027 so ownership is auto-cleared on delete, then try again.",
+          "Server is missing SUPABASE_SERVICE_ROLE_KEY — set it in .env.local (and in Vercel) before trying to delete users.",
       };
     }
-    return { error: profileError.message };
-  }
 
-  // Then delete the auth user. This fires cascade for any other FK references.
-  const { error: authError } = await admin.auth.admin.deleteUser(userId);
-  if (authError) {
-    if (/foreign key/i.test(authError.message)) {
+    const admin = createAdminClient();
+
+    // ── Verify target is in this org ──────────────────────────────────────
+    const { data: target, error: lookupError } = await admin
+      .from("profiles")
+      .select("id, org_id")
+      .eq("id", userId)
+      .single();
+
+    if (lookupError || !target) return { error: "User not found" };
+    if (target.org_id !== gate.orgId) {
+      return { error: "User is not in your organization" };
+    }
+
+    // ── Pre-clear ownership refs so FK cascades can't block the delete ────
+    // Migration 027 sets every FK to ON DELETE SET NULL, but if the admin
+    // hasn't applied it yet we'd still fail downstream. Proactively NULL
+    // them here with the service-role client — idempotent, cheap, and
+    // silent if a table doesn't exist in their schema yet.
+    for (const { table, columns } of OWNED_BY_TABLES) {
+      for (const column of columns) {
+        const { error: updErr } = await admin
+          .from(table)
+          .update({ [column]: null })
+          .eq(column, userId);
+        // We don't stop on error here — most failures are "table doesn't
+        // exist" (42P01) or "column doesn't exist" (42703) in DBs that
+        // haven't applied every migration. Those are safe to ignore.
+        if (
+          updErr &&
+          updErr.code !== "42P01" &&
+          updErr.code !== "42703" &&
+          updErr.code !== "PGRST116"
+        ) {
+          // Real failure — surface it so the admin knows something is wrong.
+          return {
+            error: `Failed clearing ${table}.${column}: ${updErr.message}`,
+          };
+        }
+      }
+    }
+
+    // ── Delete the profile row (CASCADE also fires when auth.users goes) ──
+    const { error: profileError } = await admin
+      .from("profiles")
+      .delete()
+      .eq("id", userId)
+      .eq("org_id", gate.orgId);
+    if (profileError) {
+      // 23503 = FK violation. Should not happen now that we've pre-cleared
+      // ownership refs, but catch it with a helpful message just in case.
+      if ("code" in profileError && profileError.code === "23503") {
+        return {
+          error:
+            "This user still owns records we couldn't auto-clear. Apply migration 027 so every ownership FK is ON DELETE SET NULL, then try again.",
+        };
+      }
+      return { error: profileError.message };
+    }
+
+    // ── Delete the auth.users row ─────────────────────────────────────────
+    // Wrap in try/catch because the Supabase SDK sometimes throws on 500s
+    // from GoTrue (e.g. downstream FK violation we didn't anticipate) rather
+    // than returning { error }.
+    try {
+      const { error: authError } = await admin.auth.admin.deleteUser(userId);
+      if (authError) {
+        if (/foreign key|violates/i.test(authError.message)) {
+          return {
+            error:
+              "Cannot delete: the user still has linked records that aren't owned-by columns. Check custom tables referencing auth.users(id) and add ON DELETE SET NULL.",
+          };
+        }
+        return { error: authError.message };
+      }
+    } catch (err) {
       return {
         error:
-          "Cannot delete: this user still has linked records in auth schema. Apply migration 027 then try again.",
+          err instanceof Error
+            ? `Auth delete failed: ${err.message}`
+            : "Auth delete failed with an unknown error",
       };
     }
-    return { error: authError.message };
-  }
 
-  revalidatePath("/settings/users");
-  return { success: true };
+    revalidatePath("/settings/users");
+    return { success: true };
+  } catch (err) {
+    // Absolute last-ditch safety net — Server Actions that throw return
+    // HTML error pages to the client, which the RSC runtime surfaces as
+    // "An unexpected response was received from the server." Convert any
+    // unhandled throw into a well-formed JSON response.
+    console.error("[deleteUser] unexpected error:", err);
+    return {
+      error:
+        err instanceof Error
+          ? `Unexpected error while deleting user: ${err.message}`
+          : "Unexpected error while deleting user",
+    };
+  }
 }
 
 // ─── Update profile fields (name, phone) ─────────────────────────────────────
