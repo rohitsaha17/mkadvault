@@ -23,11 +23,29 @@ export async function upsertAlertPreference(data: {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("org_id, role")
+      .select("org_id, role, roles")
       .eq("id", user.id)
       .single();
 
     if (!profile) return { error: "Profile not found" };
+
+    // Alert-preference config is an ORG-WIDE concern — it drives who gets
+    // which notifications and through which channels. Only admins /
+    // super_admins are allowed to change it. Non-admin callers can still
+    // READ their own prefs (via RLS on the table) but this mutation is
+    // role-gated both here and in the UI.
+    const adminRoles = ["super_admin", "admin"];
+    const callerRoles: string[] =
+      Array.isArray(profile.roles) && profile.roles.length > 0
+        ? profile.roles
+        : [profile.role ?? ""];
+    const isAdmin = callerRoles.some((r) => adminRoles.includes(r));
+    if (!isAdmin) {
+      return {
+        error:
+          "Only admins and super admins can edit alert preferences. Ask your organisation admin.",
+      };
+    }
 
     // Upsert — if a preference for this org+user+type exists, update it; else insert
     const { error } = await supabase

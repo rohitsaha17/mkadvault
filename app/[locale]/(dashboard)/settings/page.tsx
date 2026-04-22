@@ -106,7 +106,7 @@ export default async function SettingsPage({
           <div className="mb-5 border-b border-border pb-3">
             <h2 className="text-base font-semibold text-foreground">{t("alertPreferences")}</h2>
           </div>
-          <AlertPreferences preferences={alertPrefs} />
+          <AlertPreferences preferences={alertPrefs} canEdit={isAdmin} />
         </section>
 
       </div>

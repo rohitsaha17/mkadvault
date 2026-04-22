@@ -35,14 +35,26 @@ interface PrefRow {
 
 // ─── Toggle switch ────────────────────────────────────────────────────────────
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-muted-foreground/30 dark:bg-muted-foreground/40"}`}
+      aria-disabled={disabled}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${
+        disabled ? "opacity-50 cursor-not-allowed" : ""
+      } ${checked ? "bg-blue-600" : "bg-muted-foreground/30 dark:bg-muted-foreground/40"}`}
     >
       <span className={`block h-4 w-4 rounded-full bg-white shadow transition-transform m-0.5 ${checked ? "translate-x-4" : "translate-x-0"}`} />
     </button>
@@ -53,9 +65,14 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 
 interface Props {
   preferences: AlertPreference[];
+  // Only admins / super admins can edit these org-wide settings. Other
+  // roles see the panel in read-only mode so they know what's configured
+  // but can't change it — requests to the server action are also
+  // rejected server-side as a second line of defence.
+  canEdit: boolean;
 }
 
-export function AlertPreferences({ preferences }: Props) {
+export function AlertPreferences({ preferences, canEdit }: Props) {
   const [isPending, startTransition] = useTransition();
 
   // Build initial state: merge DB preferences with defaults
@@ -109,8 +126,16 @@ export function AlertPreferences({ preferences }: Props) {
       <div>
         <h2 className="text-base font-semibold">Alert Preferences</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Configure how and when you receive each type of alert. Changes apply to your account only.
+          Configure how and when each type of alert is delivered across the
+          organisation.
         </p>
+        {!canEdit && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+            Only admins and super admins can edit alert preferences. You can
+            see the current configuration below — ask your organisation admin
+            to change any of these settings.
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl border border-border overflow-hidden">
@@ -142,17 +167,29 @@ export function AlertPreferences({ preferences }: Props) {
 
               {/* In-app toggle */}
               <div className="hidden md:flex justify-center">
-                <Toggle checked={row.in_app} onChange={(v) => updateRow(row.alert_type, { in_app: v })} />
+                <Toggle
+                  checked={row.in_app}
+                  onChange={(v) => updateRow(row.alert_type, { in_app: v })}
+                  disabled={!canEdit}
+                />
               </div>
 
               {/* Email toggle */}
               <div className="hidden md:flex justify-center">
-                <Toggle checked={row.email} onChange={(v) => updateRow(row.alert_type, { email: v })} />
+                <Toggle
+                  checked={row.email}
+                  onChange={(v) => updateRow(row.alert_type, { email: v })}
+                  disabled={!canEdit}
+                />
               </div>
 
               {/* WhatsApp toggle */}
               <div className="hidden md:flex justify-center">
-                <Toggle checked={row.whatsapp} onChange={(v) => updateRow(row.alert_type, { whatsapp: v })} />
+                <Toggle
+                  checked={row.whatsapp}
+                  onChange={(v) => updateRow(row.alert_type, { whatsapp: v })}
+                  disabled={!canEdit}
+                />
               </div>
 
               {/* Advance days */}
@@ -162,7 +199,8 @@ export function AlertPreferences({ preferences }: Props) {
                   value={daysDisplayValue}
                   onChange={(e) => handleDaysInput(row.alert_type, e.target.value)}
                   onBlur={() => commitDays(row.alert_type)}
-                  className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+                  disabled={!canEdit}
+                  className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="e.g. 7, 3, 1"
                   aria-label="Advance days (comma separated)"
                 />
@@ -176,12 +214,18 @@ export function AlertPreferences({ preferences }: Props) {
                   variant="outline"
                   className="h-7 text-xs"
                   onClick={() => handleSave(row)}
-                  disabled={isPending && savingType === row.alert_type}
-                >
-                  {isPending && savingType === row.alert_type
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : "Save"
+                  disabled={
+                    !canEdit || (isPending && savingType === row.alert_type)
                   }
+                  title={
+                    !canEdit ? "Only admins can change alert preferences" : undefined
+                  }
+                >
+                  {isPending && savingType === row.alert_type ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    "Save"
+                  )}
                 </Button>
               </div>
             </div>
