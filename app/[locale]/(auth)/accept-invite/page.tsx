@@ -42,6 +42,7 @@ export default async function AcceptInvitePage() {
   // best-effort: if anything fails we still render the form (with a
   // generic greeting) so the user is never blocked from setting a password.
   let fullName: string | null = null;
+  let phone: string | null = null;
   let orgName: string | null = null;
 
   try {
@@ -53,11 +54,12 @@ export default async function AcceptInvitePage() {
 
     const { data: profile } = await client
       .from("profiles")
-      .select("org_id, full_name")
+      .select("org_id, full_name, phone")
       .eq("id", user.id)
       .maybeSingle();
 
     fullName = profile?.full_name ?? null;
+    phone = profile?.phone ?? null;
 
     if (profile?.org_id) {
       const { data: org } = await client
@@ -72,10 +74,21 @@ export default async function AcceptInvitePage() {
     console.error("[accept-invite] profile/org lookup failed:", err);
   }
 
+  // Fallback: if the profile didn't have a full_name yet (trigger may not
+  // have copied it from auth metadata), use what the admin typed into the
+  // invite form — it's stored on user_metadata.full_name.
+  if (!fullName) {
+    const metaName = user.user_metadata?.full_name;
+    if (typeof metaName === "string" && metaName.trim()) {
+      fullName = metaName.trim();
+    }
+  }
+
   return (
     <AcceptInviteForm
       email={user.email ?? ""}
       fullName={fullName}
+      phone={phone}
       orgName={orgName}
     />
   );
