@@ -74,6 +74,21 @@ export default async function proxy(request: NextRequest) {
   // getUser() validates the token with Supabase and refreshes it if needed
   const { data: { user } } = await supabase.auth.getUser();
 
+  // ─── 1a. Server Action early exit ──────────────────────────────────────────
+  // Server Actions ship as POSTs with a `next-action` header, and the response
+  // body is an RSC stream. ANY redirect issued by the proxy for such a POST
+  // turns the response into HTML (the redirect target), which the client-side
+  // action parser then rejects with
+  //   "An unexpected response was received from the server."
+  //
+  // The server-action handler in the page component ITSELF handles auth checks
+  // (via `requireAdmin()` etc.), so we don't need the proxy's redirect logic
+  // for these requests — all we need is to keep the auth cookies fresh.
+  // Bail out here, BEFORE any redirectTo(...) branch below can fire.
+  if (isServerAction) {
+    return supabaseResponse;
+  }
+
   // Helper: build a redirect response that carries Supabase's refreshed
   // session cookies. Without copying cookies, a redirect during proxy can
   // drop the newly-rotated access/refresh tokens, logging the user out.
@@ -248,13 +263,8 @@ export default async function proxy(request: NextRequest) {
   }
 
   // ─── 3. Run next-intl locale routing ────────────────────────────────────────
-  // For Server Action POSTs we must NOT let intl middleware rewrite the URL —
-  // that breaks the RSC action response stream on the client. Just return the
-  // session-refresh response so cookies are still rotated.
-  if (isServerAction) {
-    return supabaseResponse;
-  }
-
+  // Server Action POSTs have already returned above (1a) so we don't need to
+  // re-check for them here. Only regular page/asset requests reach this point.
   const intlResponse = intlMiddleware(request);
 
   // Copy the Supabase session cookies onto the intl response so the browser
