@@ -16,10 +16,34 @@
 // Supabase cookies the same way the old Server Actions did.
 
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { UserRole } from "@/lib/types/database";
 import { USER_ROLES, isExecutiveAccountsCombo } from "@/lib/constants";
+
+// Derive the current app origin from the incoming request headers.
+// Falls back to NEXT_PUBLIC_APP_URL then localhost so it works in both
+// dev and prod without relying on env vars that admins often forget to
+// set. This is what Supabase's invite `redirectTo` has to match — if
+// the derived URL isn't in Supabase's allowed Redirect URLs list,
+// Supabase silently falls back to Site URL and the user ends up on
+// /login instead of /accept-invite, which is the bug we keep hitting.
+async function currentOrigin(): Promise<string> {
+  try {
+    const h = await headers();
+    const forwardedProto = h.get("x-forwarded-proto") ?? "https";
+    const forwardedHost = h.get("x-forwarded-host") ?? h.get("host");
+    if (forwardedHost) return `${forwardedProto}://${forwardedHost}`;
+  } catch {
+    // Ignore — headers() can be unavailable in some contexts.
+  }
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+}
 
 // ─── Shared helpers (lifted verbatim from actions.ts) ──────────────────────
 
@@ -117,11 +141,12 @@ async function handleInvite(body: {
   }
 
   const admin = createAdminClient();
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    "http://localhost:3000";
-  const redirectTo = `${appUrl.replace(/\/$/, "")}/auth/callback`;
+  // Build the redirectTo from the ACTUAL request origin (not an env
+  // var) so invites sent from https://app.example.com route back to
+  // https://app.example.com/auth/callback regardless of whether
+  // NEXT_PUBLIC_APP_URL was ever set.
+  const origin = await currentOrigin();
+  const redirectTo = `${origin}/auth/callback`;
 
   let inviteUserId: string | null = null;
   let inviteErrorMessage: string | null = null;
@@ -342,11 +367,8 @@ async function handleResend(body: { email?: unknown }) {
   if (!gate.ok) return jsonErr(gate.error);
 
   const admin = createAdminClient();
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    "http://localhost:3000";
-  const redirectTo = `${appUrl.replace(/\/$/, "")}/auth/callback`;
+  const origin = await currentOrigin();
+  const redirectTo = `${origin}/auth/callback`;
 
   try {
     const { error } = await admin.auth.admin.inviteUserByEmail(email, {

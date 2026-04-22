@@ -5,8 +5,8 @@
 // surfacing "An unexpected response was received from the server" on
 // both this flow and the user-management flow; moving to JSON routes
 // made the error class go away everywhere we applied it.
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -30,7 +30,18 @@ export function LoginForm() {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isPending, setIsPending] = useState(false);
+
+  // Surface ?error= messages from redirects (e.g. the auth callback
+  // redirects here with a readable reason when an invite link can't be
+  // verified). Without this the user lands on login with no context
+  // and just thinks "login isn't working" — the actual problem stays
+  // invisible in the URL bar.
+  useEffect(() => {
+    const err = searchParams?.get("error");
+    if (err) toast.error(err);
+  }, [searchParams]);
 
   const {
     register,
