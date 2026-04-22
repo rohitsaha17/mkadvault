@@ -1,6 +1,12 @@
 "use client";
-// LoginForm — client component so it can use react-hook-form and useActionState.
-import { useActionState } from "react";
+// LoginForm — posts credentials to the /api/auth/login JSON route and,
+// on success, pushes the user to /dashboard. We use a plain fetch()
+// rather than a Server Action because the Server Action stack kept
+// surfacing "An unexpected response was received from the server" on
+// both this flow and the user-management flow; moving to JSON routes
+// made the error class go away everywhere we applied it.
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,12 +14,10 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { loginAction } from "../actions";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -25,9 +29,8 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export function LoginForm() {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
-
-  // useActionState wires the form to the server action and tracks pending state
-  const [state, formAction, isPending] = useActionState(loginAction, null);
+  const router = useRouter();
+  const [isPending, setIsPending] = useState(false);
 
   const {
     register,
@@ -37,18 +40,50 @@ export function LoginForm() {
     resolver: zodResolver(loginSchema),
   });
 
-  // Show error toast when the server action returns an error
-  useEffect(() => {
-    if (state && "error" in state) {
-      toast.error(state.error);
-    }
-  }, [state]);
+  async function onSubmit(values: LoginFormValues) {
+    setIsPending(true);
+    try {
+      let res: Response;
+      try {
+        res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            email: values.email,
+            password: values.password,
+          }),
+        });
+      } catch (networkErr) {
+        toast.error(
+          networkErr instanceof Error
+            ? `Network error: ${networkErr.message}`
+            : "Network error. Please try again.",
+        );
+        return;
+      }
 
-  // handleSubmit runs client-side zod validation first, then submits to the action
-  function onSubmit(_values: LoginFormValues, event?: React.BaseSyntheticEvent) {
-    event?.preventDefault();
-    const form = event?.target as HTMLFormElement;
-    formAction(new FormData(form));
+      let data: { success?: true; error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        toast.error("Unexpected server response. Please try again.");
+        return;
+      }
+
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
+
+      // Refresh so server components re-read the newly-signed-in cookies,
+      // then push to dashboard. router.refresh() first ensures the
+      // dashboard's server-rendered tree sees the fresh session.
+      router.refresh();
+      router.push("/dashboard");
+    } finally {
+      setIsPending(false);
+    }
   }
 
   return (
