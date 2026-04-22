@@ -1,5 +1,6 @@
 // Login page — email + password form with react-hook-form + zod validation.
-// On success, the server action redirects to /dashboard.
+// On success, the form fetches /api/auth/login and then pushes to /dashboard.
+import { Suspense } from "react";
 import { setRequestLocale } from "next-intl/server";
 import { getTranslations } from "next-intl/server";
 import Link from "next/link";
@@ -32,7 +33,13 @@ export default async function LoginPage({
         <p className="mt-1 text-sm text-muted-foreground">{t("loginSubtitle")}</p>
       </div>
 
-      <LoginForm />
+      {/* Suspense boundary is required because LoginForm calls
+          useSearchParams() to surface ?error= toasts from auth-link
+          redirects. Without it, Next.js bails out of static
+          prerendering for /login with a 'missing-suspense' error. */}
+      <Suspense fallback={null}>
+        <LoginForm />
+      </Suspense>
 
       <div className="mt-6 text-center text-sm text-muted-foreground">
         {t("noAccount")}{" "}
