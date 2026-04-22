@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
 import type { InvoiceStatus, PaymentMode } from "@/lib/types/database";
 
+import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function getOrgAndUser() {
@@ -70,120 +71,135 @@ const invoiceSchema = z.object({
 // ─── Create Invoice ───────────────────────────────────────────────────────────
 
 export async function createInvoice(values: unknown): Promise<{ error: string } | { id: string }> {
-  const parsed = invoiceSchema.safeParse(values);
-  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  try {
+    const parsed = invoiceSchema.safeParse(values);
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  const ctx = await getOrgAndUser();
-  if (!ctx) return { error: "Not authenticated" };
+    const ctx = await getOrgAndUser();
+    if (!ctx) return { error: "Not authenticated" };
 
-  const d = parsed.data;
+    const d = parsed.data;
 
-  const { data: inv, error: invErr } = await ctx.supabase
-    .from("invoices")
-    .insert({
+    const { data: inv, error: invErr } = await ctx.supabase
+      .from("invoices")
+      .insert({
+        organization_id: ctx.orgId,
+        created_by: ctx.user.id,
+        updated_by: ctx.user.id,
+        client_id: d.client_id,
+        campaign_id: d.campaign_id ?? null,
+        invoice_date: d.invoice_date,
+        due_date: d.due_date,
+        subtotal_paise: n(d.subtotal_inr),
+        cgst_paise: n(d.cgst_inr),
+        sgst_paise: n(d.sgst_inr),
+        igst_paise: n(d.igst_inr),
+        total_paise: n(d.total_inr),
+        balance_due_paise: n(d.total_inr),
+        supplier_gstin: str(d.supplier_gstin),
+        buyer_gstin: str(d.buyer_gstin),
+        place_of_supply_state: str(d.place_of_supply_state),
+        is_inter_state: d.is_inter_state,
+        status: d.status,
+        notes: str(d.notes),
+        terms_and_conditions: str(d.terms_and_conditions),
+      })
+      .select("id")
+      .single();
+
+    if (invErr || !inv) return { error: invErr?.message ?? "Failed to create invoice" };
+
+    // Insert line items
+    const lineItems = d.line_items.map((li) => ({
       organization_id: ctx.orgId,
-      created_by: ctx.user.id,
-      updated_by: ctx.user.id,
-      client_id: d.client_id,
-      campaign_id: d.campaign_id ?? null,
-      invoice_date: d.invoice_date,
-      due_date: d.due_date,
-      subtotal_paise: n(d.subtotal_inr),
-      cgst_paise: n(d.cgst_inr),
-      sgst_paise: n(d.sgst_inr),
-      igst_paise: n(d.igst_inr),
-      total_paise: n(d.total_inr),
-      balance_due_paise: n(d.total_inr),
-      supplier_gstin: str(d.supplier_gstin),
-      buyer_gstin: str(d.buyer_gstin),
-      place_of_supply_state: str(d.place_of_supply_state),
-      is_inter_state: d.is_inter_state,
-      status: d.status,
-      notes: str(d.notes),
-      terms_and_conditions: str(d.terms_and_conditions),
-    })
-    .select("id")
-    .single();
+      invoice_id: inv.id,
+      site_id: li.site_id ?? null,
+      service_type: li.service_type,
+      description: li.description,
+      hsn_sac_code: li.hsn_sac_code || "998361",
+      quantity: li.quantity,
+      rate_paise: Math.round(li.rate_inr * 100),
+      amount_paise: Math.round(li.rate_inr * li.quantity * 100),
+      period_from: str(li.period_from),
+      period_to: str(li.period_to),
+    }));
 
-  if (invErr || !inv) return { error: invErr?.message ?? "Failed to create invoice" };
+    const { error: liErr } = await ctx.supabase.from("invoice_line_items").insert(lineItems);
+    if (liErr) return { error: liErr.message };
 
-  // Insert line items
-  const lineItems = d.line_items.map((li) => ({
-    organization_id: ctx.orgId,
-    invoice_id: inv.id,
-    site_id: li.site_id ?? null,
-    service_type: li.service_type,
-    description: li.description,
-    hsn_sac_code: li.hsn_sac_code || "998361",
-    quantity: li.quantity,
-    rate_paise: Math.round(li.rate_inr * 100),
-    amount_paise: Math.round(li.rate_inr * li.quantity * 100),
-    period_from: str(li.period_from),
-    period_to: str(li.period_to),
-  }));
-
-  const { error: liErr } = await ctx.supabase.from("invoice_line_items").insert(lineItems);
-  if (liErr) return { error: liErr.message };
-
-  revalidatePath("/billing/invoices");
-  return { id: inv.id };
+    revalidatePath("/billing/invoices");
+    return { id: inv.id };
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "createInvoice");
+  }
 }
 
 // ─── Update Invoice ───────────────────────────────────────────────────────────
 
 export async function updateInvoiceStatus(id: string, status: InvoiceStatus): Promise<{ error?: string }> {
-  const ctx = await getOrgAndUser();
-  if (!ctx) return { error: "Not authenticated" };
+  try {
+    const ctx = await getOrgAndUser();
+    if (!ctx) return { error: "Not authenticated" };
 
-  // Fetch current status to validate the transition
-  const { data: invoice } = await ctx.supabase
-    .from("invoices")
-    .select("status")
-    .eq("id", id)
-    .single();
+    // Fetch current status to validate the transition
+    const { data: invoice } = await ctx.supabase
+      .from("invoices")
+      .select("status")
+      .eq("id", id)
+      .single();
 
-  if (!invoice) return { error: "Invoice not found" };
+    if (!invoice) return { error: "Invoice not found" };
 
-  // Only allow valid status transitions
-  const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-    draft: ["sent", "cancelled"],
-    sent: ["partially_paid", "paid", "overdue", "cancelled"],
-    partially_paid: ["paid", "overdue", "cancelled"],
-    overdue: ["partially_paid", "paid", "cancelled"],
-    paid: [],       // terminal state
-    cancelled: [],  // terminal state
-  };
+    // Only allow valid status transitions
+    const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+      draft: ["sent", "cancelled"],
+      sent: ["partially_paid", "paid", "overdue", "cancelled"],
+      partially_paid: ["paid", "overdue", "cancelled"],
+      overdue: ["partially_paid", "paid", "cancelled"],
+      paid: [],       // terminal state
+      cancelled: [],  // terminal state
+    };
 
-  const allowed = ALLOWED_TRANSITIONS[invoice.status] ?? [];
-  if (!allowed.includes(status)) {
-    return { error: `Cannot change status from "${invoice.status}" to "${status}"` };
+    const allowed = ALLOWED_TRANSITIONS[invoice.status] ?? [];
+    if (!allowed.includes(status)) {
+      return { error: `Cannot change status from "${invoice.status}" to "${status}"` };
+    }
+
+    const { error } = await ctx.supabase
+      .from("invoices")
+      .update({ status, updated_by: ctx.user.id })
+      .eq("id", id);
+
+    if (error) return { error: error.message };
+    revalidatePath("/billing/invoices");
+    revalidatePath(`/billing/invoices/${id}`);
+    return {};
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "updateInvoiceStatus");
   }
-
-  const { error } = await ctx.supabase
-    .from("invoices")
-    .update({ status, updated_by: ctx.user.id })
-    .eq("id", id);
-
-  if (error) return { error: error.message };
-  revalidatePath("/billing/invoices");
-  revalidatePath(`/billing/invoices/${id}`);
-  return {};
 }
 
 // ─── Delete Invoice (soft) ────────────────────────────────────────────────────
 
 export async function deleteInvoice(id: string): Promise<{ error?: string }> {
-  const ctx = await getOrgAndUser();
-  if (!ctx) return { error: "Not authenticated" };
+  try {
+    const ctx = await getOrgAndUser();
+    if (!ctx) return { error: "Not authenticated" };
 
-  const { error } = await ctx.supabase
-    .from("invoices")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", id);
+    const { error } = await ctx.supabase
+      .from("invoices")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id);
 
-  if (error) return { error: error.message };
-  revalidatePath("/billing/invoices");
-  return {};
+    if (error) return { error: error.message };
+    revalidatePath("/billing/invoices");
+    return {};
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "deleteInvoice");
+  }
 }
 
 // ─── Record Payment ───────────────────────────────────────────────────────────
@@ -201,119 +217,129 @@ export async function recordPayment(
   invoiceId: string,
   values: unknown
 ): Promise<{ error?: string }> {
-  const parsed = recordPaymentSchema.safeParse(values);
-  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  try {
+    const parsed = recordPaymentSchema.safeParse(values);
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  const ctx = await getOrgAndUser();
-  if (!ctx) return { error: "Not authenticated" };
+    const ctx = await getOrgAndUser();
+    if (!ctx) return { error: "Not authenticated" };
 
-  const d = parsed.data;
+    const d = parsed.data;
 
-  // Fetch current invoice
-  const { data: invoice } = await ctx.supabase
-    .from("invoices")
-    .select("client_id, total_paise, amount_paid_paise")
-    .eq("id", invoiceId)
-    .single();
+    // Fetch current invoice
+    const { data: invoice } = await ctx.supabase
+      .from("invoices")
+      .select("client_id, total_paise, amount_paid_paise")
+      .eq("id", invoiceId)
+      .single();
 
-  if (!invoice) return { error: "Invoice not found" };
+    if (!invoice) return { error: "Invoice not found" };
 
-  const amountPaise = Math.round(d.amount_inr * 100);
-  const balanceDuePaise = (invoice.total_paise ?? 0) - (invoice.amount_paid_paise ?? 0);
+    const amountPaise = Math.round(d.amount_inr * 100);
+    const balanceDuePaise = (invoice.total_paise ?? 0) - (invoice.amount_paid_paise ?? 0);
 
-  // Prevent overpayment — amount cannot exceed the remaining balance
-  if (amountPaise > balanceDuePaise) {
-    return { error: "Payment amount exceeds balance due" };
+    // Prevent overpayment — amount cannot exceed the remaining balance
+    if (amountPaise > balanceDuePaise) {
+      return { error: "Payment amount exceeds balance due" };
+    }
+
+    const newAmountPaid = (invoice.amount_paid_paise ?? 0) + amountPaise;
+    const newBalance = (invoice.total_paise ?? 0) - newAmountPaid;
+    const newStatus: InvoiceStatus = newBalance <= 0 ? "paid" : "partially_paid";
+
+    // Generate receipt number
+    const receiptNumber = await generateReceiptNumber(ctx.supabase, ctx.orgId, d.payment_date);
+
+    // Insert payment record
+    const { error: payErr } = await ctx.supabase.from("payments_received").insert({
+      organization_id: ctx.orgId,
+      created_by: ctx.user.id,
+      invoice_id: invoiceId,
+      client_id: invoice.client_id,
+      amount_paise: amountPaise,
+      payment_date: d.payment_date,
+      payment_mode: d.payment_mode as PaymentMode,
+      reference_number: str(d.reference_number),
+      bank_name: str(d.bank_name),
+      notes: str(d.notes),
+      receipt_number: receiptNumber,
+    });
+    if (payErr) return { error: payErr.message };
+
+    // Update invoice totals and status
+    const { error: updErr } = await ctx.supabase
+      .from("invoices")
+      .update({
+        amount_paid_paise: newAmountPaid,
+        balance_due_paise: Math.max(0, newBalance),
+        status: newStatus,
+        updated_by: ctx.user.id,
+      })
+      .eq("id", invoiceId);
+
+    if (updErr) return { error: updErr.message };
+
+    revalidatePath("/billing/invoices");
+    revalidatePath(`/billing/invoices/${invoiceId}`);
+    revalidatePath("/billing/receivables");
+    return {};
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "recordPayment");
   }
-
-  const newAmountPaid = (invoice.amount_paid_paise ?? 0) + amountPaise;
-  const newBalance = (invoice.total_paise ?? 0) - newAmountPaid;
-  const newStatus: InvoiceStatus = newBalance <= 0 ? "paid" : "partially_paid";
-
-  // Generate receipt number
-  const receiptNumber = await generateReceiptNumber(ctx.supabase, ctx.orgId, d.payment_date);
-
-  // Insert payment record
-  const { error: payErr } = await ctx.supabase.from("payments_received").insert({
-    organization_id: ctx.orgId,
-    created_by: ctx.user.id,
-    invoice_id: invoiceId,
-    client_id: invoice.client_id,
-    amount_paise: amountPaise,
-    payment_date: d.payment_date,
-    payment_mode: d.payment_mode as PaymentMode,
-    reference_number: str(d.reference_number),
-    bank_name: str(d.bank_name),
-    notes: str(d.notes),
-    receipt_number: receiptNumber,
-  });
-  if (payErr) return { error: payErr.message };
-
-  // Update invoice totals and status
-  const { error: updErr } = await ctx.supabase
-    .from("invoices")
-    .update({
-      amount_paid_paise: newAmountPaid,
-      balance_due_paise: Math.max(0, newBalance),
-      status: newStatus,
-      updated_by: ctx.user.id,
-    })
-    .eq("id", invoiceId);
-
-  if (updErr) return { error: updErr.message };
-
-  revalidatePath("/billing/invoices");
-  revalidatePath(`/billing/invoices/${invoiceId}`);
-  revalidatePath("/billing/receivables");
-  return {};
 }
 
 // ─── Get campaign line items (for pre-populating invoice form) ─────────────────
 
 export async function getCampaignLineItems(campaignId: string) {
-  const ctx = await getOrgAndUser();
-  if (!ctx) return { items: [], campaignValue: 0, pricingType: "itemized" as const };
+  try {
+    const ctx = await getOrgAndUser();
+    if (!ctx) return { items: [], campaignValue: 0, pricingType: "itemized" as const };
 
-  const { data: campaign } = await ctx.supabase
-    .from("campaigns")
-    .select("pricing_type, total_value_paise, campaign_name")
-    .eq("id", campaignId)
-    .single();
+    const { data: campaign } = await ctx.supabase
+      .from("campaigns")
+      .select("pricing_type, total_value_paise, campaign_name")
+      .eq("id", campaignId)
+      .single();
 
-  if (!campaign) return { items: [], campaignValue: 0, pricingType: "itemized" as const };
+    if (!campaign) return { items: [], campaignValue: 0, pricingType: "itemized" as const };
 
-  if (campaign.pricing_type === "bundled") {
-    return {
-      items: [{
-        service_type: "display_rental" as const,
-        description: `Campaign: ${campaign.campaign_name}`,
-        hsn_sac_code: "998361",
-        quantity: 1,
-        rate_inr: (campaign.total_value_paise ?? 0) / 100,
-        period_from: undefined,
-        period_to: undefined,
-        site_id: undefined,
-      }],
-      campaignValue: campaign.total_value_paise ?? 0,
-      pricingType: "bundled" as const,
-    };
+    if (campaign.pricing_type === "bundled") {
+      return {
+        items: [{
+          service_type: "display_rental" as const,
+          description: `Campaign: ${campaign.campaign_name}`,
+          hsn_sac_code: "998361",
+          quantity: 1,
+          rate_inr: (campaign.total_value_paise ?? 0) / 100,
+          period_from: undefined,
+          period_to: undefined,
+          site_id: undefined,
+        }],
+        campaignValue: campaign.total_value_paise ?? 0,
+        pricingType: "bundled" as const,
+      };
+    }
+
+    const { data: services } = await ctx.supabase
+      .from("campaign_services")
+      .select("service_type, description, quantity, rate_paise, total_paise, site_id")
+      .eq("campaign_id", campaignId);
+
+    const items = (services ?? []).map((s) => ({
+      service_type: s.service_type as "display_rental" | "flex_printing" | "mounting" | "design" | "transport" | "other",
+      description: s.description ?? s.service_type,
+      hsn_sac_code: "998361",
+      quantity: s.quantity ?? 1,
+      rate_inr: (s.rate_paise ?? 0) / 100,
+      period_from: undefined,
+      period_to: undefined,
+      site_id: s.site_id ?? undefined,
+    }));
+
+    return { items, campaignValue: 0, pricingType: "itemized" as const };
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "getCampaignLineItems");
   }
-
-  const { data: services } = await ctx.supabase
-    .from("campaign_services")
-    .select("service_type, description, quantity, rate_paise, total_paise, site_id")
-    .eq("campaign_id", campaignId);
-
-  const items = (services ?? []).map((s) => ({
-    service_type: s.service_type as "display_rental" | "flex_printing" | "mounting" | "design" | "transport" | "other",
-    description: s.description ?? s.service_type,
-    hsn_sac_code: "998361",
-    quantity: s.quantity ?? 1,
-    rate_inr: (s.rate_paise ?? 0) / 100,
-    period_from: undefined,
-    period_to: undefined,
-    site_id: s.site_id ?? undefined,
-  }));
-
-  return { items, campaignValue: 0, pricingType: "itemized" as const };
 }

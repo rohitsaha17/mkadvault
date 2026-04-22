@@ -22,6 +22,7 @@ import {
   type ExpenseSetStatusValues,
 } from "@/lib/validations/site-expense";
 import type { UserRole } from "@/lib/types/database";
+import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 
 // ── Auth helpers ────────────────────────────────────────────────────────────
 type AuthCtx = {
@@ -95,59 +96,64 @@ async function ensureExpenseBucket(): Promise<{ error?: string }> {
 export async function createExpense(
   values: ExpenseCreateValues,
 ): Promise<{ error?: string; success?: true; id?: string }> {
-  const who = await resolveCaller();
-  if (!who.ok) return { error: who.error };
+  try {
+    const who = await resolveCaller();
+    if (!who.ok) return { error: who.error };
 
-  const parsed = expenseCreateSchema.safeParse(values);
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0].message };
-  }
-  const v = parsed.data;
-
-  // If a site_id was provided, verify the site belongs to caller's org — this
-  // protects against a malicious client dropping another org's site_id.
-  const supabase = await createClient();
-  if (v.site_id) {
-    const { data: site, error: siteErr } = await supabase
-      .from("sites")
-      .select("id, organization_id")
-      .eq("id", v.site_id)
-      .single();
-    if (siteErr || !site || site.organization_id !== who.ctx.orgId) {
-      return { error: "That site doesn't belong to your organization." };
+    const parsed = expenseCreateSchema.safeParse(values);
+    if (!parsed.success) {
+      return { error: parsed.error.issues[0].message };
     }
+    const v = parsed.data;
+
+    // If a site_id was provided, verify the site belongs to caller's org — this
+    // protects against a malicious client dropping another org's site_id.
+    const supabase = await createClient();
+    if (v.site_id) {
+      const { data: site, error: siteErr } = await supabase
+        .from("sites")
+        .select("id, organization_id")
+        .eq("id", v.site_id)
+        .single();
+      if (siteErr || !site || site.organization_id !== who.ctx.orgId) {
+        return { error: "That site doesn't belong to your organization." };
+      }
+    }
+
+    const amount_paise = Math.round(v.amount_rupees * 100);
+
+    const { data, error } = await supabase
+      .from("site_expenses")
+      .insert({
+        organization_id: who.ctx.orgId,
+        site_id: v.site_id ?? null,
+        category: v.category,
+        description: v.description,
+        amount_paise,
+        payee_type: v.payee_type,
+        payee_id: v.payee_id ?? null,
+        payee_name: v.payee_name,
+        payee_contact: v.payee_contact ?? null,
+        payee_bank_details: v.payee_bank_details ?? null,
+        status: "pending",
+        needed_by: v.needed_by ?? null,
+        receipt_doc_urls: v.receipt_doc_urls ?? [],
+        notes: v.notes ?? null,
+        created_by: who.ctx.userId,
+        updated_by: who.ctx.userId,
+      })
+      .select("id")
+      .single();
+
+    if (error) return { error: error.message };
+
+    revalidatePath("/expenses");
+    if (v.site_id) revalidatePath(`/sites/${v.site_id}`);
+    return { success: true, id: data.id };
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "createExpense");
   }
-
-  const amount_paise = Math.round(v.amount_rupees * 100);
-
-  const { data, error } = await supabase
-    .from("site_expenses")
-    .insert({
-      organization_id: who.ctx.orgId,
-      site_id: v.site_id ?? null,
-      category: v.category,
-      description: v.description,
-      amount_paise,
-      payee_type: v.payee_type,
-      payee_id: v.payee_id ?? null,
-      payee_name: v.payee_name,
-      payee_contact: v.payee_contact ?? null,
-      payee_bank_details: v.payee_bank_details ?? null,
-      status: "pending",
-      needed_by: v.needed_by ?? null,
-      receipt_doc_urls: v.receipt_doc_urls ?? [],
-      notes: v.notes ?? null,
-      created_by: who.ctx.userId,
-      updated_by: who.ctx.userId,
-    })
-    .select("id")
-    .single();
-
-  if (error) return { error: error.message };
-
-  revalidatePath("/expenses");
-  if (v.site_id) revalidatePath(`/sites/${v.site_id}`);
-  return { success: true, id: data.id };
 }
 
 // ── Status transitions (approve / reject / re-open) ─────────────────────────
@@ -155,93 +161,103 @@ export async function createExpense(
 export async function setExpenseStatus(
   values: ExpenseSetStatusValues,
 ): Promise<{ error?: string; success?: true }> {
-  const who = await resolveCaller();
-  if (!who.ok) return { error: who.error };
-  if (!canSettle(who.ctx.roles)) {
-    return { error: "Only accounts / manager / admin can approve or reject" };
+  try {
+    const who = await resolveCaller();
+    if (!who.ok) return { error: who.error };
+    if (!canSettle(who.ctx.roles)) {
+      return { error: "Only accounts / manager / admin can approve or reject" };
+    }
+
+    const parsed = expenseSetStatusSchema.safeParse(values);
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    const { expense_id, status } = parsed.data;
+
+    const supabase = await createClient();
+    const { data: row, error: lookupErr } = await supabase
+      .from("site_expenses")
+      .select("id, organization_id, site_id, status")
+      .eq("id", expense_id)
+      .single();
+    if (lookupErr || !row) return { error: "Expense not found" };
+    if (row.organization_id !== who.ctx.orgId) return { error: "Cross-org update blocked" };
+    if (row.status === "paid") return { error: "Already paid — cannot change status" };
+
+    const { error } = await supabase
+      .from("site_expenses")
+      .update({ status, updated_by: who.ctx.userId })
+      .eq("id", expense_id);
+
+    if (error) return { error: error.message };
+
+    revalidatePath("/expenses");
+    if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
+    return { success: true };
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "setExpenseStatus");
   }
-
-  const parsed = expenseSetStatusSchema.safeParse(values);
-  if (!parsed.success) return { error: parsed.error.issues[0].message };
-  const { expense_id, status } = parsed.data;
-
-  const supabase = await createClient();
-  const { data: row, error: lookupErr } = await supabase
-    .from("site_expenses")
-    .select("id, organization_id, site_id, status")
-    .eq("id", expense_id)
-    .single();
-  if (lookupErr || !row) return { error: "Expense not found" };
-  if (row.organization_id !== who.ctx.orgId) return { error: "Cross-org update blocked" };
-  if (row.status === "paid") return { error: "Already paid — cannot change status" };
-
-  const { error } = await supabase
-    .from("site_expenses")
-    .update({ status, updated_by: who.ctx.userId })
-    .eq("id", expense_id);
-
-  if (error) return { error: error.message };
-
-  revalidatePath("/expenses");
-  if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
-  return { success: true };
 }
 
 // ── Mark paid ───────────────────────────────────────────────────────────────
 export async function markExpensePaid(
   values: ExpenseMarkPaidValues,
 ): Promise<{ error?: string; success?: true }> {
-  const who = await resolveCaller();
-  if (!who.ok) return { error: who.error };
-  if (!canSettle(who.ctx.roles)) {
-    return { error: "Only accounts / manager / admin can mark an expense paid" };
+  try {
+    const who = await resolveCaller();
+    if (!who.ok) return { error: who.error };
+    if (!canSettle(who.ctx.roles)) {
+      return { error: "Only accounts / manager / admin can mark an expense paid" };
+    }
+
+    const parsed = expenseMarkPaidSchema.safeParse(values);
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    const v = parsed.data;
+
+    const supabase = await createClient();
+    const { data: row, error: lookupErr } = await supabase
+      .from("site_expenses")
+      .select("id, organization_id, site_id, status, payment_proof_urls, notes")
+      .eq("id", v.expense_id)
+      .single();
+    if (lookupErr || !row) return { error: "Expense not found" };
+    if (row.organization_id !== who.ctx.orgId) return { error: "Cross-org update blocked" };
+
+    const tds_paise =
+      typeof v.tds_rupees === "number" ? Math.round(v.tds_rupees * 100) : null;
+
+    // Merge proofs rather than replace — accounts may upload a second doc later.
+    const existingProofs = (row.payment_proof_urls as string[] | null) ?? [];
+    const mergedProofs = [...existingProofs, ...(v.payment_proof_urls ?? [])];
+
+    const mergedNotes =
+      v.notes && v.notes.trim().length > 0
+        ? (row.notes ? `${row.notes}\n\n` : "") + v.notes.trim()
+        : row.notes;
+
+    const { error } = await supabase
+      .from("site_expenses")
+      .update({
+        status: "paid",
+        paid_at: v.paid_at,
+        paid_by: who.ctx.userId,
+        payment_mode: v.payment_mode,
+        payment_reference: v.payment_reference ?? null,
+        tds_paise,
+        payment_proof_urls: mergedProofs,
+        notes: mergedNotes,
+        updated_by: who.ctx.userId,
+      })
+      .eq("id", v.expense_id);
+
+    if (error) return { error: error.message };
+
+    revalidatePath("/expenses");
+    if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
+    return { success: true };
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "markExpensePaid");
   }
-
-  const parsed = expenseMarkPaidSchema.safeParse(values);
-  if (!parsed.success) return { error: parsed.error.issues[0].message };
-  const v = parsed.data;
-
-  const supabase = await createClient();
-  const { data: row, error: lookupErr } = await supabase
-    .from("site_expenses")
-    .select("id, organization_id, site_id, status, payment_proof_urls, notes")
-    .eq("id", v.expense_id)
-    .single();
-  if (lookupErr || !row) return { error: "Expense not found" };
-  if (row.organization_id !== who.ctx.orgId) return { error: "Cross-org update blocked" };
-
-  const tds_paise =
-    typeof v.tds_rupees === "number" ? Math.round(v.tds_rupees * 100) : null;
-
-  // Merge proofs rather than replace — accounts may upload a second doc later.
-  const existingProofs = (row.payment_proof_urls as string[] | null) ?? [];
-  const mergedProofs = [...existingProofs, ...(v.payment_proof_urls ?? [])];
-
-  const mergedNotes =
-    v.notes && v.notes.trim().length > 0
-      ? (row.notes ? `${row.notes}\n\n` : "") + v.notes.trim()
-      : row.notes;
-
-  const { error } = await supabase
-    .from("site_expenses")
-    .update({
-      status: "paid",
-      paid_at: v.paid_at,
-      paid_by: who.ctx.userId,
-      payment_mode: v.payment_mode,
-      payment_reference: v.payment_reference ?? null,
-      tds_paise,
-      payment_proof_urls: mergedProofs,
-      notes: mergedNotes,
-      updated_by: who.ctx.userId,
-    })
-    .eq("id", v.expense_id);
-
-  if (error) return { error: error.message };
-
-  revalidatePath("/expenses");
-  if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
-  return { success: true };
 }
 
 // ── Soft-delete ─────────────────────────────────────────────────────────────
@@ -250,40 +266,45 @@ export async function markExpensePaid(
 export async function deleteExpense(
   expenseId: string,
 ): Promise<{ error?: string; success?: true }> {
-  const who = await resolveCaller();
-  if (!who.ok) return { error: who.error };
+  try {
+    const who = await resolveCaller();
+    if (!who.ok) return { error: who.error };
 
-  const supabase = await createClient();
-  const { data: row, error: lookupErr } = await supabase
-    .from("site_expenses")
-    .select("id, organization_id, site_id, status, created_by")
-    .eq("id", expenseId)
-    .single();
-  if (lookupErr || !row) return { error: "Expense not found" };
-  if (row.organization_id !== who.ctx.orgId) return { error: "Cross-org update blocked" };
-  if (row.status === "paid") {
-    return { error: "Paid expenses are audit records and cannot be deleted" };
+    const supabase = await createClient();
+    const { data: row, error: lookupErr } = await supabase
+      .from("site_expenses")
+      .select("id, organization_id, site_id, status, created_by")
+      .eq("id", expenseId)
+      .single();
+    if (lookupErr || !row) return { error: "Expense not found" };
+    if (row.organization_id !== who.ctx.orgId) return { error: "Cross-org update blocked" };
+    if (row.status === "paid") {
+      return { error: "Paid expenses are audit records and cannot be deleted" };
+    }
+
+    // Non-finance users can only delete their own pending rows.
+    const isMine = row.created_by === who.ctx.userId;
+    if (!canSettle(who.ctx.roles) && !isMine) {
+      return { error: "You can only delete requests you created" };
+    }
+
+    const { error } = await supabase
+      .from("site_expenses")
+      .update({
+        deleted_at: new Date().toISOString(),
+        updated_by: who.ctx.userId,
+      })
+      .eq("id", expenseId);
+
+    if (error) return { error: error.message };
+
+    revalidatePath("/expenses");
+    if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
+    return { success: true };
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "deleteExpense");
   }
-
-  // Non-finance users can only delete their own pending rows.
-  const isMine = row.created_by === who.ctx.userId;
-  if (!canSettle(who.ctx.roles) && !isMine) {
-    return { error: "You can only delete requests you created" };
-  }
-
-  const { error } = await supabase
-    .from("site_expenses")
-    .update({
-      deleted_at: new Date().toISOString(),
-      updated_by: who.ctx.userId,
-    })
-    .eq("id", expenseId);
-
-  if (error) return { error: error.message };
-
-  revalidatePath("/expenses");
-  if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
-  return { success: true };
 }
 
 // ── Upload a supporting doc ──────────────────────────────────────────────────
@@ -301,37 +322,42 @@ export async function uploadExpenseDoc(
   expenseIdOrInbox: string | "inbox",
   kind: "receipt" | "proof",
 ): Promise<{ error?: string; path?: string }> {
-  const who = await resolveCaller();
-  if (!who.ok) return { error: who.error };
+  try {
+    const who = await resolveCaller();
+    if (!who.ok) return { error: who.error };
 
-  if (!fileName || !base64Data) return { error: "Missing file" };
-  // Limit to ~10 MB to match the bucket's own fileSizeLimit.
-  const estimatedBytes = Math.floor((base64Data.length * 3) / 4);
-  if (estimatedBytes > 10 * 1024 * 1024) {
-    return { error: "File too large — max 10 MB" };
+    if (!fileName || !base64Data) return { error: "Missing file" };
+    // Limit to ~10 MB to match the bucket's own fileSizeLimit.
+    const estimatedBytes = Math.floor((base64Data.length * 3) / 4);
+    if (estimatedBytes > 10 * 1024 * 1024) {
+      return { error: "File too large — max 10 MB" };
+    }
+
+    const ensured = await ensureExpenseBucket();
+    if (ensured.error) return { error: ensured.error };
+
+    // Build a safe path — strip everything but last path segment + keep extension.
+    const safeName = fileName.replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
+    const subfolder = kind === "receipt" ? "receipts" : "proofs";
+    const path = `${who.ctx.orgId}/${expenseIdOrInbox}/${subfolder}/${Date.now()}_${safeName}`;
+
+    const admin = createAdminClient();
+    const buffer = Buffer.from(base64Data, "base64");
+
+    const { error: uploadError } = await admin.storage
+      .from("expense-docs")
+      .upload(path, buffer, {
+        // Content type is best-effort guessed from extension.
+        contentType: guessMime(fileName),
+        upsert: false,
+      });
+    if (uploadError) return { error: uploadError.message };
+
+    return { path };
+  } catch (err) {
+    if (isNextInternalThrow(err)) throw err;
+    return toActionError(err, "uploadExpenseDoc");
   }
-
-  const ensured = await ensureExpenseBucket();
-  if (ensured.error) return { error: ensured.error };
-
-  // Build a safe path — strip everything but last path segment + keep extension.
-  const safeName = fileName.replace(/[^A-Za-z0-9._-]/g, "_").slice(-80);
-  const subfolder = kind === "receipt" ? "receipts" : "proofs";
-  const path = `${who.ctx.orgId}/${expenseIdOrInbox}/${subfolder}/${Date.now()}_${safeName}`;
-
-  const admin = createAdminClient();
-  const buffer = Buffer.from(base64Data, "base64");
-
-  const { error: uploadError } = await admin.storage
-    .from("expense-docs")
-    .upload(path, buffer, {
-      // Content type is best-effort guessed from extension.
-      contentType: guessMime(fileName),
-      upsert: false,
-    });
-  if (uploadError) return { error: uploadError.message };
-
-  return { path };
 }
 
 function guessMime(name: string): string {

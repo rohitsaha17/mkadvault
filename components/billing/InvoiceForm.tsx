@@ -169,6 +169,10 @@ export function InvoiceForm({
     setLoadingCampaign(true);
     try {
       const result = await getCampaignLineItems(campaignId);
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
       if (result.items.length > 0) {
         // Replace line items
         while (fields.length > 0) remove(0);
