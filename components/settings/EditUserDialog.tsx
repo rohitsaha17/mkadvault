@@ -31,13 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  updateUserRoles,
-  setUserActive,
-  setUserPassword,
-  updateUserProfile,
-  deleteUser,
-} from "@/app/[locale]/(dashboard)/settings/users/actions";
+import { callUsersApi } from "@/lib/client/users-api";
 import type { UserRole } from "@/lib/types/database";
 import type { TeamMember } from "@/app/[locale]/(dashboard)/settings/users/page";
 
@@ -100,24 +94,6 @@ export function EditUserDialog({
     startTransition(async () => {
       try {
         await fn();
-      } catch (err) {
-        // Belt-and-braces: every server action in this app returns `{ error }`
-        // on failure and never throws, but if one ever does, we surface a
-        // toast here instead of letting it bubble to the error boundary.
-        // The specific "An unexpected response was received from the server"
-        // error comes from React's action-response parser when the response
-        // body isn't a valid RSC stream — the action itself almost certainly
-        // succeeded. Treat it as a "likely-succeeded, please reload" case
-        // rather than an error.
-        console.error(`[EditUserDialog:${section}] unexpected error:`, err);
-        const msg = err instanceof Error ? err.message : "";
-        if (/unexpected response was received/i.test(msg)) {
-          toast.message(
-            "Change likely saved — reload the page to confirm.",
-          );
-        } else {
-          toast.error(msg || "Something went wrong. Try again.");
-        }
       } finally {
         setBusySection(null);
       }
@@ -131,7 +107,9 @@ export function EditUserDialog({
       return;
     }
     run("profile", async () => {
-      const res = await updateUserProfile(member.id, {
+      const res = await callUsersApi({
+        action: "update_profile",
+        user_id: member.id,
         full_name: name,
         phone: phone.trim() || null,
       });
@@ -147,7 +125,11 @@ export function EditUserDialog({
       return;
     }
     run("roles", async () => {
-      const res = await updateUserRoles(member.id, roles);
+      const res = await callUsersApi({
+        action: "update_roles",
+        user_id: member.id,
+        roles,
+      });
       if (res.error) return toast.error(res.error);
       toast.success("Role updated");
       onPatched({ role: roles[0], roles });
@@ -157,7 +139,11 @@ export function EditUserDialog({
   function handleToggleActive() {
     if (isSelf) return;
     run("active", async () => {
-      const res = await setUserActive(member.id, !member.is_active);
+      const res = await callUsersApi({
+        action: "set_active",
+        user_id: member.id,
+        is_active: !member.is_active,
+      });
       if (res.error) return toast.error(res.error);
       toast.success(member.is_active ? "User deactivated" : "User reactivated");
       onPatched({ is_active: !member.is_active });
@@ -170,7 +156,11 @@ export function EditUserDialog({
       return;
     }
     run("password", async () => {
-      const res = await setUserPassword(member.id, newPassword);
+      const res = await callUsersApi({
+        action: "set_password",
+        user_id: member.id,
+        password: newPassword,
+      });
       if (res.error) return toast.error(res.error);
       toast.success("Password updated — share it with the user securely");
       setNewPassword("");
@@ -185,7 +175,10 @@ export function EditUserDialog({
     );
     if (!ok) return;
     run("delete", async () => {
-      const res = await deleteUser(member.id);
+      const res = await callUsersApi({
+        action: "delete",
+        user_id: member.id,
+      });
       if (res.error) return toast.error(res.error);
       toast.success(`${label} deleted`);
       onDeleted();

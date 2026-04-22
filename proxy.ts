@@ -89,6 +89,17 @@ export default async function proxy(request: NextRequest) {
     return supabaseResponse;
   }
 
+  // ─── 1b. /api route early exit ─────────────────────────────────────────────
+  // API route handlers speak plain JSON, not RSC. They do their own auth in
+  // the handler itself. We must NOT let next-intl rewrite /api/... into
+  // /en/api/... (which would 404) or the proxy issue any redirects on a
+  // fetch() call (which would turn a JSON response into an HTML redirect
+  // target and break the client's `res.json()` parse). Session refresh is
+  // enough — pass through.
+  if (pathname.startsWith("/api/")) {
+    return supabaseResponse;
+  }
+
   // Helper: build a redirect response that carries Supabase's refreshed
   // session cookies. Without copying cookies, a redirect during proxy can
   // drop the newly-rotated access/refresh tokens, logging the user out.

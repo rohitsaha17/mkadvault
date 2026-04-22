@@ -23,10 +23,7 @@ import { EditUserDialog } from "@/components/settings/EditUserDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  inviteUser,
-  resendInvite,
-} from "@/app/[locale]/(dashboard)/settings/users/actions";
+import { callUsersApi } from "@/lib/client/users-api";
 import type { UserRole } from "@/lib/types/database";
 import type { TeamMember } from "@/app/[locale]/(dashboard)/settings/users/page";
 
@@ -145,56 +142,36 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
     const nameAtSubmit = fullName.trim();
     const rolesAtSubmit = selectedRoles;
     startTransition(async () => {
-      try {
-        const res = await inviteUser({
-          email: emailAtSubmit,
-          full_name: nameAtSubmit,
-          roles: rolesAtSubmit,
-        });
-        if (res.error) {
-          toast.error(res.error);
-          return;
-        }
-        toast.success(`Invite sent to ${emailAtSubmit}`);
-        setEmail("");
-        setFullName("");
-        setSelectedRoles(["viewer"]);
-        setShowInvite(false);
-        setMembers((prev) => [
-          ...prev,
-          {
-            id: `pending-${Date.now()}`,
-            full_name: nameAtSubmit,
-            email: emailAtSubmit,
-            role: rolesAtSubmit[0],
-            roles: rolesAtSubmit,
-            is_active: true,
-            phone: null,
-            last_sign_in_at: null,
-            created_at: new Date().toISOString(),
-          },
-        ]);
-        softRefresh();
-      } catch (err) {
-        // Safety net: if the server action somehow threw instead of returning
-        // `{ error }` (e.g. a redeployment with an older bundle), surface a
-        // toast here so the app doesn't crash into the dashboard error
-        // boundary. We translate the unhelpful Next/React RSC-parse error
-        // into something actionable — the invite almost certainly succeeded
-        // server-side (the action returned JSON and we only failed to stream
-        // a revalidation tree back), so ask the user to reload instead of
-        // implying the operation failed.
-        console.error("[UsersManagement:invite] unexpected error:", err);
-        const msg = err instanceof Error ? err.message : "";
-        if (/unexpected response was received/i.test(msg)) {
-          toast.success(
-            `Invite likely sent — refreshing to confirm.`,
-          );
-          softRefresh();
-        } else {
-          toast.error(msg || "Failed to send invite. Try again.");
-        }
+      const res = await callUsersApi({
+        action: "invite",
+        email: emailAtSubmit,
+        full_name: nameAtSubmit,
+        roles: rolesAtSubmit,
+      });
+      if (res.error) {
+        toast.error(res.error);
+        return;
       }
+      toast.success(`Invite sent to ${emailAtSubmit}`);
+      setEmail("");
+      setFullName("");
+      setSelectedRoles(["viewer"]);
+      setShowInvite(false);
+      setMembers((prev) => [
+        ...prev,
+        {
+          id: `pending-${Date.now()}`,
+          full_name: nameAtSubmit,
+          email: emailAtSubmit,
+          role: rolesAtSubmit[0],
+          roles: rolesAtSubmit,
+          is_active: true,
+          phone: null,
+          last_sign_in_at: null,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      softRefresh();
     });
   }
 
@@ -208,25 +185,16 @@ export function UsersManagement({ members: initialMembers, currentUserId }: Prop
     setBusyId(member.id);
     const emailForToast = member.email;
     startTransition(async () => {
-      try {
-        const res = await resendInvite(emailForToast);
-        if (res.error) toast.error(res.error);
-        else {
-          toast.success(`Invite resent to ${emailForToast}`);
-          softRefresh();
-        }
-      } catch (err) {
-        console.error("[UsersManagement:resend] unexpected error:", err);
-        const msg = err instanceof Error ? err.message : "";
-        if (/unexpected response was received/i.test(msg)) {
-          toast.success("Invite likely resent — refreshing to confirm.");
-          softRefresh();
-        } else {
-          toast.error(msg || "Failed to resend invite.");
-        }
-      } finally {
-        setBusyId(null);
+      const res = await callUsersApi({
+        action: "resend_invite",
+        email: emailForToast,
+      });
+      if (res.error) toast.error(res.error);
+      else {
+        toast.success(`Invite resent to ${emailForToast}`);
+        softRefresh();
       }
+      setBusyId(null);
     });
   }
 
