@@ -1,18 +1,18 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { format } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
 import { Button } from "@/components/ui/button";
 import {
-  ChevronLeft, Pencil, MapPin, Calendar, User, FileText, Activity, Wrench, Wallet,
+  ChevronLeft, Pencil, MapPin, Calendar, User, FileText, Wrench, Wallet,
 } from "lucide-react";
 import { CampaignStatusBar } from "@/components/campaigns/CampaignStatusBar";
 import { CampaignDetailActions } from "@/components/campaigns/CampaignDetailActions";
 import { ChangeRequestButton } from "@/components/campaigns/ChangeRequestButton";
 import { ChangeRequestsTab } from "@/components/campaigns/ChangeRequestsTab";
 import { CampaignJobsTab } from "@/components/campaigns/CampaignJobsTab";
+import { CampaignActivityTimeline, type ActivityEntry } from "@/components/campaigns/CampaignActivityTimeline";
 import { SitePreviewModal } from "@/components/sites/SitePreviewModal";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { fmt, inr } from "@/lib/utils";
@@ -88,12 +88,15 @@ export default async function CampaignDetailPage({
       .select("*")
       .eq("campaign_id", id)
       .order("created_at"),
+    // Activity log with the actor profile joined — the timeline
+     // surfaces who made each change, so we pull full_name alongside
+     // user_id rather than doing N+1 profile lookups client-side.
     supabase
       .from("campaign_activity_log")
-      .select("*")
+      .select("*, actor:profiles!campaign_activity_log_user_id_fkey(id, full_name)")
       .eq("campaign_id", id)
       .order("created_at", { ascending: false })
-      .limit(50),
+      .limit(100),
     supabase
       .from("invoices")
       .select("id, invoice_number, invoice_date, due_date, total_paise, status")
@@ -121,7 +124,21 @@ export default async function CampaignDetailPage({
 
   const campSites = (campSitesData ?? []) as unknown as CampaignSiteWithSite[];
   const campServices = (campServicesData ?? []) as unknown as CampaignService[];
-  const activity = (activityData ?? []) as unknown as CampaignActivityLog[];
+  // Activity log rows carry a joined `actor` (user_id → profiles), so we
+  // widen the local shape for the timeline component. The raw CampaignActivityLog
+  // type is still used for any future places that need the plain row.
+  const activity = (activityData ?? []) as unknown as (CampaignActivityLog & {
+    actor?: { id: string; full_name: string | null } | null;
+  })[];
+  const activityEntries: ActivityEntry[] = activity.map((e) => ({
+    id: e.id,
+    created_at: e.created_at,
+    action: e.action,
+    description: e.description,
+    old_value: e.old_value,
+    new_value: e.new_value,
+    actor: e.actor ?? null,
+  }));
   const invoices = (invoicesData ?? []) as Array<{
     id: string; invoice_number: string; invoice_date: string; due_date: string; total_paise: number; status: string;
   }>;
@@ -448,36 +465,7 @@ export default async function CampaignDetailPage({
 
             {/* Activity tab */}
             {tab === "activity" && (
-              activity.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border py-10 text-center">
-                  <Activity className="mx-auto mb-2 h-8 w-8 text-muted-foreground/60" />
-                  <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
-                </div>
-              ) : (
-                <div className="space-y-0">
-                  {activity.map((log, i) => (
-                    <div key={log.id} className="flex gap-3">
-                      <div className="flex flex-col items-center">
-                        <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary/70" />
-                        {i < activity.length - 1 && (
-                          <div className="mt-1 w-px flex-1 bg-border" />
-                        )}
-                      </div>
-                      <div className="flex-1 pb-4">
-                        <p className="text-sm text-foreground">{log.description}</p>
-                        {log.old_value && log.new_value && (
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {log.old_value} → {log.new_value}
-                          </p>
-                        )}
-                        <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                          {format(new Date(log.created_at), "dd MMM yyyy, HH:mm")}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
+              <CampaignActivityTimeline entries={activityEntries} />
             )}
 
             {/* Change Requests tab */}

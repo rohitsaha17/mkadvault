@@ -556,14 +556,21 @@ export type CampaignServiceUpdate = Partial<Omit<CampaignService, "id" | "create
 // ─── campaign_activity_log ────────────────────────────────────────────────────
 
 export type CampaignActivityAction =
+  | "created"
+  | "updated"
+  | "deleted"
   | "status_changed"
   | "note_added"
   | "file_uploaded"
   | "payment_received"
   | "site_added"
   | "site_removed"
-  | "created"
-  | "updated"
+  | "service_added"
+  | "service_removed"
+  | "service_updated"
+  | "job_added"
+  | "job_updated"
+  | "job_removed"
   | "change_requested"
   | "change_approved"
   | "change_rejected";

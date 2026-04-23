@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useTransition, useEffect, useRef } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Search, Save } from "lucide-react";
 import { createCampaignSchema, type CreateCampaignValues } from "@/lib/validations/campaign";
 import { createCampaign, saveCampaignDraft } from "@/app/[locale]/(dashboard)/campaigns/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { SitePreviewModal } from "@/components/sites/SitePreviewModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,6 +196,30 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
   // Site map for quick lookup
   const siteMap = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
 
+  // Auto-fill service quantity with the linked site's area (sqft) when
+  // rate_basis is "per_sqft" and a site is picked. Tracks the last
+  // auto-synced (rate_basis + site_id) per service so switching back to
+  // a previous selection re-applies, but manual quantity edits stick —
+  // we only sync when the trigger changes, not on every render.
+  const lastSyncedPerSqft = useRef<Map<number, string>>(new Map());
+  useEffect(() => {
+    watchedServices.forEach((svc, idx) => {
+      const key = `${svc.rate_basis}|${svc.site_id ?? ""}`;
+      const previous = lastSyncedPerSqft.current.get(idx);
+      if (previous === key) return; // unchanged → respect any manual edits
+      lastSyncedPerSqft.current.set(idx, key);
+
+      if (svc.rate_basis !== "per_sqft") return;
+      if (!svc.site_id) return;
+      const site = siteMap.get(svc.site_id);
+      if (!site?.total_sqft || site.total_sqft <= 0) return;
+      setValue(`services.${idx}.quantity`, site.total_sqft, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    });
+  }, [watchedServices, siteMap, setValue]);
+
   function handleDurationToggle(mode: "campaign" | "custom") {
     if (mode === "campaign" && durationMode === "custom" && siteFields.length > 0) {
       const ok = window.confirm(
@@ -232,7 +257,11 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
       }));
     }
     startTransition(async () => {
-      const result = await createCampaign(values);
+      // Strip any NaN / Infinity before crossing the Server Action
+      // boundary — Flight transport chokes on them and Next.js
+      // surfaces a cryptic "An unexpected response was received from
+      // the server." error page.
+      const result = await createCampaign(sanitizeForTransport(values));
       if ("error" in result) { toast.error(result.error); return; }
       toast.success("Campaign created");
       router.push(`/campaigns/${result.id}`);
@@ -681,11 +710,19 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
             const rateInr = watchedServices[idx]?.rate_inr ?? 0;
             const qty = watchedServices[idx]?.quantity ?? 1;
 
-            // Calculate total based on rate basis
-            let serviceTotal = rateInr * qty;
-            if (rateBasis === "per_sqft" && linkedSite?.total_sqft) {
-              serviceTotal = rateInr * linkedSite.total_sqft * qty;
-            }
+            // Total is always rate × quantity. For per-sqft, `quantity`
+            // IS the area in sqft (auto-filled from the linked site's
+            // width × height by the effect below); the server-side
+            // total calc matches this convention.
+            const serviceTotal = rateInr * qty;
+
+            // Did we auto-fill the quantity from the site's area?
+            // Surfaced as a small hint under the quantity input so the
+            // user understands why it's pre-populated.
+            const autoFilledFromSqft =
+              rateBasis === "per_sqft" &&
+              !!linkedSite?.total_sqft &&
+              qty === linkedSite.total_sqft;
 
             return (
               <div key={field.id} className="rounded-xl border border-border p-4 space-y-3 bg-muted/30">
@@ -733,13 +770,19 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
                   <Input {...register(`services.${idx}.description`)} placeholder="e.g. 10ft × 20ft flex printing" />
                 </F>
                 <div className="grid grid-cols-3 gap-3">
-                  <F label="Quantity">
+                  <F label={rateBasis === "per_sqft" ? "Quantity (sqft)" : "Quantity"}>
                     <Input
                       {...register(`services.${idx}.quantity`, { valueAsNumber: true })}
                       type="number"
                       min={1}
+                      step={rateBasis === "per_sqft" ? "0.01" : "1"}
                       defaultValue={1}
                     />
+                    {autoFilledFromSqft && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Auto-filled from {linkedSite?.name} area ({linkedSite?.total_sqft} sqft). Edit to override.
+                      </p>
+                    )}
                   </F>
                   <F label={rateBasis === "per_sqft" ? "Rate (₹/sqft)" : rateBasis === "other" ? `Rate (₹)` : "Rate (₹)"}>
                     <Input
@@ -754,11 +797,6 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
                     <Label className="text-sm font-medium text-foreground">Total</Label>
                     <p className="h-10 flex items-center text-sm font-medium tabular-nums text-foreground">
                       {serviceTotal > 0 ? inrAmount(Math.round(serviceTotal)) : "—"}
-                      {rateBasis === "per_sqft" && linkedSite?.total_sqft && (
-                        <span className="ml-1 text-[10px] text-muted-foreground font-normal">
-                          ({linkedSite.total_sqft} sqft)
-                        </span>
-                      )}
                     </p>
                   </div>
                 </div>
@@ -784,14 +822,11 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
             });
             const sitesTotal = sitesTotals.reduce((a, b) => a + b, 0);
 
-            // Calculate service totals
+            // Calculate service totals. Quantity already carries the
+            // area (sqft) for per_sqft rows — no double-multiply.
             const servicesTotals = values.services.map((s) => {
               const qty = s.quantity ?? 1;
               const rate = s.rate_inr ?? 0;
-              if (s.rate_basis === "per_sqft" && s.site_id) {
-                const site = siteMap.get(s.site_id);
-                return rate * (site?.total_sqft ?? 0) * qty;
-              }
               return rate * qty;
             });
             const servicesTotal = servicesTotals.reduce((a, b) => a + b, 0);
@@ -978,7 +1013,11 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
               return;
             }
             startDraftTransition(async () => {
-              const result = await saveCampaignDraft(vals);
+              // getValues() returns the raw form state — if a number
+              // input was cleared, it holds NaN. Strip those before
+              // sending, otherwise Flight transport returns an HTML
+              // error page ("An unexpected response…").
+              const result = await saveCampaignDraft(sanitizeForTransport(vals));
               if ("error" in result) { toast.error(result.error); return; }
               toast.success("Draft saved");
               router.push(`/campaigns/${result.id}`);

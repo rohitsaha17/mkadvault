@@ -236,6 +236,20 @@ export async function POST(request: Request) {
     }
   }
 
+  // Best-effort: log this to campaign_activity_log so the campaign's
+  // Activity tab shows who added what job. Silent on failure — the
+  // job itself is already saved.
+  await supabase.from("campaign_activity_log").insert({
+    organization_id: orgId,
+    campaign_id,
+    user_id: userId,
+    action: "job_added",
+    description: `Added ${job_type.replace(/_/g, " ")} job: ${description}${
+      source === "external" && vendor_name ? ` (vendor: ${vendor_name})` : ""
+    }`,
+    new_value: cost_paise != null ? `₹${(cost_paise / 100).toLocaleString("en-IN")}` : null,
+  });
+
   return jsonOk({
     job: { ...job, expense_id: linkedExpenseId ?? job.expense_id ?? null },
     expense_id: linkedExpenseId,
@@ -258,10 +272,12 @@ export async function PATCH(request: Request) {
   if (!auth.ok) return jsonErr(auth.error);
   const { supabase, userId, orgId } = auth;
 
-  // Load the job to verify org ownership.
+  // Load the job to verify org ownership + capture the fields we might
+  // log against (status, description) so the activity entry reads as a
+  // proper old→new transition.
   const { data: existing } = await supabase
     .from("campaign_jobs")
-    .select("id, organization_id, source")
+    .select("id, organization_id, source, campaign_id, job_type, status, description")
     .eq("id", id)
     .single();
   if (!existing) return jsonErr("Job not found");
@@ -312,6 +328,22 @@ export async function PATCH(request: Request) {
     .single();
   if (updErr) return jsonErr(`Update failed: ${updErr.message}`);
 
+  // Log a status change distinctly so the timeline reads cleanly.
+  // Any other edits collapse into a generic "updated".
+  const statusChanged =
+    typeof patch.status === "string" && patch.status !== existing.status;
+  await supabase.from("campaign_activity_log").insert({
+    organization_id: orgId,
+    campaign_id: existing.campaign_id,
+    user_id: userId,
+    action: "job_updated",
+    description: statusChanged
+      ? `${existing.job_type.replace(/_/g, " ")} job "${existing.description}" status changed`
+      : `Updated ${existing.job_type.replace(/_/g, " ")} job: ${existing.description}`,
+    old_value: statusChanged ? existing.status : null,
+    new_value: statusChanged ? (patch.status as string) : null,
+  });
+
   return jsonOk({ job: updated });
 }
 
@@ -332,7 +364,7 @@ export async function DELETE(request: Request) {
 
   const { data: existing } = await supabase
     .from("campaign_jobs")
-    .select("id, organization_id, expense_id")
+    .select("id, organization_id, expense_id, campaign_id, job_type, description")
     .eq("id", id)
     .single();
   if (!existing) return jsonErr("Job not found");
@@ -345,6 +377,14 @@ export async function DELETE(request: Request) {
     .update({ deleted_at: new Date().toISOString(), updated_by: userId })
     .eq("id", id);
   if (delErr) return jsonErr(`Delete failed: ${delErr.message}`);
+
+  await supabase.from("campaign_activity_log").insert({
+    organization_id: orgId,
+    campaign_id: existing.campaign_id,
+    user_id: userId,
+    action: "job_removed",
+    description: `Removed ${existing.job_type.replace(/_/g, " ")} job: ${existing.description}`,
+  });
 
   return jsonOk({
     // Let the client know if there was a linked expense it might also
