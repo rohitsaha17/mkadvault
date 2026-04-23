@@ -118,8 +118,9 @@ export async function createExpense(
     }
     const v = parsed.data;
 
-    // If a site_id was provided, verify the site belongs to caller's org — this
-    // protects against a malicious client dropping another org's site_id.
+    // If a site_id or campaign_id was provided, verify it belongs to the
+    // caller's org — protects against a malicious client dropping another
+    // org's id into the insert.
     const supabase = await createClient();
     if (v.site_id) {
       const { data: site, error: siteErr } = await supabase
@@ -131,6 +132,16 @@ export async function createExpense(
         return { error: "That site doesn't belong to your organization." };
       }
     }
+    if (v.campaign_id) {
+      const { data: camp, error: campErr } = await supabase
+        .from("campaigns")
+        .select("id, organization_id")
+        .eq("id", v.campaign_id)
+        .single();
+      if (campErr || !camp || camp.organization_id !== who.ctx.orgId) {
+        return { error: "That campaign doesn't belong to your organization." };
+      }
+    }
 
     const amount_paise = Math.round(v.amount_rupees * 100);
 
@@ -139,6 +150,7 @@ export async function createExpense(
       .insert({
         organization_id: who.ctx.orgId,
         site_id: v.site_id ?? null,
+        campaign_id: v.campaign_id ?? null,
         category: v.category,
         description: v.description,
         amount_paise,

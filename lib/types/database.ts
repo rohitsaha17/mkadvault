@@ -797,6 +797,10 @@ export interface SiteExpense {
   id: string;
   organization_id: string;
   site_id: string | null;
+  // Optional campaign link — set when the payment request relates to a
+  // specific booking (e.g. flex print/mount for a particular campaign).
+  // Left NULL for overhead expenses that aren't tied to any campaign.
+  campaign_id: string | null;
 
   category: ExpenseCategory;
   description: string;

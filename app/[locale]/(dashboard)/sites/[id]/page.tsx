@@ -131,7 +131,7 @@ export default async function SiteDetailPage({ params }: Props) {
       // Campaign bookings
       supabase
         .from("campaign_sites")
-        .select("id, campaign_id, start_date, end_date, status, site_rate_paise, campaigns(id, campaign_name, start_date, end_date, status, client_id, clients(company_name))")
+        .select("id, campaign_id, start_date, end_date, status, display_rate_paise, campaigns(id, campaign_name, start_date, end_date, status, client_id, clients(company_name))")
         .eq("site_id", id)
         .order("start_date", { ascending: false })
         .limit(50),
@@ -157,7 +157,7 @@ export default async function SiteDetailPage({ params }: Props) {
     payment_model: string; rent_amount_paise: number | null; start_date: string; end_date: string; status: string;
   }>;
   const campaignSites = (campaignSitesResult.data ?? []) as unknown as Array<{
-    id: string; campaign_id: string; start_date: string; end_date: string; status: string; site_rate_paise: number | null;
+    id: string; campaign_id: string; start_date: string; end_date: string; status: string; display_rate_paise: number | null;
     campaigns: { id: string; campaign_name: string; start_date: string; end_date: string; status: string; client_id: string; clients: { company_name: string } | null } | null;
   }>;
 
@@ -266,6 +266,22 @@ export default async function SiteDetailPage({ params }: Props) {
                   },
                 ]}
                 defaultSiteId={id}
+                // Campaigns that booked this site — lets the user tag a
+                // payment request to a specific booking (e.g. flex
+                // printing for Campaign X). Pulled from the campaign
+                // bookings we already fetched for this page.
+                campaigns={campaignSites
+                  .map((cs) => cs.campaigns)
+                  .filter((c): c is NonNullable<typeof c> => !!c)
+                  .map((c) => ({
+                    id: c.id,
+                    campaign_name: c.campaign_name,
+                    campaign_code: null,
+                  }))
+                  // Dedupe by id in case the same campaign appears twice.
+                  .filter(
+                    (c, i, arr) => arr.findIndex((x) => x.id === c.id) === i,
+                  )}
                 triggerLabel="New request"
                 triggerSize="sm"
               />
@@ -466,7 +482,7 @@ export default async function SiteDetailPage({ params }: Props) {
                       </div>
                       <div className="flex items-center gap-3 shrink-0">
                         <span className="text-sm font-semibold tabular-nums text-foreground">
-                          {formatRate(cs.site_rate_paise)}
+                          {formatRate(cs.display_rate_paise)}
                         </span>
                         <StatusBadge status={camp.status} />
                       </div>

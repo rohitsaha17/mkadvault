@@ -2,7 +2,7 @@
 //
 // Numbers returned:
 //   revenue_paise       — money earned from campaigns that used this site
-//                         (sum of campaign_sites.site_rate_paise over the
+//                         (sum of campaign_sites.display_rate_paise over the
 //                          window). All historical campaigns, including ones
 //                          currently live.
 //   rent_cost_paise     — money paid to landowner/agency via contract payments
@@ -125,7 +125,7 @@ export async function getSiteAnalytics(
   // Pull every booking where the booking window touches ours.
   const { data: bookings } = await supabase
     .from("campaign_sites")
-    .select("campaign_id, start_date, end_date, site_rate_paise, status")
+    .select("campaign_id, start_date, end_date, display_rate_paise, status")
     .eq("site_id", siteId)
     .lte("start_date", toDate)
     .gte("end_date", fromDate);
@@ -172,12 +172,12 @@ export async function getSiteAnalytics(
     );
   }
 
-  // ── 5. Revenue — sum of site_rate_paise, attributing pro-rata by overlap ──
+  // ── 5. Revenue — sum of display_rate_paise, attributing pro-rata by overlap ──
   // For now a simpler attribution: include the full site_rate if the booking
   // overlaps the window at all. Good enough for a top-line number and keeps
   // the numbers intuitive ("book a campaign, see the full value show up").
   const revenuePaise = bookingRows.reduce(
-    (sum, b) => sum + (b.site_rate_paise ?? 0),
+    (sum, b) => sum + (b.display_rate_paise ?? 0),
     0,
   );
 
@@ -218,7 +218,7 @@ export async function getSiteAnalytics(
   for (const b of bookingRows) {
     const k = monthKey(b.start_date < fromDate ? fromDate : b.start_date);
     if (k in buckets) {
-      buckets[k].revenue_paise += b.site_rate_paise ?? 0;
+      buckets[k].revenue_paise += b.display_rate_paise ?? 0;
     }
   }
   for (const e of expensesPaid ?? []) {

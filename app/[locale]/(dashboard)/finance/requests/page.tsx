@@ -69,16 +69,33 @@ export default async function FinanceRequestsPage({
       : [];
   const canSettle = rolesArr.some((r) => FINANCE_ROLES.includes(r));
 
-  const { data: sitesData } = await supabase
-    .from("sites")
-    .select("id, name, site_code")
-    .is("deleted_at", null)
-    .order("name")
-    .limit(500);
-  const sites = (sitesData ?? []) as {
+  const [sitesResult, campaignsResult] = await Promise.all([
+    supabase
+      .from("sites")
+      .select("id, name, site_code")
+      .is("deleted_at", null)
+      .order("name")
+      .limit(500),
+    // Non-archived campaigns — used as the optional campaign tag in
+    // the New Request dialog. Cap at a sensible number so the dropdown
+    // stays usable.
+    supabase
+      .from("campaigns")
+      .select("id, campaign_name, campaign_code, status, start_date")
+      .is("deleted_at", null)
+      .not("status", "in", "(dismounted,cancelled)")
+      .order("start_date", { ascending: false })
+      .limit(500),
+  ]);
+  const sites = (sitesResult.data ?? []) as {
     id: string;
     name: string;
     site_code: string | null;
+  }[];
+  const campaignsForTag = (campaignsResult.data ?? []) as {
+    id: string;
+    campaign_name: string;
+    campaign_code: string | null;
   }[];
 
   let query = supabase
@@ -140,7 +157,11 @@ export default async function FinanceRequestsPage({
         title="Payment requests"
         description="Create, filter, and settle payment requests for site expenses."
         actions={
-          <NewExpenseDialog sites={sites} triggerLabel="New request" />
+          <NewExpenseDialog
+            sites={sites}
+            campaigns={campaignsForTag}
+            triggerLabel="New request"
+          />
         }
       />
 

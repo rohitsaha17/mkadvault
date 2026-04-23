@@ -6,7 +6,8 @@
 // `uploadExpenseDoc` server action → gets back a storage path which we store
 // in `receipt_doc_urls`. This mirrors the pattern used by other upload dialogs.
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Loader2, X, Upload, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,11 @@ interface Props {
   // pick the wrong one. When opened from /expenses it's free-form.
   sites?: { id: string; name: string; site_code: string | null }[];
   defaultSiteId?: string;
+  // Optional campaign picker — lets users tag a payment request to a
+  // specific campaign (flex printing for Campaign A, mounting for
+  // Campaign B, etc.). Leave empty to skip the field entirely.
+  campaigns?: { id: string; campaign_name: string; campaign_code: string | null }[];
+  defaultCampaignId?: string;
   // Nudge to refresh when the create succeeds. Parent usually calls
   // router.refresh() here.
   onCreated?: () => void;
@@ -64,6 +70,8 @@ function fileToBase64(file: File): Promise<string> {
 export function NewExpenseDialog({
   sites = [],
   defaultSiteId,
+  campaigns = [],
+  defaultCampaignId,
   onCreated,
   triggerLabel = "New request",
   triggerVariant = "default",
@@ -75,6 +83,29 @@ export function NewExpenseDialog({
   const formRef = useRef<HTMLFormElement>(null);
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // The modal markup is rendered via createPortal to document.body so
+  // it escapes any parent that has `transform`, `overflow`, or `filter`
+  // set — without the portal, `position: fixed` becomes relative to
+  // the nearest such ancestor and the modal visibly scrolls with the
+  // page. This was the bug on the site detail page where the card
+  // container's transform was pulling the dialog along with the scroll.
+  // Portal only exists on the client, so we gate on mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Lock the page's scroll while the modal is open so scroll events
+  // target the dialog body rather than the underlying page.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   function resetAll() {
     setDocs([]);
@@ -120,6 +151,7 @@ export function NewExpenseDialog({
 
     const values = {
       site_id: (fd.get("site_id") as string) || null,
+      campaign_id: (fd.get("campaign_id") as string) || null,
       category: fd.get("category") as ExpenseCategory,
       description: String(fd.get("description") ?? "").trim(),
       amount_rupees: amountRupees,
@@ -162,14 +194,20 @@ export function NewExpenseDialog({
         {triggerLabel}
       </Button>
 
-      {open && (
+      {open && mounted && createPortal(
         // Modal uses a flex column layout so header (shrink-0) + scrollable
         // body (flex-1 overflow-y-auto) + footer (shrink-0) stay visible at
         // once — the submit button never falls below the fold, which was the
         // original viewability complaint. Outer padding is smaller on mobile
         // so the card fills the screen properly on phones.
+        //
+        // Rendered via createPortal to document.body so `position: fixed`
+        // is relative to the viewport regardless of parent transforms /
+        // overflow. Without the portal the dialog visibly scrolls with
+        // the page when a grandparent has `transform` — the bug the user
+        // reported on the site detail page.
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-2 sm:items-center sm:p-4"
+          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/50 p-2 sm:items-center sm:p-4"
           onClick={() => setOpen(false)}
         >
           <div
@@ -233,6 +271,28 @@ export function NewExpenseDialog({
                     </select>
                   </Field>
                 </div>
+
+                {/* Optional campaign tag — visible only when the caller
+                    actually passed in a campaigns list (e.g. from a page
+                    that has that data on hand). Helps attribute this
+                    expense to a specific campaign on the P&L. */}
+                {campaigns.length > 0 && (
+                  <Field
+                    label="Campaign"
+                    hint="Optional — tag this request to a campaign for P&L attribution"
+                  >
+                    <PartySelect
+                      name="campaign_id"
+                      defaultValue={defaultCampaignId ?? ""}
+                      options={campaigns.map((c) => ({
+                        id: c.id,
+                        label: c.campaign_code
+                          ? `${c.campaign_name} (${c.campaign_code})`
+                          : c.campaign_name,
+                      }))}
+                    />
+                  </Field>
+                )}
 
                 <Field label="Description" required>
                   <Input
@@ -403,7 +463,8 @@ export function NewExpenseDialog({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

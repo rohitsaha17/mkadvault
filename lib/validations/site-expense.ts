@@ -47,6 +47,10 @@ export const paymentModeEnum = z.enum([
 // be logged.
 export const expenseCreateSchema = z.object({
   site_id: z.string().uuid().nullable().optional(),
+  // Optional — tag the request to a specific campaign for P&L attribution.
+  // Can be combined with site_id (this expense is for site X, campaign Y)
+  // or left null for overhead expenses unrelated to a campaign.
+  campaign_id: z.string().uuid().nullable().optional(),
   category: expenseCategoryEnum,
   description: z.string().trim().min(3, "Give a one-line description").max(500),
   amount_rupees: z
