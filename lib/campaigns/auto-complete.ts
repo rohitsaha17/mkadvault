@@ -31,6 +31,7 @@ const ACTIVE_CAMPAIGN_STATUSES = [
 interface AutoCompleteResult {
   completed: number;
   sitesFreed: number;
+  sitesBooked: number;
   errors: string[];
 }
 
@@ -41,7 +42,12 @@ interface AutoCompleteResult {
 export async function autoCompletePastDueCampaigns(
   supabase: SupabaseClient
 ): Promise<AutoCompleteResult> {
-  const result: AutoCompleteResult = { completed: 0, sitesFreed: 0, errors: [] };
+  const result: AutoCompleteResult = {
+    completed: 0,
+    sitesFreed: 0,
+    sitesBooked: 0,
+    errors: [],
+  };
 
   // Today at midnight IST (UTC+5:30) — campaigns ending today are still active,
   // only complete campaigns whose end_date is strictly before today.
@@ -62,7 +68,14 @@ export async function autoCompletePastDueCampaigns(
   }
 
   if (!expiredCampaigns || expiredCampaigns.length === 0) {
-    return result; // nothing to do
+    // Even if nothing completed, still sync site statuses — a confirmed
+    // campaign whose start_date just arrived, or a stored 'booked' status
+    // that's gone stale, will be corrected below.
+    const sync = await syncSiteStatuses(supabase);
+    result.sitesBooked += sync.booked;
+    result.sitesFreed += sync.freed;
+    if (sync.error) result.errors.push(sync.error);
+    return result;
   }
 
   console.log(
@@ -142,5 +155,113 @@ export async function autoCompletePastDueCampaigns(
     }
   }
 
+  // Final sync pass — covers two cases the per-campaign loop above doesn't:
+  //   1. A campaign that's already in an active status (confirmed / mounted /
+  //      live) but its site is still stored as 'available'. This happens when
+  //      campaigns are inserted directly (bulk import) or created before
+  //      today but go active later.
+  //   2. A site marked 'booked' whose last live campaign was cancelled /
+  //      deleted and no other live campaign overlaps today.
+  const sync = await syncSiteStatuses(supabase);
+  result.sitesBooked += sync.booked;
+  result.sitesFreed += sync.freed;
+  if (sync.error) result.errors.push(sync.error);
+
   return result;
+}
+
+/**
+ * Reconciles sites.status against the campaign_sites that cover TODAY.
+ *
+ * A site is 'booked' right now iff there exists a campaign_site where:
+ *   - start_date <= today <= end_date
+ *   - parent campaign is not deleted AND status is in ACTIVE_CAMPAIGN_STATUSES
+ *
+ * Called after auto-complete inside autoCompletePastDueCampaigns, and can be
+ * invoked directly if the caller just wants to re-sync.
+ *
+ * Leaves 'maintenance' and 'blocked' statuses alone — those are explicit
+ * admin overrides and must not be clobbered by automatic sync.
+ */
+export async function syncSiteStatuses(
+  supabase: SupabaseClient,
+): Promise<{ booked: number; freed: number; error?: string }> {
+  const today = new Date().toISOString().split("T")[0];
+
+  // Pull campaign_sites that cover today, with parent campaign status.
+  const { data: overlapping, error: fetchErr } = await supabase
+    .from("campaign_sites")
+    .select("site_id, campaign:campaigns(status, deleted_at)")
+    .lte("start_date", today)
+    .gte("end_date", today);
+
+  if (fetchErr) {
+    return { booked: 0, freed: 0, error: fetchErr.message };
+  }
+
+  // Supabase's JS types render a to-one relation as an array; normalise
+  // either shape to a single object.
+  type CampaignRef = { status: string; deleted_at: string | null } | null;
+  const normaliseCampaign = (raw: unknown): CampaignRef => {
+    if (!raw) return null;
+    const obj = Array.isArray(raw) ? raw[0] : raw;
+    if (!obj || typeof obj !== "object") return null;
+    const o = obj as Record<string, unknown>;
+    return {
+      status: typeof o.status === "string" ? o.status : "",
+      deleted_at:
+        typeof o.deleted_at === "string" ? o.deleted_at : (o.deleted_at as null),
+    };
+  };
+
+  const shouldBeBooked = new Set<string>();
+  for (const row of overlapping ?? []) {
+    const camp = normaliseCampaign(
+      (row as { campaign?: unknown }).campaign,
+    );
+    if (!camp || camp.deleted_at) continue;
+    if (ACTIVE_CAMPAIGN_STATUSES.includes(camp.status)) {
+      shouldBeBooked.add(row.site_id as string);
+    }
+  }
+
+  // Book sites that should be booked but aren't — only flip from 'available'
+  // or 'expired' (don't touch manual maintenance/blocked/deleted).
+  let booked = 0;
+  if (shouldBeBooked.size > 0) {
+    const { data: flipped, error: bookErr } = await supabase
+      .from("sites")
+      .update({ status: "booked" })
+      .in("id", Array.from(shouldBeBooked))
+      .in("status", ["available", "expired"])
+      .is("deleted_at", null)
+      .select("id");
+    if (bookErr) return { booked: 0, freed: 0, error: bookErr.message };
+    booked = (flipped ?? []).length;
+  }
+
+  // Free sites that are stored as 'booked' but no longer have a live
+  // campaign overlapping today.
+  const { data: currentlyBooked } = await supabase
+    .from("sites")
+    .select("id")
+    .eq("status", "booked")
+    .is("deleted_at", null);
+
+  const toFree = (currentlyBooked ?? [])
+    .map((s) => s.id as string)
+    .filter((id) => !shouldBeBooked.has(id));
+
+  let freed = 0;
+  if (toFree.length > 0) {
+    const { data: freedRows, error: freeErr } = await supabase
+      .from("sites")
+      .update({ status: "available" })
+      .in("id", toFree)
+      .select("id");
+    if (freeErr) return { booked, freed: 0, error: freeErr.message };
+    freed = (freedRows ?? []).length;
+  }
+
+  return { booked, freed };
 }

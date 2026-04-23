@@ -5,6 +5,7 @@ import { setRequestLocale, getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { Plus, MapPin, Calendar, LayoutList, FileBarChart, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { syncSiteStatuses } from "@/lib/campaigns/auto-complete";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -83,6 +84,16 @@ export default async function SitesPage({ params, searchParams }: Props) {
   const sortDir = sp.dir === "desc" ? "desc" : "asc";
 
   const supabase = await createClient();
+
+  // Reconcile sites.status with current live campaigns BEFORE we query.
+  // Cheap (~2-3 queries) and keeps the list always accurate — a site with
+  // an active campaign spanning today is marked 'booked' here, one whose
+  // last campaign just ended is released to 'available'. Fire-and-forget
+  // would leave this render stale, so we await.
+  await syncSiteStatuses(supabase).catch(() => {
+    // Don't block the page if the sync ever hiccups — worst case the
+    // user sees yesterday's status for a moment.
+  });
 
   // ── Build query ────────────────────────────────────────────────────────────
   let query = supabase
