@@ -3,7 +3,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, ChevronRight, XCircle, RotateCcw } from "lucide-react";
-import { updateCampaignStatus, cancelCampaign, revertToEnquiry } from "@/app/[locale]/(dashboard)/campaigns/actions";
+import { updateCampaignStatus, revertToEnquiry } from "@/app/[locale]/(dashboard)/campaigns/actions";
 import { Button } from "@/components/ui/button";
 import type { CampaignStatus, ServiceType } from "@/lib/types/database";
 
@@ -72,12 +72,24 @@ export function CampaignStatusBar({ campaignId, currentStatus, serviceTypes }: P
 
   function handleCancel() {
     startTransition(async () => {
-      const result = await cancelCampaign(campaignId);
-      if (result.error) {
-        toast.error(result.error);
-      } else {
+      try {
+        // Use Route Handler (stable URL) instead of Server Action
+        // directly — avoids the stale-action-hash class of errors
+        // ("An unexpected response was received from the server.")
+        // that hits users with tabs open across a deploy.
+        const res = await fetch(`/api/campaigns/${campaignId}/cancel`, {
+          method: "POST",
+          credentials: "same-origin",
+        });
+        const data = await res.json().catch(() => ({ error: "Invalid server response" }));
+        if (data?.error) {
+          toast.error(data.error);
+          return;
+        }
         toast.success("Campaign cancelled");
         router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Cancel failed");
       }
     });
     setShowCancelConfirm(false);

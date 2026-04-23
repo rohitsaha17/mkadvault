@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Search, Save } from "lucide-react";
 import { createCampaignSchema, type CreateCampaignValues } from "@/lib/validations/campaign";
-import { createCampaign, saveCampaignDraft } from "@/app/[locale]/(dashboard)/campaigns/actions";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { SitePreviewModal } from "@/components/sites/SitePreviewModal";
 import { Button } from "@/components/ui/button";
@@ -349,15 +348,25 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
     }
     startTransition(async () => {
       try {
-        // Strip any NaN / Infinity before crossing the Server Action
-        // boundary — Flight transport chokes on them and Next.js
-        // surfaces a cryptic "An unexpected response was received from
-        // the server." error page.
-        const result = await createCampaign(sanitizeForTransport(values));
-        if ("error" in result) { toast.error(result.error); return; }
+        // Use the Route Handler (POST /api/campaigns) instead of a
+        // Server Action directly. Route Handler URLs are stable across
+        // deploys — Server Action URLs are content-hashed per build,
+        // which means a browser with a cached client bundle from an
+        // earlier deploy hits a 404 HTML page on submit and shows the
+        // "An unexpected response was received from the server." error.
+        const clean = sanitizeForTransport(values);
+        const res = await fetch("/api/campaigns", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(clean),
+        });
+        const data = await res.json().catch(() => ({ error: "Invalid server response" }));
+        if (data?.error) { toast.error(data.error); return; }
+        if (!data?.id) { toast.error("Unexpected server response"); return; }
         clearAutosave();
         toast.success("Campaign created");
-        router.push(`/campaigns/${result.id}`);
+        router.push(`/campaigns/${data.id}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
@@ -1110,15 +1119,21 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
             }
             startDraftTransition(async () => {
               try {
-                // getValues() returns the raw form state — if a number
-                // input was cleared, it holds NaN. Strip those before
-                // sending, otherwise Flight transport returns an HTML
-                // error page ("An unexpected response…").
-                const result = await saveCampaignDraft(sanitizeForTransport(vals));
-                if ("error" in result) { toast.error(result.error); return; }
+                // Use /api/campaigns?mode=draft instead of the Server
+                // Action to avoid the stale-action-hash class of errors.
+                const clean = sanitizeForTransport(vals);
+                const res = await fetch("/api/campaigns?mode=draft", {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(clean),
+                });
+                const data = await res.json().catch(() => ({ error: "Invalid server response" }));
+                if (data?.error) { toast.error(data.error); return; }
+                if (!data?.id) { toast.error("Unexpected server response"); return; }
                 clearAutosave();
                 toast.success("Draft saved");
-                router.push(`/campaigns/${result.id}`);
+                router.push(`/campaigns/${data.id}`);
               } catch (err) {
                 toast.error(err instanceof Error ? err.message : "Save failed");
               }
