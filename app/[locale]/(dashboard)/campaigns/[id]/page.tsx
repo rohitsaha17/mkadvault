@@ -13,9 +13,11 @@ import { ChangeRequestButton } from "@/components/campaigns/ChangeRequestButton"
 import { ChangeRequestsTab } from "@/components/campaigns/ChangeRequestsTab";
 import { CampaignJobsTab } from "@/components/campaigns/CampaignJobsTab";
 import { CampaignActivityTimeline, type ActivityEntry } from "@/components/campaigns/CampaignActivityTimeline";
+import { CampaignPhotosTab } from "@/components/campaigns/CampaignPhotosTab";
 import { SitePreviewModal } from "@/components/sites/SitePreviewModal";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { fmt, inr } from "@/lib/utils";
+import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import type {
   Campaign, Client, CampaignSite, CampaignService, CampaignActivityLog, CampaignChangeRequest, CampaignJob, Site, ServiceType,
 } from "@/lib/types/database";
@@ -77,6 +79,8 @@ export default async function CampaignDetailPage({
     { data: changeRequestsData },
     { data: jobsData },
     { data: agenciesData },
+    { data: campaignData },
+    { data: photosData },
   ] = await Promise.all([
     supabase
       .from("campaign_sites")
@@ -120,6 +124,21 @@ export default async function CampaignDetailPage({
       .select("id, agency_name")
       .is("deleted_at", null)
       .order("agency_name"),
+    // Campaign row with created_by for the Photos tab's "your duty"
+    // nudge + permission check. The FK points at auth.users, not
+    // profiles, so we look the creator's name up in a second query below.
+    supabase
+      .from("campaigns")
+      .select("id, created_by")
+      .eq("id", id)
+      .maybeSingle(),
+    // Campaign-linked photos (migration 034) — server-side sign their
+    // paths so the Photos tab opens without a client-side round-trip.
+    supabase
+      .from("site_photos")
+      .select("id, site_id, campaign_site_id, photo_url, created_at")
+      .eq("campaign_id", id)
+      .order("created_at", { ascending: false }),
   ]);
 
   const campSites = (campSitesData ?? []) as unknown as CampaignSiteWithSite[];
@@ -146,6 +165,64 @@ export default async function CampaignDetailPage({
   const jobs = (jobsData ?? []) as unknown as CampaignJob[];
   const agencyOptions = (agenciesData ?? []) as Array<{ id: string; agency_name: string }>;
   const hasPendingChangeRequest = changeRequests.some((r) => r.status === "pending");
+
+  // ── Photos tab wiring ────────────────────────────────────────────────
+  const campaignRow = campaignData as { created_by?: string | null } | null;
+  const campaignCreatorId = campaignRow?.created_by ?? null;
+
+  // Look up creator name for the "your duty" nudge (FK targets auth.users,
+  // not profiles, so PostgREST can't embed it directly).
+  let creatorName: string | null = null;
+  if (campaignCreatorId) {
+    const { data: creatorRow } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", campaignCreatorId)
+      .maybeSingle();
+    creatorName = creatorRow?.full_name ?? null;
+  }
+
+  // Who's allowed to upload? The creator + admin / manager / executive.
+  const currentUserId = session?.user?.id ?? null;
+  const canUploadPhotos =
+    (!!currentUserId && currentUserId === campaignCreatorId) ||
+    userRoles.some((r) =>
+      ["super_admin", "admin", "manager", "executive"].includes(r),
+    );
+
+  // Sign photo URLs server-side so the Photos tab opens instantly.
+  const rawPhotoRows = (photosData ?? []) as Array<{
+    id: string;
+    site_id: string;
+    campaign_site_id: string | null;
+    photo_url: string;
+    created_at: string;
+  }>;
+  const photoPaths = rawPhotoRows
+    .map((p) => p.photo_url)
+    .filter((u): u is string => !!u && !/^https?:\/\//i.test(u));
+  const signedPhotoMap = await getSignedUrls("site-photos", photoPaths);
+  const campaignPhotos = rawPhotoRows.map((p) => ({
+    id: p.id,
+    site_id: p.site_id,
+    campaign_site_id: p.campaign_site_id,
+    photo_url: p.photo_url,
+    created_at: p.created_at,
+    signedUrl: /^https?:\/\//i.test(p.photo_url)
+      ? p.photo_url
+      : signedPhotoMap[p.photo_url] ?? null,
+  }));
+
+  // One row per campaign_site for the tab's group headers.
+  const photoSiteRows = campSites
+    .filter((cs) => !!cs.site)
+    .map((cs) => ({
+      campaign_site_id: cs.id,
+      site_id: cs.site!.id,
+      site_name: cs.site!.name,
+      site_code: cs.site!.site_code ?? null,
+      city: cs.site!.city ?? null,
+    }));
 
   // Site options for the "Add job" dialog — each campaign_site becomes a
   // picker option. The dialog can also leave the site blank for
@@ -175,6 +252,7 @@ export default async function CampaignDetailPage({
     { key: "sites", label: `Sites (${campSites.length})` },
     { key: "services", label: `Services (${campServices.length})` },
     { key: "jobs", label: `Jobs (${jobs.length})` },
+    { key: "photos", label: `Photos (${campaignPhotos.length})` },
     { key: "invoices", label: `Invoices (${invoices.length})` },
     { key: "financials", label: "Financials" },
     { key: "activity", label: "Activity" },
@@ -461,6 +539,17 @@ export default async function CampaignDetailPage({
                   )}
                 </div>
               </div>
+            )}
+
+            {/* Photos tab */}
+            {tab === "photos" && (
+              <CampaignPhotosTab
+                campaignId={campaign.id}
+                sites={photoSiteRows}
+                photos={campaignPhotos}
+                canUpload={canUploadPhotos}
+                creatorName={creatorName}
+              />
             )}
 
             {/* Activity tab */}

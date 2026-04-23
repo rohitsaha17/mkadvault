@@ -142,7 +142,7 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
   const [siteSearch, setSiteSearch] = useState("");
   const [durationMode, setDurationMode] = useState<"campaign" | "custom">("campaign");
 
-  const { register, handleSubmit, watch, setValue, control, getValues, formState: { errors } } = useForm<CreateCampaignValues>({
+  const { register, handleSubmit, watch, setValue, control, getValues, reset, formState: { errors, isDirty } } = useForm<CreateCampaignValues>({
     // Cast: z.preprocess() for NaN-safe optional numbers makes zod's
     // input type `unknown`, which trips up zodResolver's generics.
     // Matches the pattern in SiteForm.tsx.
@@ -195,6 +195,97 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
 
   // Site map for quick lookup
   const siteMap = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
+
+  // ─── Local draft autosave ──────────────────────────────────────────────
+  // Persist the in-progress form to localStorage so closing the tab /
+  // refreshing the browser doesn't lose the user's typing. On mount,
+  // offer to restore any leftover draft. Clears itself on successful
+  // create / save-draft.
+  const AUTOSAVE_KEY = "campaign-draft:new";
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasSubmittedRef = useRef(false);
+  const [autosaveStatus, setAutosaveStatus] = useState<
+    "idle" | "saving" | "saved" | "restored"
+  >("idle");
+
+  // Restore on first mount. We do this in a layout-effect-free useEffect
+  // so SSR stays clean; the draft only exists in the browser anyway.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<CreateCampaignValues> & {
+        _savedAt?: number;
+      };
+      // Stale guard: drop anything older than 7 days so we don't
+      // prompt users to restore something they've long forgotten.
+      if (parsed?._savedAt && Date.now() - parsed._savedAt > 7 * 24 * 60 * 60 * 1000) {
+        localStorage.removeItem(AUTOSAVE_KEY);
+        return;
+      }
+      // Only bother restoring if there was real content.
+      const hasContent =
+        (parsed.campaign_name && parsed.campaign_name.trim().length > 0) ||
+        (parsed.sites && parsed.sites.length > 0) ||
+        (parsed.services && parsed.services.length > 0);
+      if (!hasContent) return;
+      reset(parsed as CreateCampaignValues, { keepDefaultValues: false });
+      setAutosaveStatus("restored");
+      toast.info("Restored your unsaved campaign draft.");
+    } catch {
+      // ignore — corrupt / old-shape draft, just start fresh
+      localStorage.removeItem(AUTOSAVE_KEY);
+    }
+    // Only run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced save on every form change. `watch()` with no args streams
+  // the whole form state — perfect for cheap snapshots.
+  useEffect(() => {
+    const sub = watch((values) => {
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = setTimeout(() => {
+        try {
+          const snapshot = { ...values, _savedAt: Date.now() };
+          localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshot));
+          setAutosaveStatus("saved");
+        } catch {
+          // Quota exceeded or disabled — fail silently.
+        }
+      }, 500);
+    });
+    return () => {
+      sub.unsubscribe();
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    };
+  }, [watch]);
+
+  // beforeunload guard: warn if the user tries to close / navigate
+  // away with unsaved work. The localStorage draft is still there, but
+  // the browser shrug is useful so they don't accidentally lose the tab.
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!isDirty || hasSubmittedRef.current) return;
+      e.preventDefault();
+      // Modern browsers ignore the message but require this to trigger
+      // the prompt. Older ones show the returned string.
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isDirty]);
+
+  // Helper: wipe the autosave entry after a successful submit so the
+  // next /campaigns/new visit starts fresh.
+  function clearAutosave() {
+    try {
+      localStorage.removeItem(AUTOSAVE_KEY);
+    } catch {
+      /* noop */
+    }
+    hasSubmittedRef.current = true;
+  }
 
   // Auto-fill service quantity with the linked site's area (sqft) when
   // rate_basis is "per_sqft" and a site is picked. Tracks the last
@@ -257,14 +348,19 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
       }));
     }
     startTransition(async () => {
-      // Strip any NaN / Infinity before crossing the Server Action
-      // boundary — Flight transport chokes on them and Next.js
-      // surfaces a cryptic "An unexpected response was received from
-      // the server." error page.
-      const result = await createCampaign(sanitizeForTransport(values));
-      if ("error" in result) { toast.error(result.error); return; }
-      toast.success("Campaign created");
-      router.push(`/campaigns/${result.id}`);
+      try {
+        // Strip any NaN / Infinity before crossing the Server Action
+        // boundary — Flight transport chokes on them and Next.js
+        // surfaces a cryptic "An unexpected response was received from
+        // the server." error page.
+        const result = await createCampaign(sanitizeForTransport(values));
+        if ("error" in result) { toast.error(result.error); return; }
+        clearAutosave();
+        toast.success("Campaign created");
+        router.push(`/campaigns/${result.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 
@@ -1013,14 +1109,19 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
               return;
             }
             startDraftTransition(async () => {
-              // getValues() returns the raw form state — if a number
-              // input was cleared, it holds NaN. Strip those before
-              // sending, otherwise Flight transport returns an HTML
-              // error page ("An unexpected response…").
-              const result = await saveCampaignDraft(sanitizeForTransport(vals));
-              if ("error" in result) { toast.error(result.error); return; }
-              toast.success("Draft saved");
-              router.push(`/campaigns/${result.id}`);
+              try {
+                // getValues() returns the raw form state — if a number
+                // input was cleared, it holds NaN. Strip those before
+                // sending, otherwise Flight transport returns an HTML
+                // error page ("An unexpected response…").
+                const result = await saveCampaignDraft(sanitizeForTransport(vals));
+                if ("error" in result) { toast.error(result.error); return; }
+                clearAutosave();
+                toast.success("Draft saved");
+                router.push(`/campaigns/${result.id}`);
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Save failed");
+              }
             });
           }}
         >
@@ -1030,6 +1131,26 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
         <Button type="button" variant="ghost" onClick={() => router.back()}>
           Cancel
         </Button>
+        {/* Autosave indicator — tells the user their typing is safe */}
+        {autosaveStatus !== "idle" && (
+          <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span
+              aria-hidden
+              className={
+                autosaveStatus === "saved"
+                  ? "h-1.5 w-1.5 rounded-full bg-emerald-500"
+                  : autosaveStatus === "restored"
+                    ? "h-1.5 w-1.5 rounded-full bg-amber-500"
+                    : "h-1.5 w-1.5 rounded-full bg-muted-foreground/50"
+              }
+            />
+            {autosaveStatus === "saved"
+              ? "Draft auto-saved in this browser"
+              : autosaveStatus === "restored"
+                ? "Restored from your last session"
+                : "Saving…"}
+          </span>
+        )}
       </div>
     </form>
   );

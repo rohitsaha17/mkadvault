@@ -206,6 +206,12 @@ export interface SitePhoto {
   photo_type: PhotoType;
   is_primary: boolean;
   sort_order: number;
+
+  // Optional campaign provenance. NULL means "plain site photo".
+  // Non-NULL means the photo was uploaded against a specific campaign
+  // (and optionally the exact campaign_site row). See migration 034.
+  campaign_id: string | null;
+  campaign_site_id: string | null;
 }
 
 export type SitePhotoInsert = Omit<SitePhoto, "id" | "created_at" | "updated_at">;

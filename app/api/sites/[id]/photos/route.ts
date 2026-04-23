@@ -101,6 +101,70 @@ export async function POST(
   const file = form.get("file");
   if (!(file instanceof File)) return jsonErr("No file attached");
 
+  // Optional campaign provenance. When present, the photo is stamped
+  // with campaign_id (+ campaign_site_id) so it can be grouped on the
+  // campaign page AND still flows into the site's own gallery.
+  const campaignIdRaw = form.get("campaign_id");
+  const campaignSiteIdRaw = form.get("campaign_site_id");
+  const campaignId =
+    typeof campaignIdRaw === "string" && campaignIdRaw.length > 0
+      ? campaignIdRaw
+      : null;
+  const campaignSiteId =
+    typeof campaignSiteIdRaw === "string" && campaignSiteIdRaw.length > 0
+      ? campaignSiteIdRaw
+      : null;
+
+  // If a campaign was specified, verify it belongs to this org and the
+  // caller is allowed to post photos against it. The campaign's creator
+  // always can; admins / managers / executives can too.
+  if (campaignId) {
+    const { data: campaign } = await supabase
+      .from("campaigns")
+      .select("id, organization_id, created_by")
+      .eq("id", campaignId)
+      .single();
+    if (!campaign) return jsonErr("Campaign not found");
+    if (campaign.organization_id !== profile.org_id) {
+      return jsonErr("Cross-organisation campaign access blocked");
+    }
+
+    const { data: roleProfile } = await supabase
+      .from("profiles")
+      .select("role, roles")
+      .eq("id", user.id)
+      .single();
+    const roles: string[] =
+      Array.isArray((roleProfile as { roles?: string[] } | null)?.roles) &&
+      ((roleProfile as { roles?: string[] } | null)?.roles?.length ?? 0) > 0
+        ? ((roleProfile as { roles?: string[] }).roles as string[])
+        : [roleProfile?.role ?? ""];
+    const isCreator = campaign.created_by === user.id;
+    const isPrivileged = roles.some((r) =>
+      ["super_admin", "admin", "manager", "executive"].includes(r),
+    );
+    if (!isCreator && !isPrivileged) {
+      return jsonErr(
+        "Only the campaign's creator or an admin / manager / executive can upload campaign photos.",
+      );
+    }
+
+    // If a campaign_site_id was given, sanity-check it points to the
+    // same site + campaign — otherwise the UI would show the photo
+    // under the wrong row.
+    if (campaignSiteId) {
+      const { data: cs } = await supabase
+        .from("campaign_sites")
+        .select("id, campaign_id, site_id")
+        .eq("id", campaignSiteId)
+        .single();
+      if (!cs) return jsonErr("Campaign-site link not found");
+      if (cs.campaign_id !== campaignId || cs.site_id !== siteId) {
+        return jsonErr("campaign_site_id doesn't match campaign/site");
+      }
+    }
+  }
+
   // Validate — reject clearly so the user sees exactly why nothing uploaded.
   if (file.size === 0) return jsonErr("The selected file is empty.");
   if (file.size > 5 * 1024 * 1024) {
@@ -154,9 +218,11 @@ export async function POST(
       photo_type: "day",
       is_primary: isPrimary,
       sort_order: existingCount ?? 0,
+      campaign_id: campaignId,
+      campaign_site_id: campaignSiteId,
     })
     .select(
-      "id, site_id, organization_id, photo_url, photo_type, is_primary, sort_order",
+      "id, site_id, organization_id, photo_url, photo_type, is_primary, sort_order, campaign_id, campaign_site_id",
     )
     .single();
 
@@ -179,8 +245,11 @@ export async function POST(
     .createSignedUrl(storagePath, 60 * 60);
 
   // Invalidate the site page so visitors see the new count / primary
-  // photo from server-rendered components on their next nav.
+  // photo from server-rendered components on their next nav. Also bust
+  // the campaign page when the photo was campaign-scoped so the Photos
+  // tab picks it up immediately.
   revalidatePath(`/sites/${siteId}`);
+  if (campaignId) revalidatePath(`/campaigns/${campaignId}`);
 
   return jsonOk({
     photo: inserted,
