@@ -128,10 +128,6 @@ export type FacingDirection = (typeof FACING_DIRECTIONS)[number];
 export const OWNERSHIP_MODELS = ["owned", "rented"] as const;
 export type OwnershipModel = (typeof OWNERSHIP_MODELS)[number];
 
-// Client types
-export const CLIENT_TYPES = ["direct", "agency", "government"] as const;
-export type ClientType = (typeof CLIENT_TYPES)[number];
-
 // Credit terms
 export const CREDIT_TERMS = ["advance", "net15", "net30", "net60"] as const;
 export type CreditTerms = (typeof CREDIT_TERMS)[number];

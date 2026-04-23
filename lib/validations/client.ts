@@ -14,7 +14,6 @@ export const clientSchema = z.object({
   company_name: z.string().min(1, "Company name is required"),
   brand_name: z.string().optional(),
   industry_category: z.string().optional(),
-  client_type: z.enum(["direct_client", "agency", "government"]),
 
   primary_contact_name: z.string().optional(),
   primary_contact_phone: optionalPhone,
@@ -50,6 +49,5 @@ export type ClientFormValues = z.infer<typeof clientSchema>;
 
 export const clientDefaults: ClientFormValues = {
   company_name: "",
-  client_type: "direct_client",
   credit_terms: "advance",
 };

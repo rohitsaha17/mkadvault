@@ -20,14 +20,25 @@ import { KanbanBoard } from "@/components/campaigns/KanbanBoard";
 import { ListExportMenu } from "@/components/shared/ListExportMenu";
 import { SortableTableHead } from "@/components/shared/SortableTableHead";
 import { sanitizeSearch, fmt, inr } from "@/lib/utils";
-import type { Campaign, Client, CampaignStatus } from "@/lib/types/database";
+import type { Campaign, Client, PartnerAgency, CampaignStatus } from "@/lib/types/database";
 
 export const metadata = { title: "Campaigns" };
 
 const PAGE_SIZE = 25;
 
-interface CampaignWithClient extends Campaign {
-  client?: Pick<Client, "id" | "company_name"> | null;
+// Supabase returns to-one relations as either an object or a one-element
+// array depending on inference. We normalise both shapes to a single
+// object / null.
+type Rel<T> = T | T[] | null | undefined;
+function one<T>(rel: Rel<T>): T | null {
+  if (!rel) return null;
+  if (Array.isArray(rel)) return rel[0] ?? null;
+  return rel;
+}
+
+interface CampaignWithBillingParty extends Campaign {
+  client?: Rel<Pick<Client, "id" | "company_name">>;
+  agency?: Rel<Pick<PartnerAgency, "id" | "agency_name">>;
 }
 
 export default async function CampaignsPage({
@@ -51,9 +62,16 @@ export default async function CampaignsPage({
 
   const supabase = await createClient();
 
+  // Load both sides of the billing party in one query: campaigns billed
+  // to a client join `clients`; campaigns billed to an agency join
+  // `partner_agencies` via billed_agency_id. We render whichever is
+  // populated in the list's Client / Agency column.
   let query = supabase
     .from("campaigns")
-    .select("*, client:clients(id, company_name)", { count: "exact" })
+    .select(
+      "*, client:clients(id, company_name), agency:partner_agencies!billed_agency_id(id, agency_name)",
+      { count: "exact" },
+    )
     .is("deleted_at", null)
     .order(sortCol, { ascending: sortDir === "asc" });
 
@@ -69,7 +87,7 @@ export default async function CampaignsPage({
   }
 
   const { data, count, error } = await query;
-  const campaigns = (data ?? []) as unknown as CampaignWithClient[];
+  const campaigns = (data ?? []) as unknown as CampaignWithBillingParty[];
   const total = count ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const hasFilters = !!(q || status);
@@ -214,7 +232,7 @@ export default async function CampaignsPage({
               <TableHeader>
                 <TableRow>
                   <SortableTableHead column="campaign_name" label="Campaign" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
-                  <TableHead>Client</TableHead>
+                  <TableHead>Client / Agency</TableHead>
                   <SortableTableHead column="start_date" label="Dates" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
                   <SortableTableHead column="total_value_paise" label="Value" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
                   <SortableTableHead column="status" label="Status" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
@@ -238,16 +256,56 @@ export default async function CampaignsPage({
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {c.client ? (
-                        <Link
-                          href={`/clients/${c.client.id}`}
-                          className="hover:text-primary transition-colors"
-                        >
-                          {c.client.company_name}
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
+                      {(() => {
+                        // Prefer the billing party actually in use. If the
+                        // campaign is billed to an agency, show the agency
+                        // (linked to the agency detail page). Otherwise
+                        // show the client (linked to the client page).
+                        // Some legacy campaigns may have both set — we
+                        // follow billing_party_type to disambiguate.
+                        const agency = one(c.agency);
+                        const client = one(c.client);
+                        const preferAgency =
+                          c.billing_party_type === "agency" ||
+                          c.billing_party_type === "client_on_behalf_of_agency";
+                        if (preferAgency && agency) {
+                          return (
+                            <Link
+                              href={`/agencies/${agency.id}`}
+                              className="hover:text-primary transition-colors"
+                            >
+                              {agency.agency_name}
+                              <span className="ml-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                                agency
+                              </span>
+                            </Link>
+                          );
+                        }
+                        if (client) {
+                          return (
+                            <Link
+                              href={`/clients/${client.id}`}
+                              className="hover:text-primary transition-colors"
+                            >
+                              {client.company_name}
+                            </Link>
+                          );
+                        }
+                        if (agency) {
+                          return (
+                            <Link
+                              href={`/agencies/${agency.id}`}
+                              className="hover:text-primary transition-colors"
+                            >
+                              {agency.agency_name}
+                              <span className="ml-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                                agency
+                              </span>
+                            </Link>
+                          );
+                        }
+                        return "—";
+                      })()}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground tabular-nums">
                       {fmt(c.start_date)} – {fmt(c.end_date)}

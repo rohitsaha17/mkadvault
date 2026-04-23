@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { inr, fmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   ChevronLeft, Phone, Mail, MapPin, FileText, Pencil, Building2, Users, Receipt, CreditCard,
 } from "lucide-react";
@@ -89,9 +88,6 @@ export default async function ClientDetailPage({
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
               {clientData.company_name}
             </h1>
-            <Badge variant="outline" className="text-xs capitalize">
-              {clientData.client_type.replace(/_/g, " ")}
-            </Badge>
           </div>
           {clientData.brand_name && (
             <p className="mt-0.5 text-sm text-muted-foreground">Brand: {clientData.brand_name}</p>

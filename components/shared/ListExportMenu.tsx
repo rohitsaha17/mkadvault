@@ -39,7 +39,6 @@ const COLUMNS: Record<string, ExportColumn[]> = {
     { header: "Company", key: "company_name" },
     { header: "Brand", key: "brand_name" },
     { header: "Industry", key: "industry_category" },
-    { header: "Type", key: "client_type", format: humanize },
     { header: "Credit Terms", key: "credit_terms", format: humanize },
     { header: "Contact Name", key: "primary_contact_name" },
     { header: "Phone", key: "primary_contact_phone" },

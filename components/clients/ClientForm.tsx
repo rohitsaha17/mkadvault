@@ -62,7 +62,6 @@ export function ClientForm({ existing }: Props) {
     company_name: existing.company_name,
     brand_name: existing.brand_name ?? "",
     industry_category: existing.industry_category ?? "",
-    client_type: existing.client_type,
     primary_contact_name: existing.primary_contact_name ?? "",
     primary_contact_phone: existing.primary_contact_phone ?? "",
     primary_contact_email: existing.primary_contact_email ?? "",
@@ -137,23 +136,14 @@ export function ClientForm({ existing }: Props) {
               <Input {...register("industry_category")} placeholder="e.g. FMCG, Telecom" />
             </F>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <F label="Client Type" error={errors.client_type?.message} required>
-              <NativeSelect {...register("client_type")}>
-                <option value="direct_client">Direct Client</option>
-                <option value="agency">Agency</option>
-                <option value="government">Government</option>
-              </NativeSelect>
-            </F>
-            <F label="Credit Terms" error={errors.credit_terms?.message} required>
-              <NativeSelect {...register("credit_terms")}>
-                <option value="advance">Advance</option>
-                <option value="net15">Net 15</option>
-                <option value="net30">Net 30</option>
-                <option value="net60">Net 60</option>
-              </NativeSelect>
-            </F>
-          </div>
+          <F label="Credit Terms" error={errors.credit_terms?.message} required>
+            <NativeSelect {...register("credit_terms")}>
+              <option value="advance">Advance</option>
+              <option value="net15">Net 15</option>
+              <option value="net30">Net 30</option>
+              <option value="net60">Net 60</option>
+            </NativeSelect>
+          </F>
         </div>
       )}
 

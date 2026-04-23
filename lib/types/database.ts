@@ -346,7 +346,6 @@ export type ContractPaymentUpdate = Partial<Omit<ContractPayment, "id" | "create
 
 // ─── clients ──────────────────────────────────────────────────────────────────
 
-export type ClientType = "direct_client" | "agency" | "government";
 export type CreditTerms = "advance" | "net15" | "net30" | "net60";
 
 export interface Client {
@@ -361,7 +360,6 @@ export interface Client {
   company_name: string;
   brand_name: string | null;
   industry_category: string | null;
-  client_type: ClientType;
 
   primary_contact_name: string | null;
   primary_contact_phone: string | null;

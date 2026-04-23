@@ -7,12 +7,25 @@ import { updateCampaignStatus } from "@/app/[locale]/(dashboard)/campaigns/actio
 import { fmt, inr } from "@/lib/utils";
 import type { Campaign, CampaignStatus } from "@/lib/types/database";
 
-interface CampaignWithClient extends Campaign {
-  client?: { company_name: string } | null;
+// Supabase renders to-one relations as either an object or a one-element
+// array depending on inference. Accept both shapes and normalise inside
+// the component. Campaigns billed to an agency populate `agency`
+// instead of `client`; we display whichever is present.
+type Rel<T> = T | T[] | null | undefined;
+
+interface CampaignWithBillingParty extends Campaign {
+  client?: Rel<{ id?: string; company_name: string }>;
+  agency?: Rel<{ id?: string; agency_name: string }>;
+}
+
+function one<T>(rel: Rel<T>): T | null {
+  if (!rel) return null;
+  if (Array.isArray(rel)) return rel[0] ?? null;
+  return rel;
 }
 
 interface Props {
-  campaigns: CampaignWithClient[];
+  campaigns: CampaignWithBillingParty[];
 }
 
 // Only show 5 key workflow columns in Kanban (operational sub-statuses managed in detail page)
@@ -59,7 +72,7 @@ export function KanbanBoard({ campaigns }: Props) {
     return status;
   }
 
-  const grouped: Record<CampaignStatus, CampaignWithClient[]> = {
+  const grouped: Record<CampaignStatus, CampaignWithBillingParty[]> = {
     enquiry: [],
     proposal_sent: [],
     confirmed: [],
@@ -156,9 +169,24 @@ export function KanbanBoard({ campaigns }: Props) {
                       {c.campaign_name}
                     </p>
                   </Link>
-                  {c.client && (
-                    <p className="text-xs text-muted-foreground truncate">{c.client.company_name}</p>
-                  )}
+                  {(() => {
+                    const agency = one(c.agency);
+                    const client = one(c.client);
+                    const preferAgency =
+                      c.billing_party_type === "agency" ||
+                      c.billing_party_type === "client_on_behalf_of_agency";
+                    const label =
+                      (preferAgency && agency?.agency_name) ||
+                      client?.company_name ||
+                      agency?.agency_name ||
+                      null;
+                    if (!label) return null;
+                    return (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {label}
+                      </p>
+                    );
+                  })()}
                   {c.campaign_code && (
                     <p className="text-xs font-mono text-muted-foreground">{c.campaign_code}</p>
                   )}

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -25,21 +24,6 @@ export const metadata = { title: "Clients" };
 
 const PAGE_SIZE = 20;
 
-const TYPE_TONES: Record<string, string> = {
-  direct_client:
-    "bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30",
-  agency:
-    "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30",
-  government:
-    "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30",
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  direct_client: "Direct",
-  agency: "Agency",
-  government: "Govt",
-};
-
 const TERMS_LABELS: Record<string, string> = {
   advance: "Advance",
   net15: "Net 15",
@@ -52,18 +36,18 @@ export default async function ClientsPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ q?: string; type?: string; terms?: string; page?: string; sort?: string; dir?: string }>;
+  searchParams: Promise<{ q?: string; terms?: string; page?: string; sort?: string; dir?: string }>;
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations("clients");
 
-  const { q, type, terms, page, sort, dir } = await searchParams;
+  const { q, terms, page, sort, dir } = await searchParams;
   const currentPage = Math.max(1, parseInt(page ?? "1", 10));
   const offset = (currentPage - 1) * PAGE_SIZE;
 
   // Validate sort column against allowlist to prevent injection
-  const SORTABLE_COLUMNS = ["company_name", "client_type", "credit_terms", "primary_contact_name"] as const;
+  const SORTABLE_COLUMNS = ["company_name", "credit_terms", "primary_contact_name"] as const;
   const sortCol = SORTABLE_COLUMNS.includes(sort as (typeof SORTABLE_COLUMNS)[number])
     ? (sort as string)
     : "company_name";
@@ -83,7 +67,6 @@ export default async function ClientsPage({
       `company_name.ilike.%${safe}%,brand_name.ilike.%${safe}%,primary_contact_name.ilike.%${safe}%,primary_contact_email.ilike.%${safe}%`
     );
   }
-  if (type) query = query.eq("client_type", type);
   if (terms) query = query.eq("credit_terms", terms);
 
   query = query.range(offset, offset + PAGE_SIZE - 1);
@@ -92,12 +75,11 @@ export default async function ClientsPage({
   const clients = (data ?? []) as unknown as Client[];
   const total = count ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const hasFilters = !!(q || type || terms);
+  const hasFilters = !!(q || terms);
 
   const buildHref = (extra: Record<string, string>) => {
     const p: Record<string, string> = {};
     if (q) p.q = q;
-    if (type) p.type = type;
     if (terms) p.terms = terms;
     if (sort) p.sort = sort;
     if (dir) p.dir = dir;
@@ -134,16 +116,6 @@ export default async function ClientsPage({
             className="pl-9"
           />
         </div>
-        <select
-          name="type"
-          defaultValue={type ?? ""}
-          className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 w-40"
-        >
-          <option value="">All Types</option>
-          <option value="direct_client">Direct Client</option>
-          <option value="agency">Agency</option>
-          <option value="government">Government</option>
-        </select>
         <select
           name="terms"
           defaultValue={terms ?? ""}
@@ -210,7 +182,6 @@ export default async function ClientsPage({
                 <TableRow>
                   <SortableTableHead column="company_name" label="Company / Brand" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
                   <TableHead>Primary Contact</TableHead>
-                  <SortableTableHead column="client_type" label="Type" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
                   <SortableTableHead column="credit_terms" label="Credit Terms" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
                   <TableHead className="w-20" />
                 </TableRow>
@@ -257,14 +228,6 @@ export default async function ClientsPage({
                             <span className="text-xs text-muted-foreground/60">—</span>
                           )}
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] ${TYPE_TONES[c.client_type] ?? ""}`}
-                      >
-                        {TYPE_LABELS[c.client_type] ?? c.client_type}
-                      </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {TERMS_LABELS[c.credit_terms] ?? c.credit_terms}
