@@ -835,6 +835,64 @@ export type SiteExpenseInsert = Omit<
   "id" | "created_at" | "updated_at" | "deleted_at"
 > & { id?: string };
 
+// ─── campaign_jobs ──────────────────────────────────────────────────────────
+// Print / mount / unmount / repair tasks attached to a campaign. Each job is
+// either handled in-house (source='internal') or outsourced to a vendor
+// (source='external'). External jobs with a cost can spawn a site_expenses
+// row (payment request) for the accounts team to approve + pay, via the
+// linked expense_id column.
+export type CampaignJobType =
+  | "print"
+  | "mount"
+  | "print_and_mount"
+  | "unmount"
+  | "repair"
+  | "other";
+
+export type CampaignJobSource = "internal" | "external";
+
+export type CampaignJobStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "cancelled";
+
+export interface CampaignJob {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  campaign_id: string;
+  campaign_site_id: string | null;
+  site_id: string | null;
+
+  job_type: CampaignJobType;
+  source: CampaignJobSource;
+
+  vendor_name: string | null;
+  vendor_agency_id: string | null;
+  vendor_contact: string | null;
+
+  status: CampaignJobStatus;
+  scheduled_date: string | null;
+  completed_date: string | null;
+
+  cost_paise: number | null;
+  expense_id: string | null;
+
+  description: string;
+  notes: string | null;
+}
+
+export type CampaignJobInsert = Omit<
+  CampaignJob,
+  "id" | "created_at" | "updated_at" | "deleted_at"
+> & { id?: string };
+
 // ─── Supabase Database type (for use with createClient<Database>()) ──────────
 // Extend this as more tables are added.
 

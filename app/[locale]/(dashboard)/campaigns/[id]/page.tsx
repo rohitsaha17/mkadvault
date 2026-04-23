@@ -12,11 +12,12 @@ import { CampaignStatusBar } from "@/components/campaigns/CampaignStatusBar";
 import { CampaignDetailActions } from "@/components/campaigns/CampaignDetailActions";
 import { ChangeRequestButton } from "@/components/campaigns/ChangeRequestButton";
 import { ChangeRequestsTab } from "@/components/campaigns/ChangeRequestsTab";
+import { CampaignJobsTab } from "@/components/campaigns/CampaignJobsTab";
 import { SitePreviewModal } from "@/components/sites/SitePreviewModal";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { fmt, inr } from "@/lib/utils";
 import type {
-  Campaign, Client, CampaignSite, CampaignService, CampaignActivityLog, CampaignChangeRequest, Site, ServiceType,
+  Campaign, Client, CampaignSite, CampaignService, CampaignActivityLog, CampaignChangeRequest, CampaignJob, Site, ServiceType,
 } from "@/lib/types/database";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
@@ -74,6 +75,8 @@ export default async function CampaignDetailPage({
     { data: activityData },
     { data: invoicesData },
     { data: changeRequestsData },
+    { data: jobsData },
+    { data: agenciesData },
   ] = await Promise.all([
     supabase
       .from("campaign_sites")
@@ -101,6 +104,19 @@ export default async function CampaignDetailPage({
       .select("*")
       .eq("campaign_id", id)
       .order("requested_at", { ascending: false }),
+    // Print / mount jobs for this campaign (new Jobs tab)
+    supabase
+      .from("campaign_jobs")
+      .select("*")
+      .eq("campaign_id", id)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false }),
+    // Agencies in the org — used as vendor options in the "Add job" dialog
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .is("deleted_at", null)
+      .order("agency_name"),
   ]);
 
   const campSites = (campSitesData ?? []) as unknown as CampaignSiteWithSite[];
@@ -110,7 +126,28 @@ export default async function CampaignDetailPage({
     id: string; invoice_number: string; invoice_date: string; due_date: string; total_paise: number; status: string;
   }>;
   const changeRequests = (changeRequestsData ?? []) as unknown as CampaignChangeRequest[];
+  const jobs = (jobsData ?? []) as unknown as CampaignJob[];
+  const agencyOptions = (agenciesData ?? []) as Array<{ id: string; agency_name: string }>;
   const hasPendingChangeRequest = changeRequests.some((r) => r.status === "pending");
+
+  // Site options for the "Add job" dialog — each campaign_site becomes a
+  // picker option. The dialog can also leave the site blank for
+  // campaign-wide jobs (e.g. a bulk print order spanning multiple sites).
+  const siteOptions = campSites
+    .filter((cs) => cs.site)
+    .map((cs) => ({
+      campaign_site_id: cs.id,
+      site_id: cs.site!.id,
+      site_name: cs.site!.name,
+      site_code: cs.site!.site_code ?? null,
+    }));
+
+  // Roles that can edit jobs: admins, managers, and executives (ops team
+  // who actually schedule print/mount work). Accounts can view but
+  // approval of linked payment requests happens in the Finance module.
+  const canEditJobs = userRoles.some((r) =>
+    ["super_admin", "admin", "manager", "executive"].includes(r),
+  );
 
   // Financials
   const sitesTotal = campSites.reduce((sum, cs) => sum + (cs.display_rate_paise ?? 0), 0);
@@ -120,6 +157,7 @@ export default async function CampaignDetailPage({
   const TABS = [
     { key: "sites", label: `Sites (${campSites.length})` },
     { key: "services", label: `Services (${campServices.length})` },
+    { key: "jobs", label: `Jobs (${jobs.length})` },
     { key: "invoices", label: `Invoices (${invoices.length})` },
     { key: "financials", label: "Financials" },
     { key: "activity", label: "Activity" },
@@ -317,6 +355,17 @@ export default async function CampaignDetailPage({
                   </table>
                 </div>
               )
+            )}
+
+            {/* Jobs tab */}
+            {tab === "jobs" && (
+              <CampaignJobsTab
+                campaignId={id}
+                jobs={jobs}
+                siteOptions={siteOptions}
+                agencyOptions={agencyOptions}
+                canEdit={canEditJobs}
+              />
             )}
 
             {/* Invoices tab */}
