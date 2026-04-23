@@ -69,13 +69,18 @@ export function CampaignDetailActions({
     });
   }
 
-  const canExtend = ["confirmed", "creative_received", "printing", "mounted", "live"].includes(campaignStatus);
-  const canCreateInvoice = !["enquiry", "cancelled"].includes(campaignStatus);
+  // With the simplified status model only a live campaign makes
+  // sense to extend. Invoices can still be raised on completed
+  // campaigns (historical billing), but not on cancelled ones.
+  const canExtend = campaignStatus === "live";
+  const canCreateInvoice = campaignStatus !== "cancelled";
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {/* Download Proposal — available at enquiry or proposal_sent */}
-      {["enquiry", "proposal_sent"].includes(campaignStatus) && (
+      {/* Download Proposal — always available on non-cancelled
+          campaigns. Proposals are decoupled from status in the
+          simplified workflow. */}
+      {campaignStatus !== "cancelled" && (
         <Button
           variant="outline"
           size="sm"

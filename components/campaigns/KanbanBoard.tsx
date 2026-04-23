@@ -28,34 +28,17 @@ interface Props {
   campaigns: CampaignWithBillingParty[];
 }
 
-// Only show 5 key workflow columns in Kanban (operational sub-statuses managed in detail page)
+// Three columns matching the simplified status model from migration 035.
 const COLUMNS: { status: CampaignStatus; label: string; color: string }[] = [
-  { status: "enquiry", label: "Enquiry", color: "border-border" },
-  { status: "proposal_sent", label: "Proposal Sent", color: "border-blue-300" },
-  { status: "confirmed", label: "Confirmed", color: "border-indigo-300" },
   { status: "live", label: "Live", color: "border-green-300" },
   { status: "completed", label: "Completed", color: "border-teal-300" },
+  { status: "cancelled", label: "Cancelled", color: "border-rose-300" },
 ];
 
-const COLUMN_BG: Record<string, string> = {
-  enquiry: "bg-muted",
-  proposal_sent: "bg-blue-50",
-  confirmed: "bg-indigo-50",
+const COLUMN_BG: Record<CampaignStatus, string> = {
   live: "bg-green-50",
   completed: "bg-teal-50",
-};
-
-const CARD_STATUS_BADGE: Record<string, string> = {
-  enquiry: "bg-muted text-muted-foreground",
-  proposal_sent: "bg-blue-100 text-blue-700",
-  confirmed: "bg-indigo-100 text-indigo-700",
-  creative_received: "bg-purple-100 text-purple-700",
-  printing: "bg-amber-100 text-amber-700",
-  mounted: "bg-orange-100 text-orange-700",
-  live: "bg-green-100 text-green-700",
-  completed: "bg-teal-100 text-teal-700",
-  dismounted: "bg-muted text-muted-foreground",
-  cancelled: "bg-rose-100 text-rose-700",
+  cancelled: "bg-rose-50",
 };
 
 export function KanbanBoard({ campaigns }: Props) {
@@ -64,30 +47,14 @@ export function KanbanBoard({ campaigns }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overColumn, setOverColumn] = useState<CampaignStatus | null>(null);
 
-  // Group campaigns — cards for statuses not in columns go into their "nearest" kanban column
-  // enquiry, proposal_sent, confirmed go as-is; creative_received/printing/mounted → confirmed; live; completed/dismounted → completed
-  function columnFor(status: CampaignStatus): CampaignStatus {
-    if (["creative_received", "printing", "mounted"].includes(status)) return "confirmed";
-    if (status === "dismounted" || status === "cancelled") return "completed";
-    return status;
-  }
-
+  // One column per status now — no remapping needed.
   const grouped: Record<CampaignStatus, CampaignWithBillingParty[]> = {
-    enquiry: [],
-    proposal_sent: [],
-    confirmed: [],
-    creative_received: [],
-    printing: [],
-    mounted: [],
     live: [],
     completed: [],
-    dismounted: [],
     cancelled: [],
   };
-
   for (const c of campaigns) {
-    const col = columnFor(c.status);
-    grouped[col].push(c);
+    grouped[c.status].push(c);
   }
 
   function handleDragStart(e: React.DragEvent, id: string) {
@@ -111,8 +78,7 @@ export function KanbanBoard({ campaigns }: Props) {
     const campaign = campaigns.find((c) => c.id === id);
     if (!campaign) return;
 
-    // Don't update if dropped in same column
-    if (columnFor(campaign.status) === newStatus) { setDraggingId(null); return; }
+    if (campaign.status === newStatus) { setDraggingId(null); return; }
 
     startTransition(async () => {
       const result = await updateCampaignStatus(id, newStatus);
@@ -197,12 +163,6 @@ export function KanbanBoard({ campaigns }: Props) {
                         {c.end_date && ` → ${fmt(c.end_date)}`}
                       </span>
                     ) : <span />}
-                    {/* Show actual status if different from column status */}
-                    {columnFor(c.status) !== c.status && (
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${CARD_STATUS_BADGE[c.status] ?? ""}`}>
-                        {c.status.replace(/_/g, " ")}
-                      </span>
-                    )}
                   </div>
                   {c.total_value_paise && (
                     <p className="text-xs font-semibold text-foreground">{inr(c.total_value_paise)}</p>

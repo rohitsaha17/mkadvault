@@ -8,7 +8,10 @@ import { inr } from "@/lib/utils";
 import { getTranslations } from "next-intl/server";
 import type { CampaignStatus } from "@/lib/types/database";
 
-type PipelineStatus = "enquiry" | "proposal_sent" | "confirmed" | "live";
+// After migration 035 the pipeline is just one bucket: live. Keep the
+// type alias for readability even with a single value — makes it
+// obvious where to extend if the team re-introduces sub-statuses.
+type PipelineStatus = "live";
 
 export async function SecondaryRow({ orgId }: { orgId: string }) {
   const supabase = await createClient();
@@ -45,7 +48,7 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
       .select("status, total_value_paise")
       .eq("organization_id", orgId)
       .is("deleted_at", null)
-      .in("status", ["enquiry", "proposal_sent", "confirmed", "live"]),
+      .eq("status", "live"),
   ]);
 
   // Aging buckets
@@ -72,29 +75,19 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
   );
 
   const pipeline: Record<PipelineStatus, { count: number; value: number }> = {
-    enquiry: { count: 0, value: 0 },
-    proposal_sent: { count: 0, value: 0 },
-    confirmed: { count: 0, value: 0 },
     live: { count: 0, value: 0 },
   };
   for (const row of (pipelineCampaigns ?? []) as Array<{ status: CampaignStatus; total_value_paise: number | null }>) {
-    const s = row.status as PipelineStatus;
-    if (s in pipeline) {
-      pipeline[s].count += 1;
-      pipeline[s].value += row.total_value_paise ?? 0;
+    if (row.status === "live") {
+      pipeline.live.count += 1;
+      pipeline.live.value += row.total_value_paise ?? 0;
     }
   }
 
   const PIPELINE_LABELS: Record<PipelineStatus, string> = {
-    enquiry: "Enquiry",
-    proposal_sent: "Proposal Sent",
-    confirmed: "Confirmed",
     live: "Live",
   };
   const PIPELINE_COLORS: Record<PipelineStatus, string> = {
-    enquiry: "bg-muted text-foreground dark:bg-white/5 dark:text-muted-foreground",
-    proposal_sent: "bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
-    confirmed: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
     live: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
   };
 
@@ -144,7 +137,7 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
           <CardTitle className="text-base">{tDash("campaign_pipeline")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {(["enquiry", "proposal_sent", "confirmed", "live"] as PipelineStatus[]).map((s) => (
+          {(["live"] as PipelineStatus[]).map((s) => (
             <div key={s} className="flex items-center justify-between gap-2">
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${PIPELINE_COLORS[s]}`}>
                 {PIPELINE_LABELS[s]}

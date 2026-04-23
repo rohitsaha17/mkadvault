@@ -10,23 +10,11 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-// Campaign statuses that are considered "active" and should auto-complete
-const COMPLETABLE_STATUSES = [
-  "confirmed",
-  "creative_received",
-  "printing",
-  "mounted",
-  "live",
-] as const;
-
-// Statuses that count as "active" when checking if a site is still in use
-const ACTIVE_CAMPAIGN_STATUSES = [
-  "confirmed",
-  "creative_received",
-  "printing",
-  "mounted",
-  "live",
-];
+// With the simplified status model (migration 035), "live" is the
+// only non-terminal state — so both COMPLETABLE_STATUSES and
+// ACTIVE_CAMPAIGN_STATUSES collapse to that single value.
+const COMPLETABLE_STATUSES = ["live"] as const;
+const ACTIVE_CAMPAIGN_STATUSES = ["live"];
 
 interface AutoCompleteResult {
   completed: number;

@@ -23,6 +23,18 @@ async function getOrgAndUser() {
 function n(v: number | undefined | null) { return v != null ? Math.round(v * 100) : null; }
 function str(v?: string) { return v?.trim() || null; }
 
+// Derive the right initial status from a campaign's end_date. Almost
+// always "live" — only "completed" when the user is back-filling a
+// booking whose end has already passed. This matches the simplified
+// status model from migration 035.
+function campaignStatusFromDates(endDate: string | null): CampaignStatus {
+  if (!endDate) return "live";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  return end < today ? "completed" : "live";
+}
+
 // ─── Create campaign (with optional sites + services) ─────────────────────────
 
 export async function createCampaign(values: unknown): Promise<ActionResult> {
@@ -64,7 +76,11 @@ export async function createCampaign(values: unknown): Promise<ActionResult> {
             : null,
         start_date: str(d.start_date),
         end_date: str(d.end_date),
-        status: "enquiry" as CampaignStatus,
+        // A campaign is LIVE the moment it's created. If end_date is
+        // already in the past (rare, but happens when booking historical
+        // bookings for reporting) mark it completed straight away so the
+        // status reflects reality.
+        status: campaignStatusFromDates(str(d.end_date)),
         pricing_type: d.pricing_type,
         total_value_paise: n(d.total_value_inr),
         notes: str(d.notes),
@@ -228,7 +244,7 @@ export async function updateCampaignStatus(
     const siteIds = (campSites ?? []).map((cs) => cs.site_id as string);
 
     if (siteIds.length > 0) {
-      // When campaign goes live → mark all sites as booked
+      // When campaign goes live → mark all sites as booked.
       if (newStatus === "live") {
         await ctx.supabase
           .from("sites")
@@ -236,17 +252,13 @@ export async function updateCampaignStatus(
           .in("id", siteIds);
       }
 
-      // When campaign ends → check if site is used by another active campaign
-      if (newStatus === "completed" || newStatus === "dismounted") {
-        const activeStatuses: CampaignStatus[] = [
-          "confirmed", "creative_received", "printing", "mounted", "live",
-        ];
-
-        // Step 1: fetch IDs of other active campaigns
+      // When campaign ends → release each site unless another live
+      // campaign is still booking it.
+      if (newStatus === "completed") {
         const { data: activeCampaigns } = await ctx.supabase
           .from("campaigns")
           .select("id")
-          .in("status", activeStatuses)
+          .eq("status", "live")
           .is("deleted_at", null)
           .neq("id", campaignId);
 
@@ -259,12 +271,8 @@ export async function updateCampaignStatus(
               .select("id", { count: "exact", head: true })
               .eq("site_id", siteId)
               .in("campaign_id", activeCampaignIds);
-
-            // If another active campaign uses this site, skip
             if ((count ?? 0) > 0) continue;
           }
-
-          // No other active campaign uses this site — make it available
           await ctx.supabase
             .from("sites")
             .update({ status: "available" })
@@ -397,15 +405,13 @@ export async function cancelCampaign(campaignId: string): Promise<{ error?: stri
       .select("site_id")
       .eq("campaign_id", campaignId);
 
-    const activeStatuses: CampaignStatus[] = [
-      "confirmed", "creative_received", "printing", "mounted", "live",
-    ];
-
-    // Fetch IDs of other active campaigns
+    // Fetch IDs of other live campaigns so we can tell whether a
+    // freshly-cancelled campaign's sites should go back to "available"
+    // or stay booked by another concurrent campaign.
     const { data: activeCampaigns } = await ctx.supabase
       .from("campaigns")
       .select("id")
-      .in("status", activeStatuses)
+      .eq("status", "live")
       .is("deleted_at", null)
       .neq("id", campaignId);
 
@@ -439,50 +445,6 @@ export async function cancelCampaign(campaignId: string): Promise<{ error?: stri
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
     return toActionError(err, "cancelCampaign");
-  }
-}
-
-// ─── Revert proposal_sent → enquiry (reject / make changes) ────────────────
-
-export async function revertToEnquiry(campaignId: string): Promise<{ error?: string }> {
-  try {
-    const ctx = await getOrgAndUser();
-    if (!ctx) return { error: "Not authenticated" };
-
-    const { data: current } = await ctx.supabase
-      .from("campaigns")
-      .select("status")
-      .eq("id", campaignId)
-      .single();
-
-    if (!current) return { error: "Campaign not found" };
-    if (current.status !== "proposal_sent") {
-      return { error: "Can only revert from Proposal Sent stage" };
-    }
-
-    const { error } = await ctx.supabase
-      .from("campaigns")
-      .update({ status: "enquiry", updated_by: ctx.user.id })
-      .eq("id", campaignId);
-
-    if (error) return { error: error.message };
-
-    await ctx.supabase.from("campaign_activity_log").insert({
-      organization_id: ctx.orgId,
-      campaign_id: campaignId,
-      user_id: ctx.user.id,
-      action: "status_changed",
-      description: "Proposal rejected — reverted to Enquiry for changes",
-      old_value: "proposal_sent",
-      new_value: "enquiry",
-    });
-
-    revalidatePath("/campaigns");
-    revalidatePath(`/campaigns/${campaignId}`);
-    return {};
-  } catch (err) {
-    if (isNextInternalThrow(err)) throw err;
-    return toActionError(err, "revertToEnquiry");
   }
 }
 
@@ -574,7 +536,10 @@ export async function saveCampaignDraft(values: unknown): Promise<ActionResult> 
             : null,
         start_date: str(d.start_date),
         end_date: str(d.end_date),
-        status: "enquiry" as CampaignStatus,
+        // Drafts and real creates share the same live/completed derivation
+        // — drafts are just partial entries, but once saved they behave
+        // like any other live campaign.
+        status: campaignStatusFromDates(str(d.end_date)),
         pricing_type: d.pricing_type ?? "itemized",
         total_value_paise: n(d.total_value_inr),
         notes: str(d.notes),
@@ -658,12 +623,13 @@ export async function createChangeRequest(
 
     if (!campaign) return { error: "Campaign not found" };
 
-    const editableStatuses: CampaignStatus[] = ["enquiry", "proposal_sent"];
-    if (editableStatuses.includes(campaign.status)) {
-      return { error: "Campaign can be edited directly — no change request needed" };
-    }
-    if (campaign.status === "cancelled") {
-      return { error: "Cannot request changes on a cancelled campaign" };
+    // Only live campaigns accept change requests. Completed /
+    // cancelled are terminal and shouldn't be modified through the
+    // approval workflow.
+    if (campaign.status !== "live") {
+      return {
+        error: `Cannot request changes on a ${campaign.status} campaign`,
+      };
     }
 
     // Check for existing pending request
@@ -769,20 +735,15 @@ export async function reviewChangeRequest(
     const campaignId = request.campaign_id;
 
     if (d.status === "approved") {
-      // Revert campaign to enquiry so changes can be made
-      await ctx.supabase
-        .from("campaigns")
-        .update({ status: "enquiry", updated_by: ctx.user.id })
-        .eq("id", campaignId);
-
+      // With the simplified status model there's no status to revert
+      // to — the campaign stays "live" and the request approval is
+      // itself the signal that edits are allowed. Just log the event.
       await ctx.supabase.from("campaign_activity_log").insert({
         organization_id: ctx.orgId,
         campaign_id: campaignId,
         user_id: ctx.user.id,
         action: "change_approved",
-        description: "Change request approved — campaign reverted to Enquiry for editing",
-        old_value: "confirmed",
-        new_value: "enquiry",
+        description: "Change request approved — campaign remains live for editing",
       });
     } else {
       await ctx.supabase.from("campaign_activity_log").insert({

@@ -435,17 +435,12 @@ export type ClientUpdate = Partial<Omit<Client, "id" | "created_at" | "updated_a
 
 // ─── campaigns ────────────────────────────────────────────────────────────────
 
-export type CampaignStatus =
-  | "enquiry"
-  | "proposal_sent"
-  | "confirmed"
-  | "creative_received"
-  | "printing"
-  | "mounted"
-  | "live"
-  | "completed"
-  | "dismounted"
-  | "cancelled";
+// Simplified in migration 035. Previously had 10 workflow statuses
+// (enquiry → proposal_sent → … → completed); the team wanted to skip
+// the pre-live ceremony entirely, so a created campaign is LIVE by
+// default, flips to COMPLETED when end_date has passed (via the
+// auto-complete cron), and CANCELLED is a manual terminal state.
+export type CampaignStatus = "live" | "completed" | "cancelled";
 
 export type SiteRateType = "per_month" | "fixed";
 export type ServiceRateBasis = "per_sqft" | "lumpsum" | "other";

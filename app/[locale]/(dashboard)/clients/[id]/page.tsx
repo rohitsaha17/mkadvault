@@ -60,9 +60,7 @@ export default async function ClientDetailPage({
     id: string; amount_paise: number; payment_date: string; payment_mode: string; reference_number: string | null;
   }>;
 
-  const activeCampaigns = campaigns.filter((c) =>
-    ["confirmed", "creative_received", "printing", "mounted", "live"].includes(c.status)
-  );
+  const activeCampaigns = campaigns.filter((c) => c.status === "live");
   const lifetimeRevenue = campaigns.reduce((sum, c) => sum + (c.total_value_paise ?? 0), 0);
 
   const TABS = [

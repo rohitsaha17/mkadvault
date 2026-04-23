@@ -165,15 +165,9 @@ export default async function CampaignsPage({
             className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 w-40"
           >
             <option value="">All Statuses</option>
-            <option value="enquiry">Enquiry</option>
-            <option value="proposal_sent">Proposal Sent</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="creative_received">Creative Received</option>
-            <option value="printing">Printing</option>
-            <option value="mounted">Mounted</option>
             <option value="live">Live</option>
             <option value="completed">Completed</option>
-            <option value="dismounted">Dismounted</option>
+            <option value="cancelled">Cancelled</option>
           </select>
           <select
             name="range"

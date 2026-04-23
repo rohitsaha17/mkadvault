@@ -127,14 +127,15 @@ export async function deleteClientRecord(id: string): Promise<{ error?: string }
       return { error: "Only admins can delete records" };
     }
 
-    // Guard: check for active campaigns linked to this client
-    // Active = anything not cancelled, completed, or dismounted
+    // Guard: check for active (live) campaigns linked to this client.
+    // Migration 035 collapsed the status model — "live" is the only
+    // non-terminal state.
     const { count: activeCampaigns } = await ctx.supabase
       .from("campaigns")
       .select("id", { count: "exact", head: true })
       .eq("client_id", id)
       .is("deleted_at", null)
-      .not("status", "in", '("cancelled","completed","dismounted")');
+      .eq("status", "live");
 
     if (activeCampaigns && activeCampaigns > 0) {
       return { error: "Cannot delete client with active campaigns" };

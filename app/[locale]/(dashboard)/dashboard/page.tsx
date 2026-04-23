@@ -210,10 +210,10 @@ async function RoleSpecificDashboard({
     ] = await Promise.all([
       supabase
         .from("campaigns")
-        .select("status, total_value_paise")
+        .select("status, total_value_paise, end_date")
         .eq("organization_id", orgId)
         .is("deleted_at", null)
-        .in("status", ["enquiry", "proposal_sent", "confirmed", "live"]),
+        .eq("status", "live"),
       supabase
         .from("sites")
         .select("id")
@@ -239,10 +239,18 @@ async function RoleSpecificDashboard({
         .is("deleted_at", null),
     ]);
 
-    const enquiries = (pipeline ?? []).filter((c) => c.status === "enquiry").length;
-    const proposals = (pipeline ?? []).filter((c) => c.status === "proposal_sent").length;
-    const confirmed = (pipeline ?? []).filter((c) => c.status === "confirmed").length;
-    const live = (pipeline ?? []).filter((c) => c.status === "live").length;
+    // Simplified pipeline — the only non-terminal status is "live".
+    // Break it down by "ending soon" so the sales/ops team can act.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const in7Days = new Date(today);
+    in7Days.setDate(in7Days.getDate() + 7);
+    const live = pipeline?.length ?? 0;
+    const endingSoon = (pipeline ?? []).filter((c) => {
+      if (!c.end_date) return false;
+      const end = new Date(c.end_date);
+      return end >= today && end <= in7Days;
+    }).length;
     const pipelineValue = (pipeline ?? []).reduce(
       (s, c) => s + (c.total_value_paise ?? 0),
       0,
@@ -251,10 +259,16 @@ async function RoleSpecificDashboard({
     return (
       <RoleWrapper greeting={greeting} role={role === "manager" ? "Manager" : "Executive"}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <SimpleStatCard label="Enquiries" value={String(enquiries)} />
-          <SimpleStatCard label="Proposals Out" value={String(proposals)} />
-          <SimpleStatCard label="Confirmed" value={String(confirmed)} />
-          <SimpleStatCard label="Live" value={String(live)} />
+          <SimpleStatCard label="Live Campaigns" value={String(live)} />
+          <SimpleStatCard label="Ending in 7 days" value={String(endingSoon)} />
+          <SimpleStatCard
+            label="Available Sites"
+            value={String((availableSites ?? []).length)}
+          />
+          <SimpleStatCard
+            label="Mountings Today"
+            value={String((todayMountings ?? []).length)}
+          />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
           <SimpleStatCard

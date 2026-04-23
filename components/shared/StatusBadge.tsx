@@ -41,21 +41,9 @@ const STATUS_TONE: Record<string, Tone> = {
   maintenance: "warning",
   blocked: "neutral",
   expired: "danger",
-  // Campaign statuses
-  enquiry: "neutral",
-  proposal_sent: "accent",
-  confirmed: "info",
-  creative_received: "progress",
-  printing: "warning",
-  mounted: "progress",
-  // Live gets its own tone (bright green + pulsing dot) so it stands
-  // out from completed / archived states. See TONE.live and the
-  // conditional dot styling below.
+  // Campaign statuses — just the three kept after migration 035.
   live: "live",
-  // Completed and dismounted both mean "past, done, archive" — we want
-  // them visually quiet so the eye focuses on active work.
   completed: "archived",
-  dismounted: "archived",
   cancelled: "danger",
   // Invoice statuses
   draft: "neutral",

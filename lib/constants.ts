@@ -51,17 +51,11 @@ export const SITE_STATUSES = [
 ] as const;
 export type SiteStatus = (typeof SITE_STATUSES)[number];
 
-// Campaign statuses (Kanban columns)
+// Campaign statuses. Simplified in migration 035 — see
+// lib/types/database.ts for the rationale.
 export const CAMPAIGN_STATUSES = [
-  "enquiry",
-  "proposal_sent",
-  "confirmed",
-  "creative_received",
-  "printing",
-  "mounted",
   "live",
   "completed",
-  "dismounted",
   "cancelled",
 ] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];

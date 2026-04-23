@@ -293,13 +293,14 @@ export async function deleteSite(siteId: string): Promise<{ error?: string }> {
       return { error: "Only admins can delete records" };
     }
 
-    // Guard: check for active campaigns linked to this site
-    // Active campaign statuses = anything that isn't cancelled, completed, or dismounted
+    // Guard: check for live campaigns linked to this site. Migration
+    // 035 collapsed the status model — "live" is the only non-terminal
+    // state.
     const { count: activeCampaignSites } = await supabase
       .from("campaign_sites")
       .select("id, campaigns!inner(status)", { count: "exact", head: true })
       .eq("site_id", siteId)
-      .not("campaigns.status", "in", '("cancelled","completed","dismounted")');
+      .eq("campaigns.status", "live");
 
     if (activeCampaignSites && activeCampaignSites > 0) {
       return { error: "Cannot delete site with active campaigns" };

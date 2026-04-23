@@ -52,7 +52,7 @@ export default async function NewInvoicePage({
       .from("campaigns")
       .select("id, campaign_name, client_id, pricing_type, total_value_paise")
       .is("deleted_at", null)
-      .in("status", ["confirmed", "creative_received", "printing", "mounted", "live", "completed"])
+      .in("status", ["live", "completed"])
       .order("campaign_name"),
     supabase
       .from("organizations")

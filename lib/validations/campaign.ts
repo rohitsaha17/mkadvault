@@ -182,10 +182,7 @@ export const reviewChangeRequestSchema = z.object({
   rejection_reason: z.string().optional(),
 });
 
-// Schema for updating status — includes cancelled
+// Schema for updating status. Simplified in migration 035.
 export const updateCampaignStatusSchema = z.object({
-  status: z.enum([
-    "enquiry", "proposal_sent", "confirmed", "creative_received",
-    "printing", "mounted", "live", "completed", "dismounted", "cancelled",
-  ]),
+  status: z.enum(["live", "completed", "cancelled"]),
 });

@@ -19,7 +19,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { fmt, inr } from "@/lib/utils";
 import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import type {
-  Campaign, Client, CampaignSite, CampaignService, CampaignActivityLog, CampaignChangeRequest, CampaignJob, Site, ServiceType,
+  Campaign, Client, CampaignSite, CampaignService, CampaignActivityLog, CampaignChangeRequest, CampaignJob, Site,
 } from "@/lib/types/database";
 
 const SERVICE_TYPE_LABELS: Record<string, string> = {
@@ -314,17 +314,17 @@ export default async function CampaignDetailPage({
               ["super_admin", "admin", "manager"].includes(r),
             )}
           />
-          {/* Direct edit for early stages; change request for confirmed+ */}
-          {["enquiry", "proposal_sent"].includes(campaign.status) ? (
+          {/* Edit is available on live campaigns. Change requests are
+              still wired up for audit trails but the simplified status
+              flow means anyone with access can just edit directly. */}
+          {campaign.status === "live" && (
             <Link href={`/campaigns/${id}/edit`}>
               <Button variant="outline" size="sm" className="gap-1.5">
                 <Pencil className="h-4 w-4" />
                 Edit
               </Button>
             </Link>
-          ) : !["cancelled", "completed", "dismounted"].includes(campaign.status) ? (
-            <ChangeRequestButton campaignId={id} hasPendingRequest={hasPendingChangeRequest} />
-          ) : null}
+          )}
         </div>
       </div>
 
@@ -342,7 +342,7 @@ export default async function CampaignDetailPage({
         <CampaignStatusBar
           campaignId={id}
           currentStatus={campaign.status}
-          serviceTypes={[...new Set(campServices.map((s) => s.service_type))] as ServiceType[]}
+          endDate={campaign.end_date}
         />
       </div>
 
