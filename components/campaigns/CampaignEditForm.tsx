@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { campaignBasicsSchema, type CampaignBasicsValues } from "@/lib/validations/campaign";
 import { updateCampaign } from "@/app/[locale]/(dashboard)/campaigns/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -119,11 +120,16 @@ export function CampaignEditForm({ existing, clients, agencies }: Props) {
   const billingType = watch("billing_party_type");
 
   function onSubmit(values: CampaignBasicsValues) {
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = await updateCampaign(existing.id, values);
-      if ("error" in result) { toast.error(result.error); return; }
-      toast.success("Campaign updated");
-      router.push(`/campaigns/${existing.id}`);
+      try {
+        const result = await updateCampaign(existing.id, clean);
+        if ("error" in result) { toast.error(result.error); return; }
+        toast.success("Campaign updated");
+        router.push(`/campaigns/${existing.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

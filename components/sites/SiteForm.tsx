@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
 import type { Site, Landowner } from "@/lib/types/database";
 
@@ -147,24 +148,31 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
   function onSubmit(values: SiteFormValues) {
     if (step !== STEPS.length - 1) return;
     // Drop any empty custom dimension rows the user left behind.
-    const cleaned = {
+    // Also sanitize NaN / Infinity / non-plain values so React Flight
+    // transport doesn't reject the payload with the cryptic
+    // "An unexpected response was received from the server." error.
+    const cleaned = sanitizeForTransport({
       ...values,
       custom_dimensions: (values.custom_dimensions ?? []).filter(
         (d) => d.label.trim() && d.value.trim()
       ),
-    };
+    });
     startTransition(async () => {
-      const result = existingSite
-        ? await updateSite(existingSite.id, cleaned)
-        : await createSite(cleaned);
+      try {
+        const result = existingSite
+          ? await updateSite(existingSite.id, cleaned)
+          : await createSite(cleaned);
 
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
+        if ("error" in result) {
+          toast.error(result.error);
+          return;
+        }
+
+        toast.success(existingSite ? "Site updated" : "Site created");
+        router.push(`/sites/${result.siteId}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
       }
-
-      toast.success(existingSite ? "Site updated" : "Site created");
-      router.push(`/sites/${result.siteId}`);
     });
   }
 

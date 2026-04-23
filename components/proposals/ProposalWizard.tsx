@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn, inr } from "@/lib/utils";
 import { createProposal, updateProposal, saveOrgProposalTermsTemplate } from "@/app/[locale]/(dashboard)/proposals/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { ProposalExportButtons } from "./ProposalExportButtons";
 import { ImportFromFileDialog } from "./ImportFromFileDialog";
 import type { Proposal, ProposalSite, Client, Organization } from "@/lib/types/database";
@@ -242,16 +243,21 @@ export function ProposalWizard({
       sites: selectedSites,
     };
 
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = editProposalId
-        ? await updateProposal(editProposalId, values)
-        : await createProposal(values);
+      try {
+        const result = editProposalId
+          ? await updateProposal(editProposalId, clean)
+          : await createProposal(clean);
 
-      if ("error" in result && result.error) { toast.error(result.error); return; }
+        if ("error" in result && result.error) { toast.error(result.error); return; }
 
-      const newId = "id" in result ? result.id : editProposalId!;
-      toast.success(editProposalId ? "Proposal updated" : "Proposal created");
-      router.push(`/proposals/${newId}`);
+        const newId = "id" in result ? result.id : editProposalId!;
+        toast.success(editProposalId ? "Proposal updated" : "Proposal created");
+        router.push(`/proposals/${newId}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

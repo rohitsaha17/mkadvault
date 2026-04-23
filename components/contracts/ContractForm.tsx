@@ -4,6 +4,7 @@ import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { contractSchema, contractDefaults, type ContractFormValues } from "@/lib/validations/contract";
 import { createContract, updateContract } from "@/app/[locale]/(dashboard)/contracts/actions";
@@ -105,13 +106,21 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
   const paymentModel = watch("payment_model");
 
   function onSubmit(values: ContractFormValues) {
+    // Sanitize NaN / Infinity / non-plain values before the Server Action
+    // boundary — Flight transport rejects those and surfaces the cryptic
+    // "An unexpected response was received from the server." error page.
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = existing
-        ? await updateContract(existing.id, values)
-        : await createContract(values);
-      if ("error" in result) { toast.error(result.error); return; }
-      toast.success(existing ? "Contract updated" : "Contract created");
-      router.push(`/contracts/${result.id}`);
+      try {
+        const result = existing
+          ? await updateContract(existing.id, clean)
+          : await createContract(clean);
+        if ("error" in result) { toast.error(result.error); return; }
+        toast.success(existing ? "Contract updated" : "Contract created");
+        router.push(`/contracts/${result.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

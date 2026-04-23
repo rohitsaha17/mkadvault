@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { inr } from "@/lib/utils";
 import { recordPayment } from "@/app/[locale]/(dashboard)/billing/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 
 // Coerce cleared number inputs (NaN from react-hook-form's valueAsNumber)
 // to 0 so the user sees "Amount must be positive" instead of Zod's
@@ -56,12 +57,17 @@ export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDu
   });
 
   function onSubmit(values: FormValues) {
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = await recordPayment(invoiceId, values);
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("Payment recorded");
-      onSuccess();
-      onClose();
+      try {
+        const result = await recordPayment(invoiceId, clean);
+        if (result.error) { toast.error(result.error); return; }
+        toast.success("Payment recorded");
+        onSuccess();
+        onClose();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

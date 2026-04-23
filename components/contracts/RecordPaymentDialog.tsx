@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { recordPaymentSchema, type RecordPaymentValues } from "@/lib/validations/contract";
 import { recordPayment } from "@/app/[locale]/(dashboard)/contracts/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,15 +38,19 @@ export function RecordPaymentDialog({ paymentRowId, amountDuePaise, dueDate, onS
   });
 
   function onSubmit(values: RecordPaymentValues) {
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = await recordPayment(paymentRowId, amountDuePaise, values);
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("Payment recorded");
-      setOpen(false);
-      reset();
-      onSuccess?.();
-      // Refresh page data
-      window.location.reload();
+      try {
+        const result = await recordPayment(paymentRowId, amountDuePaise, clean);
+        if (result.error) { toast.error(result.error); return; }
+        toast.success("Payment recorded");
+        setOpen(false);
+        reset();
+        onSuccess?.();
+        window.location.reload();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

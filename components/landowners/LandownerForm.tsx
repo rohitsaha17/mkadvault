@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2, Lock } from "lucide-react";
 import { landownerSchema, landownerDefaults, type LandownerFormValues } from "@/lib/validations/landowner";
 import { createLandowner, updateLandowner } from "@/app/[locale]/(dashboard)/landowners/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,13 +59,18 @@ export function LandownerForm({ existing }: Props) {
   });
 
   function onSubmit(values: LandownerFormValues) {
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = existing
-        ? await updateLandowner(existing.id, values)
-        : await createLandowner(values);
-      if ("error" in result) { toast.error(result.error); return; }
-      toast.success(existing ? "Landowner updated" : "Landowner created");
-      router.push(`/landowners/${result.id}`);
+      try {
+        const result = existing
+          ? await updateLandowner(existing.id, clean)
+          : await createLandowner(clean);
+        if ("error" in result) { toast.error(result.error); return; }
+        toast.success(existing ? "Landowner updated" : "Landowner created");
+        router.push(`/landowners/${result.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

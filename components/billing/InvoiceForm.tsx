@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, inr } from "@/lib/utils";
 import { createInvoice, getCampaignLineItems } from "@/app/[locale]/(dashboard)/billing/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import type { Client, Campaign, OrganizationBankAccount } from "@/lib/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -243,11 +244,19 @@ export function InvoiceForm({
       is_inter_state: gst.is_inter_state,
     };
 
+    // Sanitize NaN / Infinity / non-plain values before the Server Action
+    // boundary — Flight transport rejects those and surfaces a cryptic
+    // "An unexpected response was received from the server." error.
+    const clean = sanitizeForTransport(finalValues);
     startTransition(async () => {
-      const result = await createInvoice(finalValues);
-      if ("error" in result) { toast.error(result.error); return; }
-      toast.success(submitStatus === "draft" ? "Draft saved" : "Invoice created");
-      router.push(`/billing/invoices/${result.id}`);
+      try {
+        const result = await createInvoice(clean);
+        if ("error" in result) { toast.error(result.error); return; }
+        toast.success(submitStatus === "draft" ? "Draft saved" : "Invoice created");
+        router.push(`/billing/invoices/${result.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

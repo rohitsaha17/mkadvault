@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { clientSchema, clientDefaults, type ClientFormValues } from "@/lib/validations/client";
 import { createClientRecord, updateClientRecord } from "@/app/[locale]/(dashboard)/clients/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -87,13 +88,18 @@ export function ClientForm({ existing }: Props) {
   });
 
   function onSubmit(values: ClientFormValues) {
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = existing
-        ? await updateClientRecord(existing.id, values)
-        : await createClientRecord(values);
-      if ("error" in result) { toast.error(result.error); return; }
-      toast.success(existing ? "Client updated" : "Client created");
-      router.push(`/clients/${result.id}`);
+      try {
+        const result = existing
+          ? await updateClientRecord(existing.id, clean)
+          : await createClientRecord(clean);
+        if ("error" in result) { toast.error(result.error); return; }
+        toast.success(existing ? "Client updated" : "Client created");
+        router.push(`/clients/${result.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

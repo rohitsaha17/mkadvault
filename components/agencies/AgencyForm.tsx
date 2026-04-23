@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { agencySchema, agencyDefaults, type AgencyFormValues } from "@/lib/validations/agency";
 import { createAgency, updateAgency } from "@/app/[locale]/(dashboard)/agencies/actions";
+import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,13 +54,18 @@ export function AgencyForm({ existing }: Props) {
   });
 
   function onSubmit(values: AgencyFormValues) {
+    const clean = sanitizeForTransport(values);
     startTransition(async () => {
-      const result = existing
-        ? await updateAgency(existing.id, values)
-        : await createAgency(values);
-      if ("error" in result) { toast.error(result.error); return; }
-      toast.success(existing ? "Agency updated" : "Agency created");
-      router.push(`/agencies/${result.id}`);
+      try {
+        const result = existing
+          ? await updateAgency(existing.id, clean)
+          : await createAgency(clean);
+        if ("error" in result) { toast.error(result.error); return; }
+        toast.success(existing ? "Agency updated" : "Agency created");
+        router.push(`/agencies/${result.id}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 
