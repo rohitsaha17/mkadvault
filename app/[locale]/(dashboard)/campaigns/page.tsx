@@ -20,6 +20,13 @@ import { KanbanBoard } from "@/components/campaigns/KanbanBoard";
 import { ListExportMenu } from "@/components/shared/ListExportMenu";
 import { SortableTableHead } from "@/components/shared/SortableTableHead";
 import { sanitizeSearch, fmt, inr } from "@/lib/utils";
+import {
+  DATE_RANGE_LABELS,
+  DATE_RANGE_ORDER,
+  describeDateRange,
+  resolveDateRange,
+  type DateRangePreset,
+} from "@/lib/utils/date-ranges";
 import type { Campaign, Client, PartnerAgency, CampaignStatus } from "@/lib/types/database";
 
 export const metadata = { title: "Campaigns" };
@@ -46,19 +53,32 @@ export default async function CampaignsPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ q?: string; status?: string; view?: string; page?: string; sort?: string; dir?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; view?: string; page?: string; sort?: string; dir?: string; range?: string }>;
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations("campaigns");
 
-  const { q, status, view = "table", page, sort, dir } = await searchParams;
-  // Validate sort column against allowlist
+  const { q, status, view = "table", page, sort, dir, range: rangeParam } = await searchParams;
+  // Validate sort column against allowlist. Default is "start_date" DESC so
+  // the newest campaigns (most recent start date) show first — which is
+  // what users mean by "newest first" for bookings. "Created at" is still
+  // a valid sort key if someone passes it via ?sort=created_at.
   const SORTABLE_COLS = ["campaign_name", "start_date", "total_value_paise", "status", "created_at"];
-  const sortCol = sort && SORTABLE_COLS.includes(sort) ? sort : "created_at";
+  const sortCol = sort && SORTABLE_COLS.includes(sort) ? sort : "start_date";
   const sortDir = dir === "asc" ? "asc" : "desc";
   const currentPage = Math.max(1, parseInt(page ?? "1", 10));
   const offset = (currentPage - 1) * PAGE_SIZE;
+
+  // Date-range preset: validates against the known set; anything else is
+  // treated as "all" (no date filter). The filter applies to start_date —
+  // "campaigns that started during this period".
+  const rangeCandidates: DateRangePreset[] = [...DATE_RANGE_ORDER];
+  const rangePreset: DateRangePreset =
+    rangeParam && rangeCandidates.includes(rangeParam as DateRangePreset)
+      ? (rangeParam as DateRangePreset)
+      : "all";
+  const dateRange = resolveDateRange(rangePreset);
 
   const supabase = await createClient();
 
@@ -81,6 +101,15 @@ export default async function CampaignsPage({
   if (status) {
     query = query.eq("status", status as CampaignStatus);
   }
+  if (dateRange) {
+    // Filter on start_date: "campaigns that started during the selected
+    // period". If you need overlap semantics later (campaigns that were
+    // ACTIVE during the period, including ones that started earlier),
+    // swap for .or(`and(start_date.lte.${to},end_date.gte.${from})`).
+    query = query
+      .gte("start_date", dateRange.from)
+      .lte("start_date", dateRange.to);
+  }
 
   if (view === "table") {
     query = query.range(offset, offset + PAGE_SIZE - 1);
@@ -90,12 +119,13 @@ export default async function CampaignsPage({
   const campaigns = (data ?? []) as unknown as CampaignWithBillingParty[];
   const total = count ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const hasFilters = !!(q || status);
+  const hasFilters = !!(q || status || (rangePreset !== "all"));
 
   const buildHref = (extra: Record<string, string>) => {
     const p: Record<string, string> = {};
     if (q) p.q = q;
     if (status) p.status = status;
+    if (rangePreset !== "all") p.range = rangePreset;
     if (view !== "table") p.view = view;
     if (sort) p.sort = sort;
     if (dir) p.dir = dir;
@@ -132,7 +162,7 @@ export default async function CampaignsPage({
           <select
             name="status"
             defaultValue={status ?? ""}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 w-44"
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 w-40"
           >
             <option value="">All Statuses</option>
             <option value="enquiry">Enquiry</option>
@@ -144,6 +174,17 @@ export default async function CampaignsPage({
             <option value="live">Live</option>
             <option value="completed">Completed</option>
             <option value="dismounted">Dismounted</option>
+          </select>
+          <select
+            name="range"
+            defaultValue={rangePreset}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 w-44"
+          >
+            {DATE_RANGE_ORDER.map((key) => (
+              <option key={key} value={key}>
+                {DATE_RANGE_LABELS[key]}
+              </option>
+            ))}
           </select>
           <Button type="submit" variant="outline" size="sm">Search</Button>
           {hasFilters && (
@@ -185,6 +226,11 @@ export default async function CampaignsPage({
       {total > 0 && view === "table" && (
         <p className="text-xs text-muted-foreground mb-3 tabular-nums">
           Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total} campaign{total !== 1 ? "s" : ""}
+          {dateRange && (
+            <span className="ml-2 normal-nums">
+              · started between {describeDateRange(dateRange.from, dateRange.to)}
+            </span>
+          )}
         </p>
       )}
 
