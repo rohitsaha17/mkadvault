@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { createClient as createSupabaseJs } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
@@ -155,12 +156,42 @@ export async function forgotPasswordAction(
       return { error: parsed.error.issues[0].message };
     }
 
-    const supabase = await createClient();
     const origin = await getSiteOrigin();
-    const { error } = await supabase.auth.resetPasswordForEmail(
+
+    // Use a plain supabase-js client (NOT @supabase/ssr) with flowType
+    // 'implicit' so `resetPasswordForEmail` does NOT go through PKCE.
+    //
+    // Why: the SSR client ships with flowType 'pkce' by default. PKCE
+    // needs a code verifier to be stored when the email is requested
+    // and read back when the user clicks the link. In a Next.js 16
+    // Server Action, the verifier is written to an httpOnly cookie via
+    // the response, but in our setup the cookie was not persisting to
+    // the browser (Flight response under useActionState doesn't reliably
+    // propagate Set-Cookie for the code-verifier). End result: clicking
+    // the reset link failed with
+    //     "PKCE code verifier not found in storage."
+    //
+    // By using the implicit/token flow, Supabase emails a link shaped
+    // like `/auth/confirm?token_hash=...&type=recovery&next=...`. Our
+    // AuthLinkHandler already verifies that via `verifyOtp({ token_hash,
+    // type: 'recovery' })` with zero cookie dependency — bulletproof.
+    const supabaseRecovery = createSupabaseJs(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: {
+          flowType: "implicit",
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      },
+    );
+
+    const { error } = await supabaseRecovery.auth.resetPasswordForEmail(
       parsed.data.email,
       {
-        redirectTo: `${origin}/auth/callback?next=/reset-password`,
+        redirectTo: `${origin}/auth/confirm?next=/reset-password`,
       }
     );
 

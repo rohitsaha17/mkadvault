@@ -1,14 +1,28 @@
 // Auth callback — entry point Supabase redirects users to after an
 // invite / magic-link / password-reset / email-confirm link is
-// clicked. All the real work lives in the AuthLinkHandler client
-// component so we can also read URL fragments (which carry tokens
-// in Supabase's implicit flow and never reach the server). Three
-// routes — /auth/callback, /auth/confirm, /auth/verify — all render
-// this same component so every email-template URL shape works.
+// clicked. See lib/auth/handleAuthLink.ts for the full flow story;
+// this file just wires the search params to the shared helper.
+
+import { redirect } from "next/navigation";
 import { AuthLinkHandler } from "@/components/auth/AuthLinkHandler";
+import { handleAuthLink } from "@/lib/auth/handleAuthLink";
 
-export const metadata = { title: "Verifying your invite…" };
+export const metadata = { title: "Verifying…" };
+export const dynamic = "force-dynamic";
 
-export default function AuthCallbackPage() {
+type SearchParams = Promise<{
+  code?: string;
+  next?: string;
+  type?: string;
+}>;
+
+export default async function AuthCallbackPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const sp = await searchParams;
+  const result = await handleAuthLink(sp);
+  if (result.kind !== "client") redirect(result.to);
   return <AuthLinkHandler />;
 }
