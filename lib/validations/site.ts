@@ -5,6 +5,29 @@
 // doesn't have input/output type mismatches. Coercion happens in server actions.
 import { z } from "zod";
 
+// Helper: an optional number input where an empty HTML number field
+// (which react-hook-form's valueAsNumber parses as NaN) is treated as
+// "not provided" rather than a validation error. Without this, zod v4
+// rejects NaN as "not a finite number" and the form silently blocks
+// the user from advancing — even though the DB column is nullable.
+const optionalNumber = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return undefined;
+    if (typeof v === "number" && Number.isNaN(v)) return undefined;
+    return v;
+  },
+  z.number().optional(),
+);
+
+const optionalPositiveNumber = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return undefined;
+    if (typeof v === "number" && Number.isNaN(v)) return undefined;
+    return v;
+  },
+  z.number().positive("Must be positive").optional(),
+);
+
 export const siteSchema = z.object({
   // ── Step 1: Basic Info ─────────────────────────────────────────────────
   name: z.string().min(1, "Site name is required"),
@@ -25,9 +48,11 @@ export const siteSchema = z.object({
   // Optional string fields — empty string is treated as null in the server action
   pincode: z.string().optional(),
   landmark: z.string().optional(),
-  // Lat/lng: optional numbers (HTML number input returns NaN for empty)
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
+  // Lat/lng: fully optional. Empty inputs (which valueAsNumber turns
+  // into NaN) are coerced to undefined via the optionalNumber helper so
+  // the user can save a site without touching the map / coordinates.
+  latitude: optionalNumber,
+  longitude: optionalNumber,
 
   // ── Step 3: Specifications ─────────────────────────────────────────────
   // Width, height, illumination, traffic_side are mandatory per spec — every
@@ -42,7 +67,7 @@ export const siteSchema = z.object({
   traffic_side: z.enum(["lhs", "rhs", "both"], {
     message: "Select a traffic side",
   }),
-  visibility_distance_m: z.number().positive("Must be positive").optional(),
+  visibility_distance_m: optionalPositiveNumber,
   // Extra dimensions the user adds — e.g. {label:"Depth", value:"3 ft"}.
   // Stored as JSONB on the sites table. Each entry must have a non-empty
   // label and value (we drop empty rows on submit rather than erroring).
@@ -61,7 +86,7 @@ export const siteSchema = z.object({
   // Empty string from the select is coerced to undefined by the form.
   landowner_id: z.string().uuid().optional().or(z.literal("")).transform((v) => v || undefined),
   // Form collects rate in INR; server action converts to paise (× 100).
-  base_rate_inr: z.number().positive("Must be positive").optional(),
+  base_rate_inr: optionalPositiveNumber,
   municipal_permission_number: z.string().optional(),
   municipal_permission_expiry: z.string().optional(), // ISO date "YYYY-MM-DD"
 

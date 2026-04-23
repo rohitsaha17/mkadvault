@@ -108,10 +108,10 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
     watch,
     control,
     formState: { errors },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } = useForm<SiteFormValues>({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zodResolver's generic type can't express preprocess input↔output mismatch
     resolver: zodResolver(siteSchema) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- defaultValues typed as Partial<Output> but zod Input differs
     defaultValues: defaultValues as any,
     mode: "onTouched",
   });
@@ -368,9 +368,15 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
               </FormField>
             </div>
 
-            <p className="text-sm font-medium text-foreground">GPS Coordinates</p>
+            <p className="text-sm font-medium text-foreground">
+              GPS Coordinates{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                (optional)
+              </span>
+            </p>
             <p className="text-xs text-muted-foreground -mt-3">
-              Enter manually or use the map picker below.
+              Leave blank if you don&apos;t know them yet — you can add coordinates
+              later by editing the site. Or enter manually / use the map picker below.
             </p>
 
             <div className="grid grid-cols-2 gap-4">
