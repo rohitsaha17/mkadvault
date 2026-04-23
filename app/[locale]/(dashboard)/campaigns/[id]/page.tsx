@@ -306,6 +306,13 @@ export default async function CampaignDetailPage({
             campaignStatus={campaign.status}
             clientId={campaign.client_id ?? ""}
             currentEndDate={campaign.end_date}
+            campaignName={campaign.campaign_name}
+            // Delete is a privileged action — scoped to admin /
+            // super_admin / manager. Computed from the cached session
+            // roles we already load at the top of the page.
+            canDelete={userRoles.some((r) =>
+              ["super_admin", "admin", "manager"].includes(r),
+            )}
           />
           {/* Direct edit for early stages; change request for confirmed+ */}
           {["enquiry", "proposal_sent"].includes(campaign.status) ? (
