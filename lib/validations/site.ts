@@ -58,8 +58,27 @@ export const siteSchema = z.object({
   // Width, height, illumination, traffic_side are mandatory per spec — every
   // physical site must declare these. Facing + visibility distance remain
   // optional because older stock sometimes lacks this data.
-  width_ft: z.number({ message: "Width is required" }).positive("Must be positive"),
-  height_ft: z.number({ message: "Height is required" }).positive("Must be positive"),
+  //
+  // NaN-safe: preprocess a cleared number input ("" / null / NaN) into
+  // undefined so the schema surfaces the intended "X is required" message
+  // instead of Zod v4's "Expected number, received nan" that silently
+  // blocks form submission.
+  width_ft: z.preprocess(
+    (v) => {
+      if (v === undefined || v === null || v === "") return undefined;
+      if (typeof v === "number" && Number.isNaN(v)) return undefined;
+      return v;
+    },
+    z.number({ message: "Width is required" }).positive("Must be positive"),
+  ),
+  height_ft: z.preprocess(
+    (v) => {
+      if (v === undefined || v === null || v === "") return undefined;
+      if (typeof v === "number" && Number.isNaN(v)) return undefined;
+      return v;
+    },
+    z.number({ message: "Height is required" }).positive("Must be positive"),
+  ),
   illumination: z.enum(["frontlit", "backlit", "digital", "nonlit"], {
     message: "Select an illumination type",
   }),

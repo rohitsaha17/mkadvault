@@ -1,4 +1,25 @@
 import { z } from "zod";
+import {
+  optionalPercentage,
+  optionalPositiveNumber,
+} from "./shared";
+
+// NaN-safe optional integer helper for the day-of-month / period fields.
+// react-hook-form's valueAsNumber turns a cleared input into NaN, which
+// plain z.number().int() rejects with a confusing message.
+function optionalInt(min?: number, max?: number, label?: string) {
+  let schema = z.number().int("Must be a whole number");
+  if (min !== undefined) schema = schema.min(min, label ?? `Must be ≥ ${min}`);
+  if (max !== undefined) schema = schema.max(max, label ?? `Must be ≤ ${max}`);
+  return z.preprocess(
+    (v) => {
+      if (v === undefined || v === null || v === "") return undefined;
+      if (typeof v === "number" && Number.isNaN(v)) return undefined;
+      return v;
+    },
+    schema.optional(),
+  );
+}
 
 // Base contract schema — conditional fields validated in the action based on payment_model
 export const contractSchema = z.object({
@@ -10,26 +31,26 @@ export const contractSchema = z.object({
   payment_model: z.enum(["monthly_fixed", "yearly_lumpsum", "revenue_share", "custom"]),
 
   // Monthly fixed / revenue share minimum
-  rent_amount_inr: z.number().positive("Must be positive").optional(),
-  payment_day_of_month: z.number().int().min(1).max(28).optional(),
+  rent_amount_inr: optionalPositiveNumber,
+  payment_day_of_month: optionalInt(1, 28),
 
   // Yearly lumpsum
   payment_date: z.string().optional(), // ISO date
 
   // Revenue share
-  revenue_share_percentage: z.number().min(0).max(100).optional(),
-  minimum_guarantee_inr: z.number().positive("Must be positive").optional(),
+  revenue_share_percentage: optionalPercentage,
+  minimum_guarantee_inr: optionalPositiveNumber,
 
   // Escalation
-  escalation_percentage: z.number().min(0).max(100).optional(),
-  escalation_frequency_months: z.number().int().positive().optional(),
+  escalation_percentage: optionalPercentage,
+  escalation_frequency_months: optionalInt(1),
 
   // Term
   start_date: z.string().min(1, "Start date is required"),
   end_date: z.string().optional(),
   renewal_date: z.string().optional(),
-  notice_period_days: z.number().int().positive().optional(),
-  lock_period_months: z.number().int().positive().optional(),
+  notice_period_days: optionalInt(1),
+  lock_period_months: optionalInt(1),
   early_termination_clause: z.string().optional(),
 
   notes: z.string().optional(),
@@ -60,13 +81,35 @@ export const contractDefaults: Partial<ContractFormValues> = {
   start_date: "",
 };
 
-// Schema for recording a payment against a contract_payments row
+// Schema for recording a payment against a contract_payments row.
+// tds_percentage is optional and frequently cleared — use the NaN-safe
+// helper so re-typing and deleting doesn't block the submit.
+const optionalTdsPercentage = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return undefined;
+    if (typeof v === "number" && Number.isNaN(v)) return undefined;
+    return v;
+  },
+  z.number().min(0, "Must be 0 or more").max(30, "Cannot exceed 30%").optional(),
+);
+
+// amount_paid_inr is required — coerce NaN → 0 so the zod error reads
+// "Amount must be positive" instead of "Expected number, received nan".
+const requiredPositive = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return 0;
+    if (typeof v === "number" && Number.isNaN(v)) return 0;
+    return v;
+  },
+  z.number().positive("Amount must be positive"),
+);
+
 export const recordPaymentSchema = z.object({
-  amount_paid_inr: z.number().positive("Amount must be positive"),
+  amount_paid_inr: requiredPositive,
   payment_date: z.string().min(1, "Payment date is required"),
   payment_mode: z.enum(["cash", "cheque", "bank_transfer", "upi", "online"]),
   payment_reference: z.string().optional(),
-  tds_percentage: z.number().min(0).max(30).optional(),
+  tds_percentage: optionalTdsPercentage,
   notes: z.string().optional(),
 });
 

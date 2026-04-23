@@ -34,12 +34,22 @@ interface Props {
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
+// Coerce NaN / empty string to a safe default so a cleared HTML number
+// input surfaces a meaningful validation message instead of Zod v4's
+// "Expected number, received nan" that blocks submit.
+const coerceNumberOrDefault = (fallback: number) =>
+  z.preprocess((v) => {
+    if (v === undefined || v === null || v === "") return fallback;
+    if (typeof v === "number" && Number.isNaN(v)) return fallback;
+    return v;
+  }, z.number());
+
 const lineItemSchema = z.object({
   service_type: z.enum(["display_rental", "flex_printing", "mounting", "design", "transport", "other"]),
   description: z.string().min(1, "Required"),
   hsn_sac_code: z.string(),
-  quantity: z.number().positive(),
-  rate_inr: z.number().min(0, "Required"),
+  quantity: coerceNumberOrDefault(1).pipe(z.number().positive("Must be > 0")),
+  rate_inr: coerceNumberOrDefault(0).pipe(z.number().min(0, "Required")),
   period_from: z.string().optional(),
   period_to: z.string().optional(),
   site_id: z.string().optional(),
@@ -150,7 +160,10 @@ export function InvoiceForm({
     "";
 
   const { register, handleSubmit, watch, control, setValue, formState: { errors } } = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    // Cast: z.preprocess() on line_items.quantity / rate_inr makes zod's
+    // input type `unknown`, which trips zodResolver's generics.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       client_id: preselectedClientId ?? "",
       campaign_id: preselectedCampaignId ?? "",

@@ -11,8 +11,20 @@ import { Label } from "@/components/ui/label";
 import { inr } from "@/lib/utils";
 import { recordPayment } from "@/app/[locale]/(dashboard)/billing/actions";
 
+// Coerce cleared number inputs (NaN from react-hook-form's valueAsNumber)
+// to 0 so the user sees "Amount must be positive" instead of Zod's
+// "Expected number, received nan" which silently blocks submit.
+const amountField = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return 0;
+    if (typeof v === "number" && Number.isNaN(v)) return 0;
+    return v;
+  },
+  z.number().positive("Amount must be positive"),
+);
+
 const schema = z.object({
-  amount_inr: z.number().positive("Amount must be positive"),
+  amount_inr: amountField,
   payment_date: z.string().min(1, "Required"),
   payment_mode: z.enum(["cash", "cheque", "bank_transfer", "upi", "online"]),
   reference_number: z.string().optional(),
@@ -32,7 +44,10 @@ interface Props {
 export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDuePaise, onClose, onSuccess }: Props) {
   const [isPending, startTransition] = useTransition();
   const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    // Cast: z.preprocess() on amount_inr makes the input type `unknown`,
+    // which trips zodResolver's generics. Matches SiteForm / CampaignForm.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(schema) as any,
     defaultValues: {
       amount_inr: balanceDuePaise / 100,
       payment_date: new Date().toISOString().slice(0, 10),

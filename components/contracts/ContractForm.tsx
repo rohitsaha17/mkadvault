@@ -86,7 +86,10 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
   };
 
   const { register, handleSubmit, watch, control, formState: { errors } } = useForm<ContractFormValues>({
-    resolver: zodResolver(contractSchema),
+    // Cast: z.preprocess() on optional number fields makes zod's input
+    // type `unknown`, which trips zodResolver's generics.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(contractSchema) as any,
     defaultValues: defaults,
   });
 

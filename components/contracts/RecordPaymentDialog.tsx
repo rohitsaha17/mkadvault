@@ -25,7 +25,10 @@ export function RecordPaymentDialog({ paymentRowId, amountDuePaise, dueDate, onS
   const [isPending, startTransition] = useTransition();
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<RecordPaymentValues>({
-    resolver: zodResolver(recordPaymentSchema),
+    // Cast: z.preprocess() on amount_paid_inr / tds_percentage makes zod's
+    // input type `unknown`, which trips zodResolver's generics.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(recordPaymentSchema) as any,
     defaultValues: {
       amount_paid_inr: amountDuePaise / 100,
       payment_date: new Date().toISOString().slice(0, 10),
