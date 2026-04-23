@@ -9,12 +9,57 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Upload, Trash2, Star, Loader2, ImageOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  deleteSitePhoto,
-  setSitePrimaryPhoto,
-} from "@/app/[locale]/(dashboard)/sites/actions";
 import type { SitePhoto } from "@/lib/types/database";
 import { SitePhotoLightbox } from "./SitePhotoLightbox";
+
+// Common JSON parse helper: treats any non-200 or non-JSON response as
+// a uniform { error } shape so callers never have to special-case
+// transport failures.
+async function parseJson(res: Response, fallback: string): Promise<{ success?: boolean; error?: string; [k: string]: unknown }> {
+  try {
+    return await res.json();
+  } catch {
+    return { error: `${fallback} (HTTP ${res.status})` };
+  }
+}
+
+// Delete a photo via the JSON API. Returns null on success, error msg otherwise.
+async function deletePhotoApi(
+  siteId: string,
+  photoId: string,
+): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/sites/${siteId}/photos/${photoId}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+  } catch (err) {
+    return err instanceof Error ? `Network error: ${err.message}` : "Network error";
+  }
+  const data = await parseJson(res, "Server returned an unexpected response");
+  return data.error ?? null;
+}
+
+// Set a photo as the primary one for a site. Same contract as above.
+async function setPrimaryApi(
+  siteId: string,
+  photoId: string,
+): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/sites/${siteId}/photos/${photoId}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_primary: true }),
+    });
+  } catch (err) {
+    return err instanceof Error ? `Network error: ${err.message}` : "Network error";
+  }
+  const data = await parseJson(res, "Server returned an unexpected response");
+  return data.error ?? null;
+}
 
 // Uploads a single file to the JSON photo API and returns the new row
 // (or an error string). Kept at module scope so multiple files can be
@@ -159,27 +204,40 @@ export function SitePhotoGallery({ siteId, photos: initialPhotos, signedUrls: in
 
   function handleDelete(photoId: string) {
     startTransition(async () => {
-      const result = await deleteSitePhoto(photoId, siteId);
-      if (result.error) {
-        toast.error(result.error);
+      const err = await deletePhotoApi(siteId, photoId);
+      if (err) {
+        toast.error(err);
         return;
       }
-      setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+      // Optimistic update: drop the photo from the grid. If the deleted
+      // photo was primary, promote the first remaining photo so the
+      // primary badge still shows (the API does the same on the server).
+      setPhotos((prev) => {
+        const next = prev.filter((p) => p.id !== photoId);
+        const deletedWasPrimary = prev.find((p) => p.id === photoId)?.is_primary;
+        if (deletedWasPrimary && next.length > 0 && !next.some((p) => p.is_primary)) {
+          const first = [...next].sort((a, b) => a.sort_order - b.sort_order)[0];
+          return next.map((p) => ({ ...p, is_primary: p.id === first.id }));
+        }
+        return next;
+      });
       toast.success("Photo removed");
+      router.refresh();
     });
   }
 
   function handleSetPrimary(photoId: string) {
     startTransition(async () => {
-      const result = await setSitePrimaryPhoto(photoId, siteId);
-      if (result.error) {
-        toast.error(result.error);
+      const err = await setPrimaryApi(siteId, photoId);
+      if (err) {
+        toast.error(err);
         return;
       }
       setPhotos((prev) =>
-        prev.map((p) => ({ ...p, is_primary: p.id === photoId }))
+        prev.map((p) => ({ ...p, is_primary: p.id === photoId })),
       );
       toast.success("Primary photo updated");
+      router.refresh();
     });
   }
 
