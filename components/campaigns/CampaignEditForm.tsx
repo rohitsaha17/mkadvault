@@ -92,7 +92,10 @@ export function CampaignEditForm({ existing, clients, agencies }: Props) {
   const [isPending, startTransition] = useTransition();
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<CampaignBasicsValues>({
-    resolver: zodResolver(campaignBasicsSchema),
+    // Cast: z.preprocess() for NaN-safe optional numbers makes zod's
+    // input type `unknown`, which trips up zodResolver's generics.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(campaignBasicsSchema) as any,
     defaultValues: {
       campaign_name: existing.campaign_name,
       billing_party_type: existing.billing_party_type ?? "client",

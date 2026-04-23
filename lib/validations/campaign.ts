@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  optionalNonNegativeNumber,
+  optionalPercentage,
+  optionalPositiveNumber,
+} from "./shared";
 
 // Who the campaign is billed to. See migration 024 for semantics:
 //   - client:                    bill client directly (default)
@@ -15,16 +20,16 @@ export type BillingPartyType = (typeof BILLING_PARTY_TYPES)[number];
 //   - billing_party_type === 'client'  → client_id required, agency not required
 //   - billing_party_type === 'agency'  → agency required; client_id optional (end customer ref)
 //   - billing_party_type === 'client_on_behalf_of_agency' → both required, commission expected
+// Note: numeric fields use the shared NaN-safe helpers so the form
+// doesn't silently fail when the user types in a value and then clears
+// it (which react-hook-form's valueAsNumber turns into NaN, which
+// Zod v4's plain z.number().optional() rejects).
 const billingFields = {
   billing_party_type: z.enum(BILLING_PARTY_TYPES),
   client_id: z.string().uuid().optional().or(z.literal("")),
   billed_agency_id: z.string().uuid().optional().or(z.literal("")),
-  agency_commission_percentage: z
-    .number()
-    .min(0, "Must be 0 or more")
-    .max(100, "Cannot exceed 100%")
-    .optional(),
-  agency_commission_inr: z.number().min(0).optional(),
+  agency_commission_percentage: optionalPercentage,
+  agency_commission_inr: optionalNonNegativeNumber,
 };
 
 function applyBillingRules(
@@ -75,7 +80,7 @@ export const campaignBasicsSchema = z
     start_date: z.string().optional(),
     end_date: z.string().optional(),
     pricing_type: z.enum(["itemized", "bundled"]),
-    total_value_inr: z.number().positive("Must be positive").optional(),
+    total_value_inr: optionalPositiveNumber,
     notes: z.string().optional(),
   })
   .superRefine(applyBillingRules);
@@ -84,17 +89,36 @@ export const campaignBasicsSchema = z
 export const campaignSiteEntrySchema = z.object({
   site_id: z.string().uuid(),
   rate_type: z.enum(["per_month", "fixed"]),
-  display_rate_inr: z.number().min(0, "Enter a display rate").optional(),
+  display_rate_inr: optionalNonNegativeNumber,
   start_date: z.string().optional(),
   end_date: z.string().optional(),
 });
 
-// Per-service entry
+// Per-service entry. quantity / rate_inr are required but we preprocess
+// empty inputs → default safe values so partially-filled service rows
+// surface a friendlier error than "Expected number, received nan".
+const coerceQuantity = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return 1;
+    if (typeof v === "number" && Number.isNaN(v)) return 1;
+    return v;
+  },
+  z.number().int("Must be a whole number").min(1, "Must be at least 1"),
+);
+const coerceRate = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null || v === "") return 0;
+    if (typeof v === "number" && Number.isNaN(v)) return 0;
+    return v;
+  },
+  z.number().min(0, "Must be 0 or more"),
+);
+
 export const campaignServiceEntrySchema = z.object({
   service_type: z.enum(["display_rental", "flex_printing", "mounting", "design", "transport", "other"]),
   description: z.string().optional(),
-  quantity: z.number().int().min(1),
-  rate_inr: z.number().min(0),
+  quantity: coerceQuantity,
+  rate_inr: coerceRate,
   site_id: z.string().uuid().optional(),
   rate_basis: z.enum(["per_sqft", "lumpsum", "other"]),
   other_label: z.string().optional(),
@@ -108,7 +132,7 @@ export const createCampaignSchema = z
     start_date: z.string().optional(),
     end_date: z.string().optional(),
     pricing_type: z.enum(["itemized", "bundled"]),
-    total_value_inr: z.number().positive("Must be positive").optional(),
+    total_value_inr: optionalPositiveNumber,
     notes: z.string().optional(),
     sites: z.array(campaignSiteEntrySchema),
     services: z.array(campaignServiceEntrySchema),
@@ -135,12 +159,12 @@ export const draftCampaignSchema = z.object({
   billing_party_type: z.enum(BILLING_PARTY_TYPES).optional(),
   client_id: z.string().uuid().optional().or(z.literal("")),
   billed_agency_id: z.string().uuid().optional().or(z.literal("")),
-  agency_commission_percentage: z.number().min(0).max(100).optional(),
-  agency_commission_inr: z.number().min(0).optional(),
+  agency_commission_percentage: optionalPercentage,
+  agency_commission_inr: optionalNonNegativeNumber,
   start_date: z.string().optional(),
   end_date: z.string().optional(),
   pricing_type: z.enum(["itemized", "bundled"]).optional(),
-  total_value_inr: z.number().positive().optional(),
+  total_value_inr: optionalPositiveNumber,
   notes: z.string().optional(),
   sites: z.array(campaignSiteEntrySchema).optional(),
   services: z.array(campaignServiceEntrySchema).optional(),

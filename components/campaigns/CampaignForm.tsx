@@ -142,7 +142,11 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
   const [durationMode, setDurationMode] = useState<"campaign" | "custom">("campaign");
 
   const { register, handleSubmit, watch, setValue, control, getValues, formState: { errors } } = useForm<CreateCampaignValues>({
-    resolver: zodResolver(createCampaignSchema),
+    // Cast: z.preprocess() for NaN-safe optional numbers makes zod's
+    // input type `unknown`, which trips up zodResolver's generics.
+    // Matches the pattern in SiteForm.tsx.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(createCampaignSchema) as any,
     defaultValues: {
       campaign_name: "",
       billing_party_type: "client",
