@@ -1,13 +1,18 @@
 "use client";
 // PPTX export using pptxgenjs — browser-side only, no SSR needed.
 //
-// Image handling: we fetch each site photo ourselves and convert it to a
-// base64 data URI *before* calling pptxgenjs.addImage. This guarantees the
-// image bytes are actually embedded in the downloaded .pptx file.
-// Otherwise, pptxgenjs tries to fetch the signed URL at write-time and a
-// network hiccup, CORS glitch, or URL expiry silently drops the photo —
-// which is what was happening when the user reported "image is still not
-// getting stored".
+// This is the sole export format for proposals / rate cards (PDF was
+// removed). Design principles applied in this rewrite:
+//   • Typography bumped substantially — cover title 56pt, site headers
+//     36pt, detail labels 14pt / values 22pt, so the deck reads cleanly
+//     on a meeting-room projector.
+//   • Organisation branding applied everywhere — logo on the cover,
+//     every site slide, the contact slide; org name + city/state in the
+//     cover and footer.
+//   • Image handling unchanged — we pre-fetch every photo AND the
+//     org logo into base64 data URIs so the slides embed the bytes,
+//     not signed URL references that might 404 later.
+
 import { useState } from "react";
 import { Loader2, Presentation } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,9 +29,23 @@ interface Props {
     state?: string | null;
     phone?: string | null;
     email?: string | null;
+    address?: string | null;
+    gstin?: string | null;
   } | null;
+  // 1-hour signed URL for the org logo. Fetched + embedded once on the
+  // cover and every site slide so the resulting deck is self-contained.
+  orgLogoUrl: string | null;
   filename: string;
 }
+
+// Brand colours — kept here rather than loose literals so tweaks are
+// one-stop.
+const BRAND_PRIMARY = "1e3a5f"; // deep navy, used for cover + contact slide bg
+const BRAND_ACCENT = "2563eb"; // saturated blue, used for rate + accent bars
+const BRAND_INK = "0f172a"; // body copy on light slides
+const BRAND_MUTED = "64748b"; // labels, secondary text
+const BRAND_LIGHT = "f1f5f9"; // soft background for terms slide
+const BRAND_HAIRLINE = "cbd5e1"; // divider lines
 
 function displayRate(paise: number | null, showRates: string): string {
   if (!paise || showRates === "hidden") return "—";
@@ -40,8 +59,8 @@ function displayRate(paise: number | null, showRates: string): string {
 }
 
 // Fetch a remote image and return it as a base64 data URI so pptxgenjs
-// can embed the bytes directly. Returns null on failure so the slide
-// falls back to a placeholder instead of crashing the whole export.
+// can embed the bytes directly. Returns null on failure so slides
+// fall back gracefully instead of crashing the export.
 async function urlToDataUri(url: string): Promise<string | null> {
   try {
     const res = await fetch(url);
@@ -49,7 +68,8 @@ async function urlToDataUri(url: string): Promise<string | null> {
     const blob = await res.blob();
     return await new Promise<string | null>((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onload = () =>
+        resolve(typeof reader.result === "string" ? reader.result : null);
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
     });
@@ -58,100 +78,141 @@ async function urlToDataUri(url: string): Promise<string | null> {
   }
 }
 
-export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
+export function ProposalPptxButton({
+  proposal,
+  sites,
+  org,
+  orgLogoUrl,
+  filename,
+}: Props) {
   const [loading, setLoading] = useState(false);
 
   async function handleDownload() {
     setLoading(true);
     try {
-      // Dynamic import so pptxgenjs is never bundled server-side
       const pptxgenjs = (await import("pptxgenjs")).default;
       const prs = new pptxgenjs();
 
-      // Pre-fetch every photo in parallel and convert to data URIs.
-      // Doing this up-front (rather than at addImage time) means a slow
-      // image never blocks slide layout and a failed image doesn't abort
-      // the whole PPTX build.
+      // Pre-fetch site photos + org logo in parallel so every slide
+      // builds without a further network call.
       const photoUrls = sites
         .map((s) => s.primary_photo_url)
         .filter((u): u is string => !!u);
-      const photoData = await Promise.all(photoUrls.map(urlToDataUri));
+      const [photoData, logoData] = await Promise.all([
+        Promise.all(photoUrls.map(urlToDataUri)),
+        orgLogoUrl ? urlToDataUri(orgLogoUrl) : Promise.resolve(null),
+      ]);
       const photoDataByUrl = new Map<string, string>();
       photoUrls.forEach((url, i) => {
         const data = photoData[i];
         if (data) photoDataByUrl.set(url, data);
       });
 
-      prs.layout = "LAYOUT_WIDE";
+      prs.layout = "LAYOUT_WIDE"; // 13.333" × 7.5"
       prs.title = proposal.proposal_name;
       prs.author = org?.name ?? "";
 
-      // ── Slide 1: Cover ────────────────────────────────────────────────────
+      // ─── Slide 1 — Cover ─────────────────────────────────────────────
       const cover = prs.addSlide();
-      cover.background = { color: "1e3a5f" };
+      cover.background = { color: BRAND_PRIMARY };
+
+      // Subtle right-edge accent bar for brand personality.
+      cover.addShape(prs.ShapeType.rect, {
+        x: 12.75, y: 0, w: 0.58, h: 7.5, fill: { color: BRAND_ACCENT },
+      });
+
+      // Logo — top-left, generously sized (up to 1.8" square). Only
+      // rendered when the org has actually uploaded one.
+      if (logoData) {
+        cover.addImage({
+          data: logoData, x: 0.75, y: 0.75, w: 1.8, h: 1.8,
+          sizing: { type: "contain", w: 1.8, h: 1.8 },
+        });
+      }
 
       if (proposal.include_company_branding && org?.name) {
-        cover.addText(org.name, {
-          x: 1, y: 1, w: 11, h: 0.5,
-          fontSize: 14, color: "94a3b8", align: "center", fontFace: "Calibri",
+        cover.addText(org.name.toUpperCase(), {
+          x: 0.75, y: 2.8, w: 11.5, h: 0.5,
+          fontSize: 20, color: BRAND_HAIRLINE, fontFace: "Calibri",
+          bold: true, charSpacing: 4,
         });
       }
 
       cover.addText(proposal.proposal_name, {
-        x: 1, y: 2, w: 11, h: 1,
-        fontSize: 32, bold: true, color: "ffffff", align: "center", fontFace: "Calibri",
+        x: 0.75, y: 3.35, w: 11.5, h: 1.6,
+        fontSize: 56, bold: true, color: "ffffff", fontFace: "Calibri",
+        valign: "top",
       });
 
       if (proposal.custom_header_text) {
         cover.addText(proposal.custom_header_text, {
-          x: 1, y: 3.2, w: 11, h: 0.5,
-          fontSize: 12, color: "cbd5e1", align: "center", fontFace: "Calibri",
+          x: 0.75, y: 5.1, w: 11.5, h: 0.7,
+          fontSize: 22, color: BRAND_HAIRLINE, fontFace: "Calibri",
         });
       }
 
-      cover.addText(`${sites.length} Site${sites.length !== 1 ? "s" : ""} • ${new Date().toLocaleDateString("en-IN")}`, {
-        x: 1, y: 4.2, w: 11, h: 0.4,
-        fontSize: 11, color: "64748b", align: "center", fontFace: "Calibri",
+      // Footer-ish line at the bottom of the cover: site count + date +
+      // (optional) city/state
+      const coverMeta = [
+        `${sites.length} Site${sites.length !== 1 ? "s" : ""}`,
+        new Date().toLocaleDateString("en-IN", {
+          day: "numeric", month: "long", year: "numeric",
+        }),
+        org?.city && org?.state ? `${org.city}, ${org.state}` : null,
+      ]
+        .filter(Boolean)
+        .join("   •   ");
+
+      cover.addText(coverMeta, {
+        x: 0.75, y: 6.6, w: 11.5, h: 0.5,
+        fontSize: 16, color: "94a3b8", fontFace: "Calibri",
       });
 
-      // ── Slides: Sites ──────────────────────────────────────────────────────
+      // ─── Site slides ─────────────────────────────────────────────────
       for (const site of sites) {
         const slide = prs.addSlide();
         slide.background = { color: "ffffff" };
 
-        // Accent bar at top
+        // Thick accent bar at top
         slide.addShape(prs.ShapeType.rect, {
-          x: 0, y: 0, w: "100%", h: 0.12, fill: { color: "1d4ed8" },
+          x: 0, y: 0, w: "100%", h: 0.18, fill: { color: BRAND_ACCENT },
         });
 
-        // Site name
-        slide.addText(site.name, {
-          x: 0.4, y: 0.3, w: 8, h: 0.6,
-          fontSize: 22, bold: true, color: "1e293b", fontFace: "Calibri",
-        });
-
-        // Rate badge
-        const rateText = displayRate(site.base_rate_paise, proposal.show_rates);
-        if (proposal.show_rates !== "hidden") {
-          slide.addText(rateText + (proposal.show_rates === "request_quote" ? "" : "/mo"), {
-            x: 9, y: 0.35, w: 3.2, h: 0.5,
-            fontSize: 14, bold: true, color: "1d4ed8", align: "right", fontFace: "Calibri",
+        // Corner logo — small, top-right. Keeps every slide branded.
+        if (logoData) {
+          slide.addImage({
+            data: logoData, x: 11.95, y: 0.35, w: 1, h: 1,
+            sizing: { type: "contain", w: 1, h: 1 },
           });
         }
 
-        // City & address
-        slide.addText(`${site.city}, ${site.state}${site.address ? " • " + site.address : ""}`, {
-          x: 0.4, y: 0.9, w: 12, h: 0.35,
-          fontSize: 10, color: "64748b", fontFace: "Calibri",
+        // Site name (big)
+        slide.addText(site.name, {
+          x: 0.5, y: 0.4, w: 11.3, h: 0.95,
+          fontSize: 36, bold: true, color: BRAND_INK, fontFace: "Calibri",
+          valign: "top",
         });
 
-        // Photo (if available). We embed the pre-fetched base64 data URI
-        // so the image is permanently inside the .pptx file — not a URL
-        // reference that could 404 later when the signed URL expires.
-        //
-        // LAYOUT_WIDE slide is 13.333" × 7.5". Image dominates the left
-        // two-thirds (8.4" × 5.3") so the site really lands for the
-        // viewer. Details column sits on the right in the remaining 4".
+        // City / state / address on one subtitle line
+        const locationLine = [
+          site.city,
+          site.state,
+          site.address,
+        ]
+          .filter(Boolean)
+          .join("  •  ");
+        if (locationLine) {
+          slide.addText(locationLine, {
+            x: 0.5, y: 1.32, w: 11.3, h: 0.5,
+            fontSize: 18, color: BRAND_MUTED, fontFace: "Calibri",
+          });
+        }
+
+        // Rate ribbon (bottom-right of image or free-standing)
+        const rateText = displayRate(site.base_rate_paise, proposal.show_rates);
+        const hasRateBadge = proposal.show_rates !== "hidden";
+
+        // Photo area — 8.4" × 5" wide panel on the left.
         const photoData = site.primary_photo_url
           ? photoDataByUrl.get(site.primary_photo_url)
           : null;
@@ -160,20 +221,62 @@ export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
         if (hasPhoto && photoData) {
           slide.addImage({
             data: photoData,
-            x: 0.4, y: 1.35, w: 8.4, h: 5.3,
-            sizing: { type: "contain", w: 8.4, h: 5.3 },
+            x: 0.5, y: 1.95, w: 8.4, h: 5,
+            sizing: { type: "contain", w: 8.4, h: 5 },
+          });
+        } else {
+          // Empty-photo placeholder so the slide still looks intentional.
+          slide.addShape(prs.ShapeType.rect, {
+            x: 0.5, y: 1.95, w: 8.4, h: 5,
+            fill: { color: BRAND_LIGHT },
+            line: { color: BRAND_HAIRLINE, width: 1 },
+          });
+          slide.addText("Photo pending", {
+            x: 0.5, y: 4.25, w: 8.4, h: 0.5,
+            fontSize: 16, color: BRAND_MUTED, align: "center",
+            fontFace: "Calibri",
           });
         }
 
-        // Details box (right side when photo present, full-width otherwise)
-        const detailX = hasPhoto ? 9.1 : 0.4;
-        const detailW = hasPhoto ? 3.9 : 12;
+        // Rate chip — placed at the top of the details column
+        const detailX = hasPhoto ? 9.1 : 0.5;
+        const detailW = hasPhoto ? 3.85 : 12.3;
 
+        if (hasRateBadge) {
+          slide.addShape(prs.ShapeType.roundRect, {
+            x: detailX, y: 1.95, w: detailW, h: 1.1,
+            fill: { color: BRAND_PRIMARY },
+            line: { color: BRAND_PRIMARY, width: 0 },
+            rectRadius: 0.08,
+          });
+          slide.addText("MONTHLY RATE", {
+            x: detailX + 0.15, y: 2.05, w: detailW - 0.3, h: 0.3,
+            fontSize: 11, color: "a5b4fc", fontFace: "Calibri",
+            bold: true, charSpacing: 3,
+          });
+          slide.addText(
+            rateText + (proposal.show_rates === "request_quote" ? "" : " / mo"),
+            {
+              x: detailX + 0.15, y: 2.35, w: detailW - 0.3, h: 0.6,
+              fontSize: 22, bold: true, color: "ffffff",
+              fontFace: "Calibri", valign: "top",
+            },
+          );
+        }
+
+        // Details list — starts under the rate chip (or at top if no rate)
+        const detailsStartY = hasRateBadge ? 3.2 : 1.95;
         const details: { label: string; value: string }[] = [
           { label: "Media Type", value: site.media_type?.replace(/_/g, " ") ?? "—" },
         ];
         if (proposal.show_dimensions) {
-          details.push({ label: "Dimensions", value: site.width_ft && site.height_ft ? `${site.width_ft} × ${site.height_ft} ft` : "—" });
+          details.push({
+            label: "Dimensions",
+            value:
+              site.width_ft && site.height_ft
+                ? `${site.width_ft} × ${site.height_ft} ft`
+                : "—",
+          });
         }
         if (proposal.show_illumination) {
           details.push({ label: "Illumination", value: site.illumination ?? "—" });
@@ -181,7 +284,10 @@ export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
         if (proposal.show_traffic_info) {
           details.push({ label: "Facing", value: site.facing ?? "—" });
           if (site.visibility_distance_m) {
-            details.push({ label: "Visibility", value: `${site.visibility_distance_m}m` });
+            details.push({
+              label: "Visibility",
+              value: `${site.visibility_distance_m}m`,
+            });
           }
         }
         if (proposal.show_availability) {
@@ -189,77 +295,110 @@ export function ProposalPptxButton({ proposal, sites, org, filename }: Props) {
         }
 
         details.forEach((d, i) => {
-          const yPos = 1.5 + i * 0.65;
+          const yPos = detailsStartY + i * 0.75;
           slide.addText(d.label.toUpperCase(), {
             x: detailX, y: yPos, w: detailW, h: 0.25,
-            fontSize: 8, color: "94a3b8", fontFace: "Calibri",
+            fontSize: 11, color: BRAND_MUTED, fontFace: "Calibri",
+            bold: true, charSpacing: 2,
           });
           slide.addText(d.value, {
-            x: detailX, y: yPos + 0.25, w: detailW, h: 0.35,
-            fontSize: 12, bold: true, color: "1e293b", fontFace: "Calibri",
+            x: detailX, y: yPos + 0.25, w: detailW, h: 0.45,
+            fontSize: 18, bold: true, color: BRAND_INK, fontFace: "Calibri",
+            valign: "top",
           });
         });
 
-        // Footer
-        if (proposal.custom_footer_text) {
-          slide.addText(proposal.custom_footer_text, {
-            x: 0, y: 6.9, w: "100%", h: 0.3,
-            fontSize: 7, color: "94a3b8", align: "center", fontFace: "Calibri",
+        // Footer — org name + optional custom footer text
+        const footerParts: string[] = [];
+        if (org?.name) footerParts.push(org.name);
+        if (proposal.custom_footer_text) footerParts.push(proposal.custom_footer_text);
+        if (footerParts.length > 0) {
+          slide.addText(footerParts.join("   •   "), {
+            x: 0, y: 7.15, w: "100%", h: 0.3,
+            fontSize: 10, color: BRAND_MUTED, align: "center",
+            fontFace: "Calibri",
           });
         }
       }
 
-      // ── Slide: Terms ───────────────────────────────────────────────────────
+      // ─── Terms slide ─────────────────────────────────────────────────
       if (proposal.include_terms && proposal.terms_text) {
         const termsSlide = prs.addSlide();
-        termsSlide.background = { color: "f8fafc" };
+        termsSlide.background = { color: BRAND_LIGHT };
+
+        termsSlide.addShape(prs.ShapeType.rect, {
+          x: 0, y: 0, w: "100%", h: 0.18, fill: { color: BRAND_ACCENT },
+        });
+
+        if (logoData) {
+          termsSlide.addImage({
+            data: logoData, x: 11.95, y: 0.35, w: 1, h: 1,
+            sizing: { type: "contain", w: 1, h: 1 },
+          });
+        }
 
         termsSlide.addText("Terms & Conditions", {
-          x: 0.5, y: 0.3, w: 12, h: 0.6,
-          fontSize: 22, bold: true, color: "1e3a5f", fontFace: "Calibri",
+          x: 0.5, y: 0.5, w: 11, h: 0.85,
+          fontSize: 36, bold: true, color: BRAND_PRIMARY, fontFace: "Calibri",
         });
 
         termsSlide.addShape(prs.ShapeType.line, {
-          x: 0.5, y: 1, w: 12, h: 0, line: { color: "e2e8f0", width: 1 },
+          x: 0.5, y: 1.5, w: 12.3, h: 0,
+          line: { color: BRAND_HAIRLINE, width: 1 },
         });
 
         termsSlide.addText(proposal.terms_text, {
-          x: 0.5, y: 1.2, w: 12, h: 5,
-          fontSize: 9, color: "475569", fontFace: "Calibri",
+          x: 0.5, y: 1.8, w: 12.3, h: 5.2,
+          fontSize: 14, color: "334155", fontFace: "Calibri",
           valign: "top", wrap: true,
         });
       }
 
-      // ── Slide: Contact ─────────────────────────────────────────────────────
+      // ─── Contact slide ───────────────────────────────────────────────
       if (proposal.include_contact_details && org) {
         const contactSlide = prs.addSlide();
-        contactSlide.background = { color: "1e3a5f" };
+        contactSlide.background = { color: BRAND_PRIMARY };
+
+        // Large centered logo when present
+        if (logoData) {
+          contactSlide.addImage({
+            data: logoData, x: 5.67, y: 0.6, w: 2, h: 2,
+            sizing: { type: "contain", w: 2, h: 2 },
+          });
+        }
 
         contactSlide.addText("Get in Touch", {
-          x: 1, y: 1, w: 11, h: 0.7,
-          fontSize: 28, bold: true, color: "ffffff", align: "center", fontFace: "Calibri",
+          x: 1, y: 2.8, w: 11.3, h: 0.9,
+          fontSize: 44, bold: true, color: "ffffff",
+          align: "center", fontFace: "Calibri",
         });
 
         contactSlide.addText(org.name, {
-          x: 1, y: 2, w: 11, h: 0.5,
-          fontSize: 16, color: "94a3b8", align: "center", fontFace: "Calibri",
+          x: 1, y: 3.85, w: 11.3, h: 0.6,
+          fontSize: 24, color: BRAND_HAIRLINE,
+          align: "center", fontFace: "Calibri",
         });
 
-        const contactDetails = [
-          org.phone && `Phone: ${org.phone}`,
-          org.email && `Email: ${org.email}`,
-          org.city && `${org.city}, ${org.state}`,
-        ].filter(Boolean).join("   •   ");
-
-        if (contactDetails) {
-          contactSlide.addText(contactDetails, {
-            x: 1, y: 2.7, w: 11, h: 0.4,
-            fontSize: 11, color: "cbd5e1", align: "center", fontFace: "Calibri",
-          });
+        // Stack contact details on separate rows for readability rather
+        // than cramming on one line (the previous version did).
+        const rows: string[] = [];
+        if (org.phone) rows.push(`Phone   ${org.phone}`);
+        if (org.email) rows.push(`Email   ${org.email}`);
+        if (org.address) rows.push(`Address   ${org.address}`);
+        if (org.city && org.state && !org.address) {
+          rows.push(`Location   ${org.city}, ${org.state}`);
         }
+        if (org.gstin) rows.push(`GSTIN   ${org.gstin}`);
+
+        rows.forEach((row, i) => {
+          contactSlide.addText(row, {
+            x: 1, y: 4.8 + i * 0.5, w: 11.3, h: 0.45,
+            fontSize: 18, color: "e2e8f0",
+            align: "center", fontFace: "Calibri",
+          });
+        });
       }
 
-      // ── Download ───────────────────────────────────────────────────────────
       await prs.writeFile({ fileName: filename });
     } catch (err) {
       console.error("PPTX generation failed:", err);

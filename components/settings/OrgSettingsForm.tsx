@@ -1,9 +1,10 @@
 "use client";
-import { useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Upload, Trash2, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,10 +15,75 @@ import type { Organization } from "@/lib/types/database";
 
 interface Props {
   org: Organization;
+  // Signed URL for the current logo (1-hour TTL) generated server-side.
+  // Null when no logo has been uploaded yet.
+  orgLogoSignedUrl?: string | null;
 }
 
-export function OrgSettingsForm({ org }: Props) {
+export function OrgSettingsForm({ org, orgLogoSignedUrl }: Props) {
   const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  // Show the newly-uploaded logo immediately without waiting for a
+  // full server-component refresh; fall back to the signed URL the
+  // parent page passed in.
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(
+    orgLogoSignedUrl ?? null,
+  );
+
+  async function handleLogoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset the input so the same file can be retried on error.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    setUploadingLogo(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/org/logo", {
+        method: "POST",
+        credentials: "same-origin",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+      if (data?.signedUrl) setLogoPreviewUrl(data.signedUrl);
+      toast.success("Logo updated");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function handleLogoDelete() {
+    if (!confirm("Remove the organisation logo?")) return;
+    setUploadingLogo(true);
+    try {
+      const res = await fetch("/api/org/logo", {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+      setLogoPreviewUrl(null);
+      toast.success("Logo removed");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
 
   const {
     register,
@@ -49,6 +115,71 @@ export function OrgSettingsForm({ org }: Props) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      {/* ── Logo upload ──────────────────────────────────────────────── */}
+      {/* Separate from the rest of the form because it saves as soon as
+          you pick a file (one-shot upload) rather than waiting for the
+          "Save Organisation" button. */}
+      <div className="rounded-xl border border-border bg-muted/20 p-4">
+        <div className="flex items-center gap-4">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+            {logoPreviewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- signed URL with query string, not optimisable
+              <img
+                src={logoPreviewUrl}
+                alt="Organisation logo"
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <Building2 className="h-8 w-8 text-muted-foreground" aria-hidden />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Organisation logo</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Used on proposal / rate-card slides + exports. PNG, JPG, WEBP or SVG,
+              up to 2 MB. Transparent background works best for slide branding.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="sr-only"
+                onChange={handleLogoFileChange}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingLogo}
+                className="gap-1.5"
+              >
+                {uploadingLogo ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5" />
+                )}
+                {logoPreviewUrl ? "Replace logo" : "Upload logo"}
+              </Button>
+              {logoPreviewUrl && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleLogoDelete}
+                  disabled={uploadingLogo}
+                  className="gap-1.5 text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="orgName">Organisation Name</Label>

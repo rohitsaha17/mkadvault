@@ -87,6 +87,16 @@ export default async function ProposalDetailPage({
   const proposalSites = (proposalSitesData ?? []) as unknown as (ProposalSite & { site: Site })[];
   const org = orgData as (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
 
+  // Sign the org logo path (private bucket) so the PPTX generator can
+  // fetch + embed it into the deck.
+  let orgLogoUrl: string | null = null;
+  if (org?.logo_url) {
+    const { data: signed } = await supabase.storage
+      .from("org-logos")
+      .createSignedUrl(org.logo_url, 60 * 60);
+    orgLogoUrl = signed?.signedUrl ?? null;
+  }
+
   // Fetch primary photos for proposal sites. The `site-photos` bucket is
   // private, so we sign each path before passing it to the PDF renderer /
   // preview. Without signed URLs, ProposalDocument's <Image> components
@@ -173,6 +183,7 @@ export default async function ProposalDetailPage({
             proposal={proposal}
             sites={sitesForExport}
             org={org}
+            orgLogoUrl={orgLogoUrl}
           />
           <Link href={`/proposals/${id}/edit`}>
             <Button variant="outline" size="sm" className="gap-1.5">

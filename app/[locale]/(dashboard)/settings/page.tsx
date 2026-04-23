@@ -53,6 +53,17 @@ export default async function SettingsPage({
   const org = orgResult.data as unknown as Organization | null;
   const alertPrefs = (prefsResult.data ?? []) as unknown as AlertPreference[];
 
+  // Sign the org logo (private bucket) so the settings form can render
+  // a thumbnail. 1-hour TTL matches how long a typical settings session
+  // sits open; refreshes on next page load.
+  let orgLogoSignedUrl: string | null = null;
+  if (org?.logo_url) {
+    const { data: signed } = await supabase.storage
+      .from("org-logos")
+      .createSignedUrl(org.logo_url, 60 * 60);
+    orgLogoSignedUrl = signed?.signedUrl ?? null;
+  }
+
   const isAdmin = ["super_admin", "admin"].includes(profile.role ?? "");
 
   return (
@@ -78,7 +89,7 @@ export default async function SettingsPage({
             <div className="mb-5 border-b border-border pb-3">
               <h2 className="text-base font-semibold text-foreground">{t("organisation")}</h2>
             </div>
-            <OrgSettingsForm org={org} />
+            <OrgSettingsForm org={org} orgLogoSignedUrl={orgLogoSignedUrl} />
           </section>
         )}
 

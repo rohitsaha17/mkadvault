@@ -130,6 +130,17 @@ export default async function NewProposalPage({
     : null;
   const orgTermsTemplate = orgRaw?.proposal_terms_template ?? null;
 
+  // Sign the org logo so the PPTX export can embed its bytes into the
+  // generated deck. Short TTL is fine — generation happens shortly
+  // after the user lands on this page.
+  let orgLogoUrl: string | null = null;
+  if (orgRaw?.logo_url) {
+    const { data: signed } = await supabase.storage
+      .from("org-logos")
+      .createSignedUrl(orgRaw.logo_url, 60 * 60);
+    orgLogoUrl = signed?.signedUrl ?? null;
+  }
+
   // Rate card mode: pre-select all available sites
   const preselectedSiteIds = mode === "rate_card"
     ? sites.filter((s) => s.status === "available").map((s) => s.id)
@@ -150,6 +161,7 @@ export default async function NewProposalPage({
         sites={sites}
         clients={clients}
         org={org}
+        orgLogoUrl={orgLogoUrl}
         orgTermsTemplate={orgTermsTemplate}
         preselectedSiteIds={preselectedSiteIds}
         isRateCard={mode === "rate_card"}

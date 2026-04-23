@@ -1,22 +1,25 @@
 "use client";
-// Combines PDF and PPTX export buttons for proposals.
-// PDF button is dynamically imported (ssr:false) to avoid bundling @react-pdf server-side.
-import dynamic from "next/dynamic";
+// Proposal / rate-card export — PPTX only.
+//
+// Note: we used to also offer PDF download (react-pdf). Removed per
+// product direction — the PPTX export is the single source of truth,
+// easier to edit after generation, and already branded with the org
+// logo + contact details. Keeping ProposalPDFButton + ProposalDocument
+// in the repo for now in case we need to restore it later, but nothing
+// imports them anymore.
 import type { Proposal } from "@/lib/types/database";
 import type { SiteForProposal } from "@/app/[locale]/(dashboard)/proposals/new/page";
 import type { ProposalDocumentProps } from "./ProposalDocument";
 import { ProposalPptxButton } from "./ProposalPptxButton";
 
-// Dynamic import keeps @react-pdf out of the SSR bundle
-const ProposalPDFButton = dynamic(
-  () => import("./ProposalPDFButton").then((m) => m.ProposalPDFButton),
-  { ssr: false }
-);
-
 interface Props {
   proposal: Proposal;
   sites: SiteForProposal[];
   org: ProposalDocumentProps["org"];
+  // Signed URL for the org logo (if uploaded) — embedded on the cover
+  // + contact slides in the PPTX. The page that renders this component
+  // generates a short-lived signed URL server-side.
+  orgLogoUrl?: string | null;
   clientName?: string | null;
 }
 
@@ -24,24 +27,17 @@ function safeFilename(name: string, ext: string): string {
   return name.replace(/[^a-z0-9]/gi, "_").toLowerCase() + "." + ext;
 }
 
-export function ProposalExportButtons({ proposal, sites, org, clientName }: Props) {
+export function ProposalExportButtons({ proposal, sites, org, orgLogoUrl }: Props) {
   const base = safeFilename(proposal.proposal_name || "proposal", "");
-  const pdfFilename = base + "pdf";
   const pptxFilename = base + "pptx";
 
   return (
     <div className="flex flex-wrap gap-2">
-      <ProposalPDFButton
-        proposal={proposal}
-        sites={sites}
-        org={org}
-        clientName={clientName}
-        filename={pdfFilename}
-      />
       <ProposalPptxButton
         proposal={proposal}
         sites={sites}
         org={org}
+        orgLogoUrl={orgLogoUrl ?? null}
         filename={pptxFilename}
       />
     </div>

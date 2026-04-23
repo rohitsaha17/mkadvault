@@ -98,6 +98,17 @@ export default async function EditProposalPage({
     : null;
   const orgTermsTemplate = orgRaw?.proposal_terms_template ?? null;
 
+  // Sign the org logo so the PPTX export can embed its bytes into the
+  // generated deck. Short TTL is fine — generation happens shortly
+  // after the user lands on this page.
+  let orgLogoUrl: string | null = null;
+  if (orgRaw?.logo_url) {
+    const { data: signed } = await supabase.storage
+      .from("org-logos")
+      .createSignedUrl(orgRaw.logo_url, 60 * 60);
+    orgLogoUrl = signed?.signedUrl ?? null;
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -109,6 +120,7 @@ export default async function EditProposalPage({
         sites={sites}
         clients={clients}
         org={org}
+        orgLogoUrl={orgLogoUrl}
         orgTermsTemplate={orgTermsTemplate}
         existingProposal={proposal}
         existingSites={existingSites}

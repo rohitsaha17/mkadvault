@@ -47,6 +47,10 @@ interface Props {
   sites: SiteForProposal[];
   clients: Pick<Client, "id" | "company_name">[];
   org: (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
+  // Signed URL (1-hour TTL) for the org logo, if one's uploaded. The
+  // wizard passes this to the PPTX export button which embeds the
+  // bytes into the generated deck. Null if no logo yet.
+  orgLogoUrl?: string | null;
   // Org-wide T&C template (from organizations.proposal_terms_template).
   // When a fresh proposal is opened with no existing terms, we pre-fill
   // from this. Null/empty means the org hasn't set a default yet.
@@ -93,6 +97,7 @@ export function ProposalWizard({
   sites,
   clients,
   org,
+  orgLogoUrl = null,
   orgTermsTemplate = null,
   preselectedSiteIds = [],
   isRateCard = false,
@@ -705,6 +710,7 @@ export function ProposalWizard({
                 }}
                 sites={selectedSiteData}
                 org={org}
+                orgLogoUrl={orgLogoUrl}
               />
               <Button onClick={() => handleSave("draft")} disabled={isPending} variant="outline">
                 {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
