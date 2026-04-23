@@ -1,9 +1,9 @@
 // @react-pdf/renderer document — renders as PDF, must be imported dynamically (no SSR)
 import {
-  Document, Page, Text, View, StyleSheet,
+  Document, Image, Page, Text, View, StyleSheet,
 } from "@react-pdf/renderer";
 import { inr, fmt } from "@/lib/utils";
-import type { Invoice, InvoiceLineItem, Client, Organization } from "@/lib/types/database";
+import type { Invoice, InvoiceLineItem, Client, Organization, OrganizationBankAccount } from "@/lib/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -11,7 +11,24 @@ export interface InvoiceDocumentProps {
   invoice: Invoice;
   lineItems: InvoiceLineItem[];
   client: Pick<Client, "company_name" | "brand_name" | "billing_address" | "billing_city" | "billing_state" | "billing_pin_code" | "gstin" | "pan">;
-  org: Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "pan" | "phone" | "email" | "settings">;
+  org: Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "pan" | "phone" | "email">;
+  // Proper bank account object chosen per-invoice. When null, the bank
+  // details block is hidden on the PDF.
+  bankAccount?: Pick<
+    OrganizationBankAccount,
+    | "label"
+    | "bank_name"
+    | "account_holder_name"
+    | "account_number"
+    | "ifsc_code"
+    | "branch_name"
+    | "account_type"
+    | "upi_id"
+    | "swift_code"
+  > | null;
+  // Signed URL for the org logo OR a data-URI. Rendered top-left on page
+  // 1; hidden when unset.
+  orgLogoUrl?: string | null;
 }
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -23,7 +40,8 @@ const C = {
   border:     "#E2E8F0", // dividers / borders
   borderSoft: "#F1F5F9", // table row separator
   bgMuted:    "#F8FAFC", // table header & totals background
-  accent:     "#4F46E5", // indigo brand accent
+  accent:     "#1E3A8A", // navy brand accent (matches PPTX)
+  accentSoft: "#EEF2FF", // accent-tinted backgrounds
   danger:     "#DC2626", // overdue
   success:    "#059669", // paid
 };
@@ -32,33 +50,55 @@ const C = {
 
 const S = StyleSheet.create({
   page: {
-    paddingTop: 36,
-    paddingBottom: 56,
-    paddingHorizontal: 36,
+    paddingTop: 0,
+    paddingBottom: 64,
+    paddingHorizontal: 0,
     fontSize: 9,
     fontFamily: "Helvetica",
     color: C.ink,
     lineHeight: 1.4,
   },
+  body: { paddingHorizontal: 36, paddingTop: 18 },
   row: { flexDirection: "row" },
   col: { flex: 1 },
 
+  // ── Brand band (accent stripe at the very top of the page) ──
+  brandBand: {
+    height: 6,
+    backgroundColor: C.accent,
+    marginBottom: 18,
+  },
+
   // ── Header ──
   headerWrap: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  brandName: { fontSize: 14, fontFamily: "Helvetica-Bold", color: C.ink, marginBottom: 3 },
+  headerLeft: { flex: 1, paddingRight: 16, flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  logoBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 4,
+    borderWidth: 0.5,
+    borderColor: C.border,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  logoImg: { width: 52, height: 52, objectFit: "contain" },
+  brandName: { fontSize: 15, fontFamily: "Helvetica-Bold", color: C.ink, marginBottom: 3 },
   brandLine: { fontSize: 8, color: C.muted, lineHeight: 1.5 },
+
   invoiceMeta: { alignItems: "flex-end", maxWidth: 220 },
   invoiceLabel: {
     fontSize: 18,
     fontFamily: "Helvetica-Bold",
-    color: C.ink,
+    color: C.accent,
     letterSpacing: 1.5,
   },
   invoiceNumber: {
-    fontSize: 9,
-    color: C.accent,
+    fontSize: 10,
+    color: C.ink,
     fontFamily: "Helvetica-Bold",
-    marginTop: 2,
+    marginTop: 3,
   },
   invoiceDateLine: { fontSize: 8, color: C.muted, marginTop: 4 },
   dueLine: {
@@ -122,33 +162,30 @@ const S = StyleSheet.create({
   // ── Table ──
   tableHeader: {
     flexDirection: "row",
-    backgroundColor: C.bgMuted,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: C.border,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
+    backgroundColor: C.accent,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
   },
   tableHeaderText: {
-    color: C.muted,
+    color: "#fff",
     fontFamily: "Helvetica-Bold",
-    fontSize: 7,
+    fontSize: 7.5,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    letterSpacing: 0.7,
   },
   tableRow: {
     flexDirection: "row",
     borderBottomWidth: 0.5,
     borderBottomColor: C.borderSoft,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
   },
   tableRowAlt: {
     flexDirection: "row",
     borderBottomWidth: 0.5,
     borderBottomColor: C.borderSoft,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
     backgroundColor: "#FCFDFE",
   },
   cellMuted: { color: C.muted, fontSize: 8 },
@@ -156,8 +193,8 @@ const S = StyleSheet.create({
   cellAmount: { textAlign: "right", fontSize: 9, fontFamily: "Helvetica-Bold", color: C.ink },
 
   // ── Totals ──
-  totalsWrap: { marginTop: 10, alignItems: "flex-end" },
-  totalsBox: { width: 240 },
+  totalsWrap: { marginTop: 12, alignItems: "flex-end" },
+  totalsBox: { width: 260 },
   totalsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -168,21 +205,21 @@ const S = StyleSheet.create({
   grandTotalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    borderTopWidth: 1,
-    borderTopColor: C.ink,
-    marginTop: 4,
-    paddingTop: 6,
-    paddingBottom: 4,
+    backgroundColor: C.accentSoft,
+    borderRadius: 4,
+    marginTop: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
   },
-  grandTotalLabel: { fontSize: 10, fontFamily: "Helvetica-Bold", color: C.ink },
-  grandTotalValue: { fontSize: 13, fontFamily: "Helvetica-Bold", color: C.ink },
+  grandTotalLabel: { fontSize: 10, fontFamily: "Helvetica-Bold", color: C.accent },
+  grandTotalValue: { fontSize: 14, fontFamily: "Helvetica-Bold", color: C.accent },
 
   // ── Amount in words ──
   amountWords: {
     backgroundColor: C.bgMuted,
     borderLeftWidth: 2,
     borderLeftColor: C.accent,
-    paddingVertical: 6,
+    paddingVertical: 7,
     paddingHorizontal: 10,
     marginTop: 14,
   },
@@ -203,9 +240,25 @@ const S = StyleSheet.create({
     borderColor: C.border,
     borderRadius: 4,
     padding: 10,
+    backgroundColor: "#fff",
+  },
+  bankHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  bankBadge: {
+    width: 4,
+    height: 14,
+    backgroundColor: C.accent,
+    borderRadius: 2,
+    marginRight: 8,
+  },
+  bankTitle: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: C.ink,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   bankGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
-  bankItem: { minWidth: 120 },
+  bankItem: { minWidth: 130, marginBottom: 4 },
   bankLabel: {
     fontSize: 7,
     color: C.muted,
@@ -213,14 +266,15 @@ const S = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
-  bankValue: { fontSize: 9, color: C.ink, marginTop: 1 },
+  bankValue: { fontSize: 10, color: C.ink, marginTop: 2, fontFamily: "Helvetica-Bold" },
+  bankValueMono: { fontSize: 10, color: C.ink, marginTop: 2, fontFamily: "Courier-Bold" },
 
   notesBlock: { marginTop: 12 },
   notesText: { fontSize: 8, color: C.muted, lineHeight: 1.5 },
 
   // ── Signature ──
   signatureWrap: { flexDirection: "row", justifyContent: "flex-end", marginTop: 30 },
-  signatureBox: { alignItems: "center", width: 170 },
+  signatureBox: { alignItems: "center", width: 180 },
   signatureRule: { borderTopWidth: 1, borderTopColor: C.border, width: "100%", marginBottom: 4 },
   signatureLabel: { fontSize: 7, color: C.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   signatureName: { fontSize: 9, fontFamily: "Helvetica-Bold", color: C.ink, marginTop: 1 },
@@ -280,217 +334,265 @@ function statusStyle(status?: string | null): { bg: string; border: string; colo
   if (s === "draft") return { bg: C.bgMuted, border: C.border, color: C.muted, label: "DRAFT" };
   if (s === "cancelled") return { bg: C.bgMuted, border: C.border, color: C.muted, label: "CANCELLED" };
   if (s === "partially_paid") return { bg: "#FFFBEB", border: "#D97706", color: "#D97706", label: "PARTIAL" };
-  if (s === "sent") return { bg: "#EEF2FF", border: C.accent, color: C.accent, label: "SENT" };
+  if (s === "sent") return { bg: C.accentSoft, border: C.accent, color: C.accent, label: "SENT" };
   return null;
 }
 
 // ─── Document component ───────────────────────────────────────────────────────
 
-export function InvoiceDocument({ invoice, lineItems, client, org }: InvoiceDocumentProps) {
-  const orgSettings = org.settings as Record<string, string> | null;
-  const bankName = orgSettings?.bank_name;
-  const bankAccount = orgSettings?.bank_account_number;
-  const bankIfsc = orgSettings?.bank_ifsc;
-  const bankBranch = orgSettings?.bank_branch;
-
+export function InvoiceDocument({ invoice, lineItems, client, org, bankAccount, orgLogoUrl }: InvoiceDocumentProps) {
   // Status pill is shown only if invoice has a status field react-pdf can render.
   const pill = statusStyle((invoice as { status?: string }).status);
 
   return (
     <Document>
       <Page size="A4" style={S.page}>
-        {/* ── Header ── */}
-        <View style={S.headerWrap}>
-          <View style={{ flex: 1, paddingRight: 16 }}>
-            <Text style={S.brandName}>{org.name}</Text>
-            {org.address && <Text style={S.brandLine}>{org.address}</Text>}
-            {(org.city || org.state) && (
-              <Text style={S.brandLine}>
-                {[org.city, org.state, org.pin_code].filter(Boolean).join(", ")}
-              </Text>
-            )}
-            {org.gstin && <Text style={S.brandLine}>GSTIN: {org.gstin}</Text>}
-            {org.phone && (
-              <Text style={S.brandLine}>
-                {org.phone}{org.email ? `  •  ${org.email}` : ""}
-              </Text>
-            )}
-          </View>
+        {/* ── Accent brand band ── */}
+        <View style={S.brandBand} fixed />
 
-          <View style={S.invoiceMeta}>
-            <Text style={S.invoiceLabel}>TAX INVOICE</Text>
-            <Text style={S.invoiceNumber}>{invoice.invoice_number}</Text>
-            <Text style={S.invoiceDateLine}>Issued: {fmt(invoice.invoice_date)}</Text>
-            <Text style={S.dueLine}>Due: {fmt(invoice.due_date)}</Text>
-            {pill && (
-              <Text
-                style={[
-                  S.statusPill,
-                  { backgroundColor: pill.bg, borderColor: pill.border, color: pill.color },
-                ]}
-              >
-                {pill.label}
-              </Text>
-            )}
-          </View>
-        </View>
-
-        <View style={S.rule} />
-
-        {/* ── Bill To / GST Details ── */}
-        <View style={S.blocksRow}>
-          <View style={S.block}>
-            <Text style={S.sectionLabel}>Bill To</Text>
-            <Text style={S.blockTitle}>{client.company_name}</Text>
-            {client.brand_name && <Text style={S.blockMuted}>{client.brand_name}</Text>}
-            {client.billing_address && <Text style={S.blockMuted}>{client.billing_address}</Text>}
-            {(client.billing_city || client.billing_state) && (
-              <Text style={S.blockMuted}>
-                {[client.billing_city, client.billing_state, client.billing_pin_code].filter(Boolean).join(", ")}
-              </Text>
-            )}
-            {client.gstin && (
-              <Text style={[S.blockMuted, { marginTop: 4 }]}>GSTIN: {client.gstin}</Text>
-            )}
-          </View>
-
-          <View style={{ width: 200 }}>
-            <View style={S.metaCard}>
-              <Text style={S.metaLabel}>Place of Supply</Text>
-              <Text style={S.metaValue}>{invoice.place_of_supply_state ?? org.state ?? "—"}</Text>
-            </View>
-            <View style={S.metaCard}>
-              <Text style={S.metaLabel}>Tax Treatment</Text>
-              <Text style={S.metaValue}>
-                {invoice.is_inter_state ? "IGST (Inter-State)" : "CGST + SGST (Intra-State)"}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ── Line Items ── */}
-        <View style={{ marginTop: 14 }}>
-          <View style={S.tableHeader}>
-            <Text style={[S.tableHeaderText, { width: 18 }]}>#</Text>
-            <Text style={[S.tableHeaderText, { flex: 3 }]}>Description</Text>
-            <Text style={[S.tableHeaderText, { flex: 1 }]}>HSN/SAC</Text>
-            <Text style={[S.tableHeaderText, { width: 64 }]}>Period</Text>
-            <Text style={[S.tableHeaderText, { width: 28, textAlign: "right" }]}>Qty</Text>
-            <Text style={[S.tableHeaderText, { width: 70, textAlign: "right" }]}>Rate</Text>
-            <Text style={[S.tableHeaderText, { width: 80, textAlign: "right" }]}>Amount</Text>
-          </View>
-          {lineItems.map((item, i) => (
-            <View key={item.id} style={i % 2 === 0 ? S.tableRow : S.tableRowAlt}>
-              <Text style={[S.cellMuted, { width: 18 }]}>{i + 1}</Text>
-              <View style={{ flex: 3, paddingRight: 6 }}>
-                <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 9, color: C.ink }}>
-                  {item.description}
-                </Text>
-                <Text style={[S.cellMuted, { marginTop: 1 }]}>{SERVICE_LABELS[item.service_type]}</Text>
-              </View>
-              <Text style={[S.cellMuted, { flex: 1 }]}>{item.hsn_sac_code}</Text>
-              <Text style={[S.cellMuted, { width: 64, fontSize: 7 }]}>
-                {item.period_from
-                  ? `${fmt(item.period_from)}${item.period_to ? "\nto " + fmt(item.period_to) : ""}`
-                  : "—"}
-              </Text>
-              <Text style={[S.cellNum, { width: 28 }]}>{Number(item.quantity)}</Text>
-              <Text style={[S.cellNum, { width: 70 }]}>{inr(item.rate_paise)}</Text>
-              <Text style={[S.cellAmount, { width: 80 }]}>{inr(item.amount_paise)}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* ── Totals ── */}
-        <View style={S.totalsWrap}>
-          <View style={S.totalsBox}>
-            <View style={S.totalsRow}>
-              <Text style={S.totalsLabel}>Subtotal</Text>
-              <Text style={S.totalsValue}>{inr(invoice.subtotal_paise)}</Text>
-            </View>
-            {invoice.is_inter_state ? (
-              <View style={S.totalsRow}>
-                <Text style={S.totalsLabel}>IGST (18%)</Text>
-                <Text style={S.totalsValue}>{inr(invoice.igst_paise)}</Text>
-              </View>
-            ) : (
-              <>
-                <View style={S.totalsRow}>
-                  <Text style={S.totalsLabel}>CGST (9%)</Text>
-                  <Text style={S.totalsValue}>{inr(invoice.cgst_paise)}</Text>
-                </View>
-                <View style={S.totalsRow}>
-                  <Text style={S.totalsLabel}>SGST (9%)</Text>
-                  <Text style={S.totalsValue}>{inr(invoice.sgst_paise)}</Text>
-                </View>
-              </>
-            )}
-            <View style={S.grandTotalRow}>
-              <Text style={S.grandTotalLabel}>Grand Total</Text>
-              <Text style={S.grandTotalValue}>{inr(invoice.total_paise)}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ── Amount in words ── */}
-        <View style={S.amountWords}>
-          <Text style={S.amountWordsLabel}>Amount in Words</Text>
-          <Text style={S.amountWordsText}>{amountInWords(invoice.total_paise)}</Text>
-        </View>
-
-        {/* ── Bank Details ── */}
-        {bankName && (
-          <View style={S.bankBox}>
-            <Text style={[S.sectionLabel, { marginBottom: 6 }]}>Bank Details for Payment</Text>
-            <View style={S.bankGrid}>
-              <View style={S.bankItem}>
-                <Text style={S.bankLabel}>Bank</Text>
-                <Text style={S.bankValue}>{bankName}</Text>
-              </View>
-              {bankAccount && (
-                <View style={S.bankItem}>
-                  <Text style={S.bankLabel}>Account</Text>
-                  <Text style={S.bankValue}>{bankAccount}</Text>
+        <View style={S.body}>
+          {/* ── Header ── */}
+          <View style={S.headerWrap}>
+            <View style={S.headerLeft}>
+              {orgLogoUrl && (
+                <View style={S.logoBox}>
+                  {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image doesn't accept alt */}
+                  <Image src={orgLogoUrl} style={S.logoImg} />
                 </View>
               )}
-              {bankIfsc && (
+              <View style={{ flex: 1 }}>
+                <Text style={S.brandName}>{org.name}</Text>
+                {org.address && <Text style={S.brandLine}>{org.address}</Text>}
+                {(org.city || org.state) && (
+                  <Text style={S.brandLine}>
+                    {[org.city, org.state, org.pin_code].filter(Boolean).join(", ")}
+                  </Text>
+                )}
+                {org.gstin && <Text style={S.brandLine}>GSTIN: {org.gstin}{org.pan ? `  ·  PAN: ${org.pan}` : ""}</Text>}
+                {(org.phone || org.email) && (
+                  <Text style={S.brandLine}>
+                    {org.phone}{org.phone && org.email ? "  ·  " : ""}{org.email}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            <View style={S.invoiceMeta}>
+              <Text style={S.invoiceLabel}>TAX INVOICE</Text>
+              <Text style={S.invoiceNumber}>{invoice.invoice_number}</Text>
+              <Text style={S.invoiceDateLine}>Issued: {fmt(invoice.invoice_date)}</Text>
+              <Text style={S.dueLine}>Due: {fmt(invoice.due_date)}</Text>
+              {pill && (
+                <Text
+                  style={[
+                    S.statusPill,
+                    { backgroundColor: pill.bg, borderColor: pill.border, color: pill.color },
+                  ]}
+                >
+                  {pill.label}
+                </Text>
+              )}
+            </View>
+          </View>
+
+          <View style={S.rule} />
+
+          {/* ── Bill To / GST Details ── */}
+          <View style={S.blocksRow}>
+            <View style={S.block}>
+              <Text style={S.sectionLabel}>Bill To</Text>
+              <Text style={S.blockTitle}>{client.company_name}</Text>
+              {client.brand_name && <Text style={S.blockMuted}>{client.brand_name}</Text>}
+              {client.billing_address && <Text style={S.blockMuted}>{client.billing_address}</Text>}
+              {(client.billing_city || client.billing_state) && (
+                <Text style={S.blockMuted}>
+                  {[client.billing_city, client.billing_state, client.billing_pin_code].filter(Boolean).join(", ")}
+                </Text>
+              )}
+              {client.gstin && (
+                <Text style={[S.blockMuted, { marginTop: 4 }]}>GSTIN: {client.gstin}</Text>
+              )}
+              {client.pan && (
+                <Text style={S.blockMuted}>PAN: {client.pan}</Text>
+              )}
+            </View>
+
+            <View style={{ width: 210 }}>
+              <View style={S.metaCard}>
+                <Text style={S.metaLabel}>Place of Supply</Text>
+                <Text style={S.metaValue}>{invoice.place_of_supply_state ?? org.state ?? "—"}</Text>
+              </View>
+              <View style={S.metaCard}>
+                <Text style={S.metaLabel}>Tax Treatment</Text>
+                <Text style={S.metaValue}>
+                  {invoice.is_inter_state ? "IGST (Inter-State)" : "CGST + SGST (Intra-State)"}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* ── Line Items ── */}
+          <View style={{ marginTop: 14 }}>
+            <View style={S.tableHeader}>
+              <Text style={[S.tableHeaderText, { width: 18 }]}>#</Text>
+              <Text style={[S.tableHeaderText, { flex: 3 }]}>Description</Text>
+              <Text style={[S.tableHeaderText, { flex: 1 }]}>HSN/SAC</Text>
+              <Text style={[S.tableHeaderText, { width: 70 }]}>Period</Text>
+              <Text style={[S.tableHeaderText, { width: 30, textAlign: "right" }]}>Qty</Text>
+              <Text style={[S.tableHeaderText, { width: 70, textAlign: "right" }]}>Rate</Text>
+              <Text style={[S.tableHeaderText, { width: 82, textAlign: "right" }]}>Amount</Text>
+            </View>
+            {lineItems.map((item, i) => (
+              <View key={item.id} style={i % 2 === 0 ? S.tableRow : S.tableRowAlt}>
+                <Text style={[S.cellMuted, { width: 18 }]}>{i + 1}</Text>
+                <View style={{ flex: 3, paddingRight: 6 }}>
+                  <Text style={{ fontFamily: "Helvetica-Bold", fontSize: 9, color: C.ink }}>
+                    {item.description}
+                  </Text>
+                  <Text style={[S.cellMuted, { marginTop: 1 }]}>{SERVICE_LABELS[item.service_type]}</Text>
+                </View>
+                <Text style={[S.cellMuted, { flex: 1 }]}>{item.hsn_sac_code}</Text>
+                <Text style={[S.cellMuted, { width: 70, fontSize: 7 }]}>
+                  {item.period_from
+                    ? `${fmt(item.period_from)}${item.period_to ? "\nto " + fmt(item.period_to) : ""}`
+                    : "—"}
+                </Text>
+                <Text style={[S.cellNum, { width: 30 }]}>{Number(item.quantity)}</Text>
+                <Text style={[S.cellNum, { width: 70 }]}>{inr(item.rate_paise)}</Text>
+                <Text style={[S.cellAmount, { width: 82 }]}>{inr(item.amount_paise)}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* ── Totals ── */}
+          <View style={S.totalsWrap}>
+            <View style={S.totalsBox}>
+              <View style={S.totalsRow}>
+                <Text style={S.totalsLabel}>Subtotal</Text>
+                <Text style={S.totalsValue}>{inr(invoice.subtotal_paise)}</Text>
+              </View>
+              {invoice.is_inter_state ? (
+                <View style={S.totalsRow}>
+                  <Text style={S.totalsLabel}>IGST (18%)</Text>
+                  <Text style={S.totalsValue}>{inr(invoice.igst_paise)}</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={S.totalsRow}>
+                    <Text style={S.totalsLabel}>CGST (9%)</Text>
+                    <Text style={S.totalsValue}>{inr(invoice.cgst_paise)}</Text>
+                  </View>
+                  <View style={S.totalsRow}>
+                    <Text style={S.totalsLabel}>SGST (9%)</Text>
+                    <Text style={S.totalsValue}>{inr(invoice.sgst_paise)}</Text>
+                  </View>
+                </>
+              )}
+              <View style={S.grandTotalRow}>
+                <Text style={S.grandTotalLabel}>GRAND TOTAL</Text>
+                <Text style={S.grandTotalValue}>{inr(invoice.total_paise)}</Text>
+              </View>
+              {(invoice.amount_paid_paise ?? 0) > 0 && (
+                <>
+                  <View style={S.totalsRow}>
+                    <Text style={S.totalsLabel}>Amount Paid</Text>
+                    <Text style={[S.totalsValue, { color: C.success }]}>
+                      ({inr(invoice.amount_paid_paise)})
+                    </Text>
+                  </View>
+                  <View style={[S.totalsRow, { borderTopWidth: 1, borderTopColor: C.border, paddingTop: 4 }]}>
+                    <Text style={[S.totalsLabel, { fontFamily: "Helvetica-Bold", color: C.ink }]}>Balance Due</Text>
+                    <Text style={[S.totalsValue, { fontFamily: "Helvetica-Bold", color: C.danger }]}>
+                      {inr(invoice.balance_due_paise)}
+                    </Text>
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+
+          {/* ── Amount in words ── */}
+          <View style={S.amountWords}>
+            <Text style={S.amountWordsLabel}>Amount in Words</Text>
+            <Text style={S.amountWordsText}>{amountInWords(invoice.total_paise)}</Text>
+          </View>
+
+          {/* ── Bank Details ── */}
+          {bankAccount && (
+            <View style={S.bankBox}>
+              <View style={S.bankHeader}>
+                <View style={S.bankBadge} />
+                <Text style={S.bankTitle}>Bank Details for Payment</Text>
+              </View>
+              <View style={S.bankGrid}>
+                <View style={S.bankItem}>
+                  <Text style={S.bankLabel}>Bank</Text>
+                  <Text style={S.bankValue}>
+                    {bankAccount.bank_name}
+                    {bankAccount.branch_name ? `, ${bankAccount.branch_name}` : ""}
+                  </Text>
+                </View>
+                {bankAccount.account_holder_name && (
+                  <View style={S.bankItem}>
+                    <Text style={S.bankLabel}>Account Holder</Text>
+                    <Text style={S.bankValue}>{bankAccount.account_holder_name}</Text>
+                  </View>
+                )}
+                <View style={S.bankItem}>
+                  <Text style={S.bankLabel}>Account Number</Text>
+                  <Text style={S.bankValueMono}>{bankAccount.account_number}</Text>
+                </View>
                 <View style={S.bankItem}>
                   <Text style={S.bankLabel}>IFSC</Text>
-                  <Text style={S.bankValue}>{bankIfsc}</Text>
+                  <Text style={S.bankValueMono}>{bankAccount.ifsc_code}</Text>
                 </View>
-              )}
-              {bankBranch && (
-                <View style={S.bankItem}>
-                  <Text style={S.bankLabel}>Branch</Text>
-                  <Text style={S.bankValue}>{bankBranch}</Text>
-                </View>
-              )}
+                {bankAccount.account_type && (
+                  <View style={S.bankItem}>
+                    <Text style={S.bankLabel}>A/C Type</Text>
+                    <Text style={S.bankValue}>
+                      {bankAccount.account_type.charAt(0).toUpperCase() + bankAccount.account_type.slice(1)}
+                    </Text>
+                  </View>
+                )}
+                {bankAccount.upi_id && (
+                  <View style={S.bankItem}>
+                    <Text style={S.bankLabel}>UPI</Text>
+                    <Text style={S.bankValueMono}>{bankAccount.upi_id}</Text>
+                  </View>
+                )}
+                {bankAccount.swift_code && (
+                  <View style={S.bankItem}>
+                    <Text style={S.bankLabel}>SWIFT</Text>
+                    <Text style={S.bankValueMono}>{bankAccount.swift_code}</Text>
+                  </View>
+                )}
+              </View>
             </View>
-          </View>
-        )}
+          )}
 
-        {/* ── Notes ── */}
-        {invoice.notes && (
-          <View style={S.notesBlock}>
-            <Text style={S.sectionLabel}>Notes</Text>
-            <Text style={S.notesText}>{invoice.notes}</Text>
-          </View>
-        )}
+          {/* ── Notes ── */}
+          {invoice.notes && (
+            <View style={S.notesBlock}>
+              <Text style={S.sectionLabel}>Notes</Text>
+              <Text style={S.notesText}>{invoice.notes}</Text>
+            </View>
+          )}
 
-        {/* ── Terms ── */}
-        {invoice.terms_and_conditions && (
-          <View style={S.notesBlock}>
-            <Text style={S.sectionLabel}>Terms &amp; Conditions</Text>
-            <Text style={S.notesText}>{invoice.terms_and_conditions}</Text>
-          </View>
-        )}
+          {/* ── Terms ── */}
+          {invoice.terms_and_conditions && (
+            <View style={S.notesBlock}>
+              <Text style={S.sectionLabel}>Terms &amp; Conditions</Text>
+              <Text style={S.notesText}>{invoice.terms_and_conditions}</Text>
+            </View>
+          )}
 
-        {/* ── Signature ── */}
-        <View style={S.signatureWrap}>
-          <View style={S.signatureBox}>
-            <View style={S.signatureRule} />
-            <Text style={S.signatureLabel}>Authorised Signatory</Text>
-            <Text style={S.signatureName}>{org.name}</Text>
+          {/* ── Signature ── */}
+          <View style={S.signatureWrap}>
+            <View style={S.signatureBox}>
+              <View style={S.signatureRule} />
+              <Text style={S.signatureLabel}>Authorised Signatory</Text>
+              <Text style={S.signatureName}>for {org.name}</Text>
+            </View>
           </View>
         </View>
 
@@ -498,7 +600,7 @@ export function InvoiceDocument({ invoice, lineItems, client, org }: InvoiceDocu
         <View style={S.footer} fixed>
           <View style={S.footerRow}>
             <Text style={S.footerText}>
-              {invoice.invoice_number}  •  SAC {invoice.sac_code}
+              {invoice.invoice_number}  ·  SAC {invoice.sac_code}
             </Text>
             <Text
               style={S.footerText}

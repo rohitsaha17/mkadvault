@@ -67,6 +67,46 @@ export type OrganizationUpdate = Partial<
   Omit<Organization, "id" | "created_at" | "updated_at">
 >;
 
+// ─── organization_bank_accounts ──────────────────────────────────────────────
+// One row per bank account an organization wants to print on invoices.
+// The user picks which account to use when creating each invoice, so the
+// same org can bill into multiple accounts (current, escrow, project-
+// specific etc.). Migration 032.
+
+export type BankAccountType = "savings" | "current" | "other";
+
+export interface OrganizationBankAccount {
+  id: string;
+  organization_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+  deleted_at: string | null;
+
+  label: string | null;
+  bank_name: string;
+  account_holder_name: string | null;
+  account_number: string;
+  ifsc_code: string;
+  branch_name: string | null;
+  account_type: BankAccountType | null;
+  upi_id: string | null;
+  swift_code: string | null;
+
+  is_primary: boolean;
+  is_active: boolean;
+  notes: string | null;
+}
+
+export type OrganizationBankAccountInsert = Omit<
+  OrganizationBankAccount,
+  "id" | "created_at" | "updated_at"
+> & { id?: string };
+export type OrganizationBankAccountUpdate = Partial<
+  Omit<OrganizationBankAccount, "id" | "created_at" | "updated_at">
+>;
+
 // ─── profiles ────────────────────────────────────────────────────────────────
 
 export interface Profile {
@@ -601,6 +641,10 @@ export interface Invoice {
   notes: string | null;
   terms_and_conditions: string | null;
   pdf_url: string | null;
+
+  // FK to organization_bank_accounts — which bank account to print on
+  // the invoice PDF. Nullable so older invoices continue to render.
+  bank_account_id: string | null;
 }
 
 export type InvoiceInsert = Omit<Invoice, "id" | "created_at" | "updated_at"> & { id?: string };

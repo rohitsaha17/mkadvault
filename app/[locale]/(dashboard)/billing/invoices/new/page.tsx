@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
 import { InvoiceForm } from "@/components/billing/InvoiceForm";
 import { PageHeader } from "@/components/shared/PageHeader";
-import type { Client, Campaign } from "@/lib/types/database";
+import type { Client, Campaign, OrganizationBankAccount } from "@/lib/types/database";
 
 export const metadata = { title: "Create Invoice" };
 
@@ -41,6 +41,7 @@ export default async function NewInvoicePage({
     { data: clientsData },
     { data: campaignsData },
     { data: orgData },
+    { data: bankAccountsData },
   ] = await Promise.all([
     supabase
       .from("clients")
@@ -58,6 +59,14 @@ export default async function NewInvoicePage({
       .select("gstin, settings")
       .eq("id", profile.org_id)
       .single(),
+    supabase
+      .from("organization_bank_accounts")
+      .select("id, label, bank_name, account_number, ifsc_code, branch_name, is_primary")
+      .eq("organization_id", profile.org_id)
+      .is("deleted_at", null)
+      .eq("is_active", true)
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: true }),
   ]);
 
   const clients = (clientsData ?? []) as InvoiceClient[];
@@ -65,6 +74,10 @@ export default async function NewInvoicePage({
   const orgGstin = orgData?.gstin ?? null;
   const orgSettings = (orgData?.settings ?? {}) as Record<string, string>;
   const defaultTerms = orgSettings.default_payment_terms ?? "Payment due within the agreed credit period. Please quote the invoice number in your payment.";
+  const bankAccounts = (bankAccountsData ?? []) as Pick<
+    OrganizationBankAccount,
+    "id" | "label" | "bank_name" | "account_number" | "ifsc_code" | "branch_name" | "is_primary"
+  >[];
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -78,6 +91,7 @@ export default async function NewInvoicePage({
         campaigns={campaigns}
         orgGstin={orgGstin}
         defaultTerms={defaultTerms}
+        bankAccounts={bankAccounts}
         preselectedClientId={client_id}
         preselectedCampaignId={campaign_id}
       />

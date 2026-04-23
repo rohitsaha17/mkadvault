@@ -8,7 +8,7 @@ import { inr, fmt } from "@/lib/utils";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { BillingNav } from "@/components/billing/BillingNav";
 import { InvoiceDetailActions } from "@/components/billing/InvoiceDetailActions";
-import type { Invoice, InvoiceLineItem, Client, Organization, PaymentReceived } from "@/lib/types/database";
+import type { Invoice, InvoiceLineItem, Client, Organization, OrganizationBankAccount, PaymentReceived } from "@/lib/types/database";
 
 export const metadata = { title: "Invoice" };
 
@@ -77,16 +77,47 @@ export default async function InvoiceDetailPage({
   const lineItems = (lineItemsData ?? []) as unknown as InvoiceLineItem[];
   const payments = (paymentsData ?? []) as unknown as PaymentReceived[];
 
-  // Fetch org data
-  type OrgData = Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "pan" | "phone" | "email" | "settings">;
+  // Fetch org data + optional bank account + signed logo URL in parallel
+  type OrgData = Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "pan" | "phone" | "email" | "logo_url">;
   let org: OrgData | null = null;
+  let bankAccount: Pick<
+    OrganizationBankAccount,
+    | "label"
+    | "bank_name"
+    | "account_holder_name"
+    | "account_number"
+    | "ifsc_code"
+    | "branch_name"
+    | "account_type"
+    | "upi_id"
+    | "swift_code"
+  > | null = null;
+  let orgLogoUrl: string | null = null;
+
   if (profileOrgId) {
-    const { data: orgData } = await supabase
-      .from("organizations")
-      .select("name, address, city, state, pin_code, gstin, pan, phone, email, settings")
-      .eq("id", profileOrgId)
-      .single();
+    const [{ data: orgData }, { data: bankData }] = await Promise.all([
+      supabase
+        .from("organizations")
+        .select("name, address, city, state, pin_code, gstin, pan, phone, email, logo_url")
+        .eq("id", profileOrgId)
+        .single(),
+      invoice.bank_account_id
+        ? supabase
+            .from("organization_bank_accounts")
+            .select("label, bank_name, account_holder_name, account_number, ifsc_code, branch_name, account_type, upi_id, swift_code")
+            .eq("id", invoice.bank_account_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
     if (orgData) org = orgData as unknown as OrgData;
+    if (bankData) bankAccount = bankData as unknown as typeof bankAccount;
+    // Sign the private-bucket logo so the PDF's <Image> can fetch it.
+    if (org?.logo_url) {
+      const { data: signed } = await supabase.storage
+        .from("org-logos")
+        .createSignedUrl(org.logo_url, 60 * 60);
+      orgLogoUrl = signed?.signedUrl ?? null;
+    }
   }
 
   const client = invoice.client;
@@ -135,6 +166,8 @@ export default async function InvoiceDetailPage({
               lineItems,
               client,
               org,
+              bankAccount,
+              orgLogoUrl,
               filename: `${invoice.invoice_number}.pdf`,
             } : undefined}
           />

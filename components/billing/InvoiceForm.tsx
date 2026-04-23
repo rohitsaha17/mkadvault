@@ -3,6 +3,7 @@ import { useState, useTransition, useEffect, useCallback } from "react";
 import { useForm, useFieldArray, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2 } from "lucide-react";
@@ -12,15 +13,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, inr } from "@/lib/utils";
 import { createInvoice, getCampaignLineItems } from "@/app/[locale]/(dashboard)/billing/actions";
-import type { Client, Campaign } from "@/lib/types/database";
+import type { Client, Campaign, OrganizationBankAccount } from "@/lib/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+type BankAccountLite = Pick<
+  OrganizationBankAccount,
+  "id" | "label" | "bank_name" | "account_number" | "ifsc_code" | "branch_name" | "is_primary"
+>;
 
 interface Props {
   clients: Pick<Client, "id" | "company_name" | "brand_name" | "gstin" | "credit_terms" | "billing_address" | "billing_city" | "billing_state">[];
   campaigns: Pick<Campaign, "id" | "campaign_name" | "client_id" | "pricing_type" | "total_value_paise">[];
   orgGstin: string | null;
   defaultTerms: string;
+  bankAccounts?: BankAccountLite[];
   preselectedClientId?: string;
   preselectedCampaignId?: string;
 }
@@ -44,6 +51,7 @@ const formSchema = z.object({
   invoice_date: z.string().min(1, "Required"),
   due_date: z.string().min(1, "Required"),
   place_of_supply_state: z.string().optional(),
+  bank_account_id: z.string().optional(),
   notes: z.string().optional(),
   terms_and_conditions: z.string().optional(),
   status: z.enum(["draft", "sent"]),
@@ -124,6 +132,7 @@ export function InvoiceForm({
   campaigns,
   orgGstin,
   defaultTerms,
+  bankAccounts = [],
   preselectedClientId,
   preselectedCampaignId,
 }: Props) {
@@ -133,6 +142,13 @@ export function InvoiceForm({
 
   const today = new Date().toISOString().slice(0, 10);
 
+  // Default to the primary bank account (or the first one). Admins set
+  // "primary" in Settings so this picker is a no-op for the common case.
+  const defaultBankId =
+    bankAccounts.find((b) => b.is_primary)?.id ??
+    bankAccounts[0]?.id ??
+    "";
+
   const { register, handleSubmit, watch, control, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -141,6 +157,7 @@ export function InvoiceForm({
       invoice_date: today,
       due_date: today,
       status: "draft",
+      bank_account_id: defaultBankId,
       line_items: [{ service_type: "display_rental", description: "", hsn_sac_code: "998361", quantity: 1, rate_inr: 0 }],
       terms_and_conditions: defaultTerms,
     },
@@ -202,6 +219,7 @@ export function InvoiceForm({
     const finalValues = {
       ...values,
       status: submitStatus,
+      bank_account_id: values.bank_account_id || undefined,
       subtotal_inr: subtotalPaise / 100,
       cgst_inr: gst.cgst / 100,
       sgst_inr: gst.sgst / 100,
@@ -262,6 +280,31 @@ export function InvoiceForm({
             {selectedClient.gstin && <p>GSTIN: {selectedClient.gstin}</p>}
           </div>
         )}
+
+        {/* ── Bank account to print on the invoice ── */}
+        <F label="Receiving bank account">
+          {bankAccounts.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No bank accounts on file. Add one under{" "}
+              <Link href="/settings" className="text-primary underline">
+                Settings → Organisation
+              </Link>{" "}
+              to print bank details on the invoice.
+            </p>
+          ) : (
+            <NativeSelect {...register("bank_account_id")}>
+              <option value="">Don&apos;t show bank details</option>
+              {bankAccounts.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {(b.label || b.bank_name) +
+                    (b.branch_name ? ` — ${b.branch_name}` : "") +
+                    ` · A/C ${b.account_number.slice(-4).padStart(8, "•")}` +
+                    (b.is_primary ? " (primary)" : "")}
+                </option>
+              ))}
+            </NativeSelect>
+          )}
+        </F>
       </section>
 
       {/* ── Line Items ── */}

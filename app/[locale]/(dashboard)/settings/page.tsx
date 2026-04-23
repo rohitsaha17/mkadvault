@@ -8,7 +8,7 @@ import { AlertPreferences } from "@/components/settings/AlertPreferences";
 import { OrgSettingsForm } from "@/components/settings/OrgSettingsForm";
 import { ProfileForm } from "@/components/settings/ProfileForm";
 import { PageHeader } from "@/components/shared/PageHeader";
-import type { AlertPreference, Organization, Profile } from "@/lib/types/database";
+import type { AlertPreference, Organization, OrganizationBankAccount, Profile } from "@/lib/types/database";
 
 export default async function SettingsPage({
   params,
@@ -36,8 +36,8 @@ export default async function SettingsPage({
     .single();
   if (!fullProfile) return <p className="p-6 text-sm text-muted-foreground">Profile not found.</p>;
 
-  // Load org + alert preferences in parallel
-  const [orgResult, prefsResult] = await Promise.all([
+  // Load org + alert preferences + bank accounts in parallel
+  const [orgResult, prefsResult, bankResult] = await Promise.all([
     supabase
       .from("organizations")
       .select("id, name, address, city, state, pin_code, gstin, pan, phone, email, logo_url, proposal_terms_template")
@@ -48,10 +48,18 @@ export default async function SettingsPage({
       .select("*")
       .eq("organization_id", profile.org_id!)
       .eq("user_id", user.id),
+    supabase
+      .from("organization_bank_accounts")
+      .select("*")
+      .eq("organization_id", profile.org_id!)
+      .is("deleted_at", null)
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: true }),
   ]);
 
   const org = orgResult.data as unknown as Organization | null;
   const alertPrefs = (prefsResult.data ?? []) as unknown as AlertPreference[];
+  const bankAccounts = (bankResult.data ?? []) as unknown as OrganizationBankAccount[];
 
   // Sign the org logo (private bucket) so the settings form can render
   // a thumbnail. 1-hour TTL matches how long a typical settings session
@@ -89,7 +97,11 @@ export default async function SettingsPage({
             <div className="mb-5 border-b border-border pb-3">
               <h2 className="text-base font-semibold text-foreground">{t("organisation")}</h2>
             </div>
-            <OrgSettingsForm org={org} orgLogoSignedUrl={orgLogoSignedUrl} />
+            <OrgSettingsForm
+              org={org}
+              orgLogoSignedUrl={orgLogoSignedUrl}
+              bankAccounts={bankAccounts}
+            />
           </section>
         )}
 

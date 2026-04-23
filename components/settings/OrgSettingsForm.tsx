@@ -11,16 +11,20 @@ import { Label } from "@/components/ui/label";
 import { updateOrganization } from "@/app/[locale]/(dashboard)/settings/actions";
 import { orgSettingsSchema, type OrgSettingsFormValues } from "@/lib/validations/settings";
 import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
-import type { Organization } from "@/lib/types/database";
+import { BankAccountsManager } from "@/components/settings/BankAccountsManager";
+import type { Organization, OrganizationBankAccount } from "@/lib/types/database";
 
 interface Props {
   org: Organization;
   // Signed URL for the current logo (1-hour TTL) generated server-side.
   // Null when no logo has been uploaded yet.
   orgLogoSignedUrl?: string | null;
+  // Bank accounts used on invoices — managed inline, one-shot saves
+  // independent of the main form submit.
+  bankAccounts?: OrganizationBankAccount[];
 }
 
-export function OrgSettingsForm({ org, orgLogoSignedUrl }: Props) {
+export function OrgSettingsForm({ org, orgLogoSignedUrl, bankAccounts = [] }: Props) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -265,10 +269,16 @@ export function OrgSettingsForm({ org, orgLogoSignedUrl }: Props) {
           )}
         </div>
       </div>
+
       <Button type="submit" size="sm" disabled={isPending}>
         {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
         Save Organisation
       </Button>
+
+      {/* ── Bank accounts (independent of the main form save) ────────── */}
+      <div className="mt-6 border-t border-border pt-6">
+        <BankAccountsManager accounts={bankAccounts} />
+      </div>
     </form>
   );
 }
