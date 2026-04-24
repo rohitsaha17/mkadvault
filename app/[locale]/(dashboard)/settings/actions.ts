@@ -118,20 +118,31 @@ export async function updateOrganization(data: {
       return { error: "Only admins can update organization settings" };
     }
 
-    // Normalize the terms template — store null when blank so the wizard's
-    // "no template yet" branch fires cleanly.
-    const payload: Record<string, unknown> = { ...data };
-    if ("proposal_terms_template" in payload) {
-      const trimmed = (payload.proposal_terms_template as string | undefined)?.trim() ?? "";
-      payload.proposal_terms_template = trimmed === "" ? null : trimmed;
-    }
+    // Split the update: core fields always go through; the
+    // proposal_terms_template column only exists after migration 026 has
+    // been applied, so we write it in a separate UPDATE and swallow the
+    // "column does not exist" error (42703). This keeps Save working on
+    // environments where 026 isn't live yet.
+    const { proposal_terms_template, ...core } = data;
 
     const { error } = await supabase
       .from("organizations")
-      .update(payload)
+      .update(core)
       .eq("id", profile.org_id);
 
     if (error) return { error: error.message };
+
+    if (proposal_terms_template !== undefined) {
+      const trimmed = proposal_terms_template.trim();
+      const value = trimmed === "" ? null : trimmed;
+      const { error: tplErr } = await supabase
+        .from("organizations")
+        .update({ proposal_terms_template: value })
+        .eq("id", profile.org_id);
+      // 42703 = undefined_column; ignore so the save as a whole still
+      // succeeds when migration 026 hasn't been applied.
+      if (tplErr && tplErr.code !== "42703") return { error: tplErr.message };
+    }
     revalidatePath("/settings");
     revalidatePath("/proposals");
     return {};

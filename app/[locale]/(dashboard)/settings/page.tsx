@@ -36,11 +36,22 @@ export default async function SettingsPage({
     .single();
   if (!fullProfile) return <p className="p-6 text-sm text-muted-foreground">Profile not found.</p>;
 
-  // Load org + alert preferences + bank accounts in parallel
-  const [orgResult, prefsResult, bankResult] = await Promise.all([
+  // Load org + alert preferences + bank accounts in parallel.
+  //
+  // `proposal_terms_template` is fetched separately because migration 026
+  // is not applied on every environment yet (some DBs don't have the
+  // column). Including it in the main select made the whole org query
+  // fail with 42703, which nulled `org` and hid this entire section.
+  // Split so the core settings always load regardless.
+  const [orgResult, orgTemplateResult, prefsResult, bankResult] = await Promise.all([
     supabase
       .from("organizations")
-      .select("id, name, address, city, state, pin_code, gstin, pan, phone, email, logo_url, proposal_terms_template")
+      .select("id, name, address, city, state, pin_code, gstin, pan, phone, email, logo_url")
+      .eq("id", profile.org_id!)
+      .single(),
+    supabase
+      .from("organizations")
+      .select("proposal_terms_template")
       .eq("id", profile.org_id!)
       .single(),
     supabase
@@ -57,7 +68,14 @@ export default async function SettingsPage({
       .order("created_at", { ascending: true }),
   ]);
 
-  const org = orgResult.data as unknown as Organization | null;
+  const orgCore = orgResult.data as unknown as Omit<Organization, "proposal_terms_template"> | null;
+  const templateValue =
+    (orgTemplateResult.data as { proposal_terms_template?: string | null } | null)
+      ?.proposal_terms_template ?? null;
+  const org = orgCore
+    ? ({ ...orgCore, proposal_terms_template: templateValue } as Organization)
+    : null;
+
   const alertPrefs = (prefsResult.data ?? []) as unknown as AlertPreference[];
   const bankAccounts = (bankResult.data ?? []) as unknown as OrganizationBankAccount[];
 
