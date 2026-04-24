@@ -7,9 +7,10 @@
 // in `receipt_doc_urls`. This mirrors the pattern used by other upload dialogs.
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { Loader2, X, Upload, Trash2 } from "lucide-react";
+import { Loader2, X, Upload, Trash2, Info, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,20 @@ import type {
   ExpenseCategory,
   ExpensePayeeType,
 } from "@/lib/types/database";
+
+// Categories that should be raised as a campaign job instead of a
+// free-form payment request. Printing and mounting have dedicated
+// job types (print / mount / print_and_mount) which auto-spawn a
+// linked expense row — that path preserves the campaign link, the
+// job status, and the vendor association. Raising them here loses
+// all of that context.
+const JOB_ONLY_CATEGORIES: ExpenseCategory[] = ["printing", "mounting"];
+
+function jobCategoryLabel(category: ExpenseCategory): string {
+  if (category === "printing") return "printing";
+  if (category === "mounting") return "mounting";
+  return category;
+}
 
 interface Props {
   // When opened from a site page we pre-select the site so the user can't
@@ -80,6 +95,12 @@ export function NewExpenseDialog({
   const formRef = useRef<HTMLFormElement>(null);
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Track category in controlled state so the job-only guard (below)
+  // can flip to a "raise a job instead" panel the moment the user
+  // picks printing / mounting. FormData would only see the value on
+  // submit, which is too late for UX.
+  const [category, setCategory] = useState<ExpenseCategory>("electricity");
+  const isJobOnly = JOB_ONLY_CATEGORIES.includes(category);
 
   // The modal markup is rendered via createPortal to document.body so
   // it escapes any parent that has `transform`, `overflow`, or `filter`
@@ -149,6 +170,15 @@ export function NewExpenseDialog({
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    // Belt-and-braces: if for any reason the guard panel was bypassed
+    // (e.g. dev tools removed the disabled attribute), refuse to
+    // submit printing/mounting from this dialog.
+    if (JOB_ONLY_CATEGORIES.includes(category)) {
+      toast.error(
+        `Raise a ${jobCategoryLabel(category)} job from the campaign instead.`,
+      );
+      return;
+    }
     const fd = new FormData(e.currentTarget);
     const amountRupees = parseFloat(String(fd.get("amount_rupees") ?? ""));
     if (!Number.isFinite(amountRupees) || amountRupees <= 0) {
@@ -274,7 +304,10 @@ export function NewExpenseDialog({
                     <select
                       name="category"
                       required
-                      defaultValue="electricity"
+                      value={category}
+                      onChange={(e) =>
+                        setCategory(e.target.value as ExpenseCategory)
+                      }
                       className={selectClass}
                     >
                       {EXPENSE_CATEGORIES.map((c) => (
@@ -286,6 +319,65 @@ export function NewExpenseDialog({
                   </Field>
                 </div>
 
+                {/* ── Job-only guard ──────────────────────────────────
+                    Printing and mounting have dedicated campaign-job
+                    types that auto-spawn a linked payment request with
+                    the right vendor, job status, and campaign link.
+                    Raising one free-form here skips all that context,
+                    so we redirect the user to the campaign's Jobs tab
+                    instead of letting them submit. */}
+                {isJobOnly && (
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-amber-300/70 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+                  >
+                    <div className="flex gap-3">
+                      <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                      <div className="space-y-2">
+                        <p className="font-medium">
+                          Raise a {jobCategoryLabel(category)} job from the
+                          campaign instead
+                        </p>
+                        <p className="text-amber-900/90 dark:text-amber-200/90">
+                          {jobCategoryLabel(category) === "printing"
+                            ? "Printing expenses should be tied to a campaign job so we keep the vendor, quantity, and campaign link together. "
+                            : "Mounting expenses should be tied to a campaign job so the crew, site list, and proof photos stay linked together. "}
+                          Open the campaign, go to the <strong>Jobs</strong> tab,
+                          and click <strong>Add Job</strong>. The payment
+                          request will be generated automatically from the job.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-3 pt-1">
+                          <Link
+                            href="/campaigns"
+                            onClick={() => setOpen(false)}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-amber-400/60 bg-white/60 px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-white dark:bg-amber-500/20 dark:text-amber-100 dark:hover:bg-amber-500/30"
+                          >
+                            Open campaigns
+                            <ArrowRight className="h-3.5 w-3.5" />
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => setCategory("other")}
+                            className="text-xs font-medium text-amber-900 underline-offset-2 hover:underline dark:text-amber-200"
+                          >
+                            Pick a different category
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Everything below the category is dimmed + made
+                    non-interactive when a job-only category is chosen,
+                    so the user can't fill in a form that won't submit. */}
+                <fieldset
+                  disabled={isJobOnly}
+                  className={cn(
+                    "space-y-4",
+                    isJobOnly && "pointer-events-none opacity-50",
+                  )}
+                >
                 {/* Optional campaign tag — visible only when the caller
                     actually passed in a campaigns list (e.g. from a page
                     that has that data on hand). Helps attribute this
@@ -451,6 +543,7 @@ export function NewExpenseDialog({
                     placeholder="Optional notes for accounts…"
                   />
                 </Field>
+                </fieldset>
               </div>
 
               {/* Footer — pinned below the scrollable body so Create / Cancel
@@ -468,8 +561,13 @@ export function NewExpenseDialog({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isPending || uploading}
+                  disabled={isPending || uploading || isJobOnly}
                   className="gap-1.5"
+                  title={
+                    isJobOnly
+                      ? `Raise a ${jobCategoryLabel(category)} job from the campaign instead`
+                      : undefined
+                  }
                 >
                   {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                   Create request

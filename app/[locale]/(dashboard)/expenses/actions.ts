@@ -118,6 +118,17 @@ export async function createExpense(
     }
     const v = parsed.data;
 
+    // Printing and mounting are reserved for the campaign-jobs flow —
+    // jobs auto-spawn a linked site_expenses row via the campaign-jobs
+    // API (which uses a direct insert and bypasses this action). Reject
+    // here so a direct /api/action call can't route around the client
+    // guard in NewExpenseDialog.
+    if (v.category === "printing" || v.category === "mounting") {
+      return {
+        error: `Raise a ${v.category} job from the campaign instead — the payment request will be created automatically.`,
+      };
+    }
+
     // If a site_id or campaign_id was provided, verify it belongs to the
     // caller's org — protects against a malicious client dropping another
     // org's id into the insert.
