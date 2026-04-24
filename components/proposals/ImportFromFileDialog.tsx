@@ -141,6 +141,17 @@ export function ImportFromFileDialog({ onDone }: Props) {
 
   async function handleExtract() {
     if (!file) return;
+    // Vercel serverless functions cap request bodies at ~4.5 MB (Hobby /
+    // Pro). Anything larger fails BEFORE the route handler runs, which
+    // the browser surfaces as a generic network failure with no server
+    // body to parse. Warn up front so the user doesn't waste a long wait.
+    const VERCEL_BODY_LIMIT = 4.5 * 1024 * 1024;
+    if (file.size > VERCEL_BODY_LIMIT && process.env.NODE_ENV === "production") {
+      toast.error(
+        `File is ${(file.size / (1024 * 1024)).toFixed(1)} MB — hosted uploads are capped at 4.5 MB. Try exporting a smaller PDF (fewer pages or compressed images).`,
+      );
+      return;
+    }
     setUploading(true);
     try {
       const fd = new FormData();
@@ -149,9 +160,28 @@ export function ImportFromFileDialog({ onDone }: Props) {
         method: "POST",
         body: fd,
       });
-      const json = await res.json();
+      // Always read the response body as text first so we can show the
+      // server's actual error even when it's not valid JSON (e.g. the
+      // dev compiler's HTML 500 page or Vercel's plain-text 413). Falling
+      // back to a generic "Network error" toast was hiding real causes
+      // like a missing ANTHROPIC_API_KEY from the user.
+      const rawBody = await res.text();
+      let json: { error?: string; sites?: ExtractedSite[] } = {};
+      try {
+        json = rawBody ? JSON.parse(rawBody) : {};
+      } catch {
+        // Non-JSON response — keep going, we'll surface status + excerpt.
+      }
       if (!res.ok) {
-        toast.error(json.error ?? "Extraction failed");
+        const excerpt = rawBody
+          ? rawBody.slice(0, 240).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+          : "";
+        const message =
+          json.error ??
+          (excerpt
+            ? `Extraction failed (${res.status}): ${excerpt}`
+            : `Extraction failed (${res.status})`);
+        toast.error(message);
         return;
       }
       const extracted = (json.sites ?? []) as ExtractedSite[];
@@ -162,8 +192,11 @@ export function ImportFromFileDialog({ onDone }: Props) {
       setRows(extracted.map(toReviewRow));
       setStep("review");
     } catch (err) {
-      console.error(err);
-      toast.error("Network error — please retry");
+      // True network / abort failure — the fetch never got a response.
+      // Show the actual error so a CORS / timeout / size issue is legible.
+      console.error("[import] fetch failed:", err);
+      const detail = err instanceof Error ? err.message : String(err);
+      toast.error(`Upload failed: ${detail}. Check your connection or try a smaller file.`);
     } finally {
       setUploading(false);
     }

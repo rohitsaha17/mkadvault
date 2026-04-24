@@ -131,6 +131,24 @@ function extractSlideText(xml: string): string {
 // Main handler
 // ───────────────────────────────────────────────────────────────────────────
 export async function POST(req: Request): Promise<Response> {
+  // Wrap the whole handler so no failure path — formData parse errors,
+  // Claude SDK throws, Supabase client creation — can slip out as an
+  // unhandled 500 with an HTML body. The client shows a generic
+  // "Network error" when it can't parse the response as JSON, which is
+  // what's been confusing users.
+  try {
+    return await extractHandler(req);
+  } catch (err) {
+    console.error("[extract] unhandled error:", err);
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    return NextResponse.json(
+      { error: `Couldn't read that file: ${msg}` },
+      { status: 500 },
+    );
+  }
+}
+
+async function extractHandler(req: Request): Promise<Response> {
   // ── 0. API-key sanity check ──────────────────────────────────────────────
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
