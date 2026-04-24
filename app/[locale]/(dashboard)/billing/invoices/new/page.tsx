@@ -73,7 +73,26 @@ export default async function NewInvoicePage({
   const campaigns = (campaignsData ?? []) as InvoiceCampaign[];
   const orgGstin = orgData?.gstin ?? null;
   const orgSettings = (orgData?.settings ?? {}) as Record<string, string>;
-  const defaultTerms = orgSettings.default_payment_terms ?? "Payment due within the agreed credit period. Please quote the invoice number in your payment.";
+
+  // Invoice T&C default source order (migration 040):
+  //   1. organizations.invoice_terms_template (new per-doc column)
+  //   2. organizations.settings.default_payment_terms  (legacy JSON key)
+  //   3. hardcoded fallback
+  // Fetched in a separate query so a missing 040 column can't nuke the
+  // main org fetch above.
+  const invoiceTermsTemplate: string | null = await (async () => {
+    const { data, error } = await supabase
+      .from("organizations")
+      .select("invoice_terms_template")
+      .eq("id", profile.org_id)
+      .maybeSingle();
+    if (error || !data) return null;
+    return (data as { invoice_terms_template?: string | null }).invoice_terms_template ?? null;
+  })();
+  const defaultTerms =
+    invoiceTermsTemplate ??
+    orgSettings.default_payment_terms ??
+    "Payment due within the agreed credit period. Please quote the invoice number in your payment.";
   const bankAccounts = (bankAccountsData ?? []) as Pick<
     OrganizationBankAccount,
     "id" | "label" | "bank_name" | "account_number" | "ifsc_code" | "branch_name" | "is_primary"

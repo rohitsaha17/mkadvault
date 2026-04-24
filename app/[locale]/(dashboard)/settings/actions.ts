@@ -85,9 +85,11 @@ export async function updateOrganization(data: {
   pan?: string;
   phone?: string;
   email?: string;
-  // Org-wide default text for proposal / rate-card Terms & Conditions.
-  // Empty string clears the template.
-  proposal_terms_template?: string;
+  // Per-document T&C templates (migration 040). Empty string clears.
+  invoice_terms_template?: string;
+  rate_card_terms_template?: string;
+  payment_voucher_terms_template?: string;
+  receipt_voucher_terms_template?: string;
 }): Promise<{ error?: string }> {
   try {
     const supabase = await createClient();
@@ -118,12 +120,17 @@ export async function updateOrganization(data: {
       return { error: "Only admins can update organization settings" };
     }
 
-    // Split the update: core fields always go through; the
-    // proposal_terms_template column only exists after migration 026 has
-    // been applied, so we write it in a separate UPDATE and swallow the
-    // "column does not exist" error (42703). This keeps Save working on
-    // environments where 026 isn't live yet.
-    const { proposal_terms_template, ...core } = data;
+    // Split the update: core fields always go through; the per-document
+    // T&C template columns live in migration 040 which may not be
+    // applied yet. Each template column is written on its own and
+    // skipped silently if its column isn't addressable (42703 / PGRST204).
+    const {
+      invoice_terms_template,
+      rate_card_terms_template,
+      payment_voucher_terms_template,
+      receipt_voucher_terms_template,
+      ...core
+    } = data;
 
     const { error } = await supabase
       .from("organizations")
@@ -132,22 +139,37 @@ export async function updateOrganization(data: {
 
     if (error) return { error: error.message };
 
-    if (proposal_terms_template !== undefined) {
-      const trimmed = proposal_terms_template.trim();
-      const value = trimmed === "" ? null : trimmed;
+    // Normalise a textarea value: empty / whitespace → null so the
+    // column's "no template set" branch fires, otherwise the trimmed text.
+    function normalize(v: string | undefined): string | null | undefined {
+      if (v === undefined) return undefined;
+      const t = v.trim();
+      return t === "" ? null : t;
+    }
+
+    const templateUpdates: Array<[string, string | null]> = [];
+    const invoiceVal = normalize(invoice_terms_template);
+    if (invoiceVal !== undefined) templateUpdates.push(["invoice_terms_template", invoiceVal]);
+    const rateCardVal = normalize(rate_card_terms_template);
+    if (rateCardVal !== undefined) templateUpdates.push(["rate_card_terms_template", rateCardVal]);
+    const paymentVal = normalize(payment_voucher_terms_template);
+    if (paymentVal !== undefined) templateUpdates.push(["payment_voucher_terms_template", paymentVal]);
+    const receiptVal = normalize(receipt_voucher_terms_template);
+    if (receiptVal !== undefined) templateUpdates.push(["receipt_voucher_terms_template", receiptVal]);
+
+    for (const [column, value] of templateUpdates) {
       const { error: tplErr } = await supabase
         .from("organizations")
-        .update({ proposal_terms_template: value })
+        .update({ [column]: value })
         .eq("id", profile.org_id);
-      // Two codes mean the same thing in practice: migration 026 isn't
-      // applied so the column isn't addressable.
-      //   42703    = Postgres "undefined_column"
-      //   PGRST204 = PostgREST "column not in schema cache"
-      // Either way, skip the template write instead of failing the whole save.
+      // 42703 = Postgres "undefined_column"; PGRST204 = PostgREST
+      // "column not in schema cache". Either means migration 040 isn't
+      // applied for this column yet — skip silently so Save still
+      // succeeds for the remaining fields.
       const missingColumn =
         tplErr?.code === "42703" ||
         tplErr?.code === "PGRST204" ||
-        /proposal_terms_template/.test(tplErr?.message ?? "");
+        (!!tplErr?.message && tplErr.message.includes(column));
       if (tplErr && !missingColumn) return { error: tplErr.message };
     }
     revalidatePath("/settings");

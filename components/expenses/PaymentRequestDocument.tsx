@@ -46,6 +46,10 @@ export interface PaymentRequestDocumentProps {
   campaign: Pick<Campaign, "id" | "campaign_name" | "campaign_code"> | null;
   createdByName?: string | null;
   paidByName?: string | null;
+  // Org-wide payment-voucher T&C (migration 040). When non-empty, a
+  // "Terms & Conditions" block renders just above the signature so the
+  // printed PDF carries the org's standard payment language.
+  termsText?: string | null;
 }
 
 // ─── Design tokens (match the invoice PDF) ────────────────────────────────────
@@ -296,6 +300,7 @@ export function PaymentRequestDocument({
   campaign,
   createdByName,
   paidByName,
+  termsText,
 }: PaymentRequestDocumentProps) {
   const pill = statusStyle(expense.status);
   const shortId = expense.id.slice(0, 8);
@@ -532,6 +537,14 @@ export function PaymentRequestDocument({
               {fmt(expense.updated_at)}.
             </Text>
           </View>
+
+          {/* ── Terms & Conditions (from organization settings) ── */}
+          {termsText && termsText.trim() !== "" && (
+            <View style={S.notesBlock}>
+              <Text style={S.sectionLabel}>Terms &amp; Conditions</Text>
+              <Text style={S.notesText}>{termsText.trim()}</Text>
+            </View>
+          )}
 
           {/* ── Signature ── */}
           <View style={S.signatureWrap}>

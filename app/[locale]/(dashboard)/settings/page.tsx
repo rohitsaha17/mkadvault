@@ -38,12 +38,11 @@ export default async function SettingsPage({
 
   // Load org + alert preferences + bank accounts in parallel.
   //
-  // `proposal_terms_template` is fetched separately because migration 026
-  // is not applied on every environment yet (some DBs don't have the
-  // column). Including it in the main select made the whole org query
-  // fail with 42703, which nulled `org` and hid this entire section.
-  // Split so the core settings always load regardless.
-  const [orgResult, orgTemplateResult, prefsResult, bankResult] = await Promise.all([
+  // The per-document T&C columns (migration 040) are fetched separately
+  // so environments without the migration still load the rest of the
+  // settings. Including them in the main SELECT made the whole org
+  // query fail with 42703/PGRST204 and hid this entire section.
+  const [orgResult, orgTemplatesResult, prefsResult, bankResult] = await Promise.all([
     supabase
       .from("organizations")
       .select("id, name, address, city, state, pin_code, gstin, pan, phone, email, logo_url")
@@ -51,7 +50,9 @@ export default async function SettingsPage({
       .single(),
     supabase
       .from("organizations")
-      .select("proposal_terms_template")
+      .select(
+        "invoice_terms_template, rate_card_terms_template, payment_voucher_terms_template, receipt_voucher_terms_template",
+      )
       .eq("id", profile.org_id!)
       .single(),
     supabase
@@ -68,12 +69,36 @@ export default async function SettingsPage({
       .order("created_at", { ascending: true }),
   ]);
 
-  const orgCore = orgResult.data as unknown as Omit<Organization, "proposal_terms_template"> | null;
-  const templateValue =
-    (orgTemplateResult.data as { proposal_terms_template?: string | null } | null)
-      ?.proposal_terms_template ?? null;
+  const orgCore = orgResult.data as unknown as
+    | Omit<
+        Organization,
+        | "invoice_terms_template"
+        | "rate_card_terms_template"
+        | "payment_voucher_terms_template"
+        | "receipt_voucher_terms_template"
+        | "proposal_terms_template"
+      >
+    | null;
+  // Templates row is null when migration 040 hasn't been applied yet —
+  // in that case every per-doc template resolves to null and the
+  // textareas render empty.
+  const tpls = (orgTemplatesResult.data ?? {}) as Partial<
+    Pick<
+      Organization,
+      | "invoice_terms_template"
+      | "rate_card_terms_template"
+      | "payment_voucher_terms_template"
+      | "receipt_voucher_terms_template"
+    >
+  >;
   const org = orgCore
-    ? ({ ...orgCore, proposal_terms_template: templateValue } as Organization)
+    ? ({
+        ...orgCore,
+        invoice_terms_template: tpls.invoice_terms_template ?? null,
+        rate_card_terms_template: tpls.rate_card_terms_template ?? null,
+        payment_voucher_terms_template: tpls.payment_voucher_terms_template ?? null,
+        receipt_voucher_terms_template: tpls.receipt_voucher_terms_template ?? null,
+      } as Organization)
     : null;
 
   const alertPrefs = (prefsResult.data ?? []) as unknown as AlertPreference[];

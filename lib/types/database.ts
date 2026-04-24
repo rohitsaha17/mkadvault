@@ -51,9 +51,16 @@ export interface Organization {
   logo_url: string | null;
   settings: Record<string, unknown>;
   subscription_tier: SubscriptionTier;
-  // Org-wide default text pre-filled into the Terms & Conditions section
-  // of proposals and rate cards. Null/empty means no template set.
-  proposal_terms_template: string | null;
+  // Legacy: org-wide proposal / rate-card T&C. Superseded by the
+  // per-document columns below (migration 040). Optional because the
+  // column is not present on every environment yet.
+  proposal_terms_template?: string | null;
+  // Per-document T&C templates (migration 040) — each one pre-fills
+  // the matching document builder. Null = no template set.
+  invoice_terms_template: string | null;
+  rate_card_terms_template: string | null;
+  payment_voucher_terms_template: string | null;
+  receipt_voucher_terms_template: string | null;
   created_at: string;
   updated_at: string;
 }

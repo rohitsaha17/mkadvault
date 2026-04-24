@@ -115,7 +115,13 @@ export function OrgSettingsForm({
       email: org.email ?? "",
       gstin: org.gstin ?? "",
       pan: org.pan ?? "",
-      proposal_terms_template: org.proposal_terms_template ?? "",
+      // Per-document T&C templates (migration 040). Blank until the
+      // admin fills them in; each one pre-fills the matching builder.
+      invoice_terms_template: org.invoice_terms_template ?? "",
+      rate_card_terms_template:
+        org.rate_card_terms_template ?? org.proposal_terms_template ?? "",
+      payment_voucher_terms_template: org.payment_voucher_terms_template ?? "",
+      receipt_voucher_terms_template: org.receipt_voucher_terms_template ?? "",
     },
   });
 
@@ -269,26 +275,74 @@ export function OrgSettingsForm({
             <p className="text-xs text-destructive">{errors.pan.message}</p>
           )}
         </div>
-        <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="proposal_terms_template">
-            Proposal / Rate-card Terms & Conditions
-          </Label>
-          <textarea
-            id="proposal_terms_template"
-            {...register("proposal_terms_template")}
-            rows={6}
-            placeholder="Payment terms, cancellation policy, creative approval process, etc. This text pre-fills the T&C section on every new proposal and rate card — editable per proposal."
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          />
-          <p className="text-xs text-muted-foreground">
-            Leave blank to skip T&C by default. Users can still enter one-off terms per proposal.
+      </div>
+
+      {/* ── Per-document T&C templates ────────────────────────────────
+          Each textarea pre-fills the T&C section on the matching
+          document builder. Leaving one blank means that document ships
+          without default terms — users can still type one-off terms
+          per document. */}
+      <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">
+            Default Terms &amp; Conditions
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Set a default per document type. These pre-fill the T&amp;C
+            section when you create the document and stay editable per
+            record.
           </p>
-          {errors.proposal_terms_template && (
-            <p className="text-xs text-destructive">
-              {errors.proposal_terms_template.message}
-            </p>
-          )}
         </div>
+
+        {(
+          [
+            {
+              name: "invoice_terms_template",
+              label: "Invoice T&C",
+              hint: "Pre-fills the Terms & Conditions field on /billing/invoices/new.",
+              placeholder:
+                "e.g. Payment due within 30 days of invoice date. Late payments attract 1.5% interest per month. All disputes within 7 days of invoice.",
+            },
+            {
+              name: "rate_card_terms_template",
+              label: "Rate Card / Proposal T&C",
+              hint: "Pre-fills the T&C section of proposals and rate cards.",
+              placeholder:
+                "e.g. Rates valid for 30 days. 50% advance on confirmation, balance on mount. Printing and mounting as per attached charges.",
+            },
+            {
+              name: "payment_voucher_terms_template",
+              label: "Payment Voucher T&C",
+              hint: "Pre-fills the footer on the payment-request PDF (/finance/requests).",
+              placeholder:
+                "e.g. Paid subject to receipt of original tax invoice. TDS deducted as applicable. Payment in INR via NEFT/RTGS.",
+            },
+            {
+              name: "receipt_voucher_terms_template",
+              label: "Receipt Voucher T&C",
+              hint: "Pre-fills the footer on the receipt voucher PDF.",
+              placeholder:
+                "e.g. This receipt is system-generated. Subject to realisation of instrument.",
+            },
+          ] as const
+        ).map(({ name, label, hint, placeholder }) => (
+          <div key={name} className="space-y-1.5">
+            <Label htmlFor={name}>{label}</Label>
+            <textarea
+              id={name}
+              {...register(name)}
+              rows={4}
+              placeholder={placeholder}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+            <p className="text-[11px] text-muted-foreground">{hint}</p>
+            {errors[name] && (
+              <p className="text-xs text-destructive">
+                {errors[name]?.message as string}
+              </p>
+            )}
+          </div>
+        ))}
       </div>
 
       {canEdit && (

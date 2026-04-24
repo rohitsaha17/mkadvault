@@ -76,7 +76,7 @@ export default async function NewProposalPage({
       .order("agency_name"),
     supabase
       .from("organizations")
-      .select("name, address, city, state, pin_code, gstin, phone, email, logo_url, proposal_terms_template")
+      .select("name, address, city, state, pin_code, gstin, phone, email, logo_url")
       .eq("id", profile.org_id)
       .single(),
   ]);
@@ -122,7 +122,7 @@ export default async function NewProposalPage({
   const agencies = (agenciesData ?? []) as Pick<PartnerAgency, "id" | "agency_name">[];
   const orgRaw = orgData as
     | (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email">
-        & { logo_url?: string | null; proposal_terms_template?: string | null })
+        & { logo_url?: string | null })
     | null;
   const org = orgRaw
     ? {
@@ -137,7 +137,26 @@ export default async function NewProposalPage({
         logo_url: orgRaw.logo_url ?? null,
       }
     : null;
-  const orgTermsTemplate = orgRaw?.proposal_terms_template ?? null;
+  // Fetch the rate-card T&C template in an isolated query so a missing
+  // migration 040 (new column) or 026 (legacy column) can't null out
+  // the whole org record and break this page. Swallows 42703 / PGRST204.
+  const orgTermsTemplate: string | null = await (async () => {
+    const { data, error } = await supabase
+      .from("organizations")
+      .select("rate_card_terms_template")
+      .eq("id", profile.org_id)
+      .maybeSingle();
+    if (!error && data) {
+      return (data as { rate_card_terms_template?: string | null }).rate_card_terms_template ?? null;
+    }
+    const { data: legacy } = await supabase
+      .from("organizations")
+      .select("proposal_terms_template")
+      .eq("id", profile.org_id)
+      .maybeSingle();
+    return (legacy as { proposal_terms_template?: string | null } | null)
+      ?.proposal_terms_template ?? null;
+  })();
 
   // Sign the org logo so the PPTX export can embed its bytes into the
   // generated deck. Short TTL is fine — generation happens shortly

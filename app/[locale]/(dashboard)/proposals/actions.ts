@@ -290,12 +290,23 @@ export async function saveOrgProposalTermsTemplate(
     if (!ctx) return { error: "Not authenticated" };
 
     const trimmed = termsText.trim();
+    const value = trimmed === "" ? null : trimmed;
+    // Writes to the per-document rate_card_terms_template column
+    // (migration 040). Tolerates the column being absent — if the
+    // migration hasn't been applied, the "Save as organization default"
+    // button becomes a no-op instead of failing the whole proposal save.
     const { error } = await ctx.supabase
       .from("organizations")
-      .update({ proposal_terms_template: trimmed === "" ? null : trimmed })
+      .update({ rate_card_terms_template: value })
       .eq("id", ctx.orgId);
 
-    if (error) return { error: error.message };
+    if (error) {
+      const missingColumn =
+        error.code === "42703" ||
+        error.code === "PGRST204" ||
+        /rate_card_terms_template/.test(error.message ?? "");
+      if (!missingColumn) return { error: error.message };
+    }
     // Any page that reads the template (proposal new/edit + settings)
     // should see the new default on next render.
     revalidatePath("/proposals");

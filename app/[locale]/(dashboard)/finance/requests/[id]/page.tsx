@@ -153,6 +153,20 @@ export default async function PaymentRequestDetailPage({
     orgLogoUrl = signed?.signedUrl ?? null;
   }
 
+  // Org-wide payment-voucher T&C (migration 040). Fetched on its own
+  // so a missing column doesn't null out the core org row above. When
+  // the column / value is missing the PDF skips the T&C block.
+  const paymentVoucherTerms: string | null = await (async () => {
+    const { data, error } = await supabase
+      .from("organizations")
+      .select("payment_voucher_terms_template")
+      .eq("id", profile.org_id)
+      .maybeSingle();
+    if (error || !data) return null;
+    return (data as { payment_voucher_terms_template?: string | null })
+      .payment_voucher_terms_template ?? null;
+  })();
+
   // Sign private document URLs (receipts + payment proofs) so they're
   // clickable from the page. `expense-docs` bucket is private.
   const docPaths = [
@@ -217,6 +231,7 @@ export default async function PaymentRequestDetailPage({
               campaign={expense.campaign}
               createdByName={profileMap[expense.created_by ?? ""] ?? null}
               paidByName={profileMap[expense.paid_by ?? ""] ?? null}
+              termsText={paymentVoucherTerms}
               filename={`PaymentRequest-${shortId}.pdf`}
             />
           )}
