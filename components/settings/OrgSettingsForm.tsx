@@ -22,9 +22,19 @@ interface Props {
   // Bank accounts used on invoices — managed inline, one-shot saves
   // independent of the main form submit.
   bankAccounts?: OrganizationBankAccount[];
+  // When false, every field is disabled, logo actions are hidden, and
+  // the Save button is suppressed. Non-admin team members still get to
+  // SEE their org's letterhead details (useful when checking how a
+  // PDF will render) but can't change them.
+  canEdit?: boolean;
 }
 
-export function OrgSettingsForm({ org, orgLogoSignedUrl, bankAccounts = [] }: Props) {
+export function OrgSettingsForm({
+  org,
+  orgLogoSignedUrl,
+  bankAccounts = [],
+  canEdit = true,
+}: Props) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -123,6 +133,11 @@ export function OrgSettingsForm({ org, orgLogoSignedUrl, bankAccounts = [] }: Pr
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      {/* Wrap the entire form body in a <fieldset disabled>. The browser
+          disables nested inputs/selects/textareas automatically when a
+          fieldset is disabled — cheaper than toggling `disabled` on each
+          field individually. */}
+      <fieldset disabled={!canEdit} className="space-y-4 disabled:opacity-90">
       {/* ── Logo upload ──────────────────────────────────────────────── */}
       {/* Separate from the rest of the form because it saves as soon as
           you pick a file (one-shot upload) rather than waiting for the
@@ -147,43 +162,45 @@ export function OrgSettingsForm({ org, orgLogoSignedUrl, bankAccounts = [] }: Pr
               Used on proposal / rate-card slides + exports. PNG, JPG, WEBP or SVG,
               up to 2 MB. Transparent background works best for slide branding.
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                className="sr-only"
-                onChange={handleLogoFileChange}
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingLogo}
-                className="gap-1.5"
-              >
-                {uploadingLogo ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Upload className="h-3.5 w-3.5" />
-                )}
-                {logoPreviewUrl ? "Replace logo" : "Upload logo"}
-              </Button>
-              {logoPreviewUrl && (
+            {canEdit && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="sr-only"
+                  onChange={handleLogoFileChange}
+                />
                 <Button
                   type="button"
                   size="sm"
-                  variant="ghost"
-                  onClick={handleLogoDelete}
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
                   disabled={uploadingLogo}
-                  className="gap-1.5 text-destructive hover:text-destructive"
+                  className="gap-1.5"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Remove
+                  {uploadingLogo ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="h-3.5 w-3.5" />
+                  )}
+                  {logoPreviewUrl ? "Replace logo" : "Upload logo"}
                 </Button>
-              )}
-            </div>
+                {logoPreviewUrl && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleLogoDelete}
+                    disabled={uploadingLogo}
+                    className="gap-1.5 text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -274,12 +291,18 @@ export function OrgSettingsForm({ org, orgLogoSignedUrl, bankAccounts = [] }: Pr
         </div>
       </div>
 
-      <Button type="submit" size="sm" disabled={isPending}>
-        {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-        Save Organisation
-      </Button>
+      {canEdit && (
+        <Button type="submit" size="sm" disabled={isPending}>
+          {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+          Save Organisation
+        </Button>
+      )}
+      </fieldset>
 
       {/* ── Bank accounts (independent of the main form save) ────────── */}
+      {/* Kept outside the read-only fieldset — BankAccountsManager has
+          its own admin gating on each row action; non-admins just see
+          the list. */}
       <div className="mt-6 border-t border-border pt-6">
         <BankAccountsManager accounts={bankAccounts} />
       </div>

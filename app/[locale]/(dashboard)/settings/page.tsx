@@ -104,15 +104,25 @@ export default async function SettingsPage({
         </section>
 
         {/* ── Organization ─────────────────────────────────────────────── */}
-        {isAdmin && org && (
+        {/* Show to every team member — the company's letterhead
+            details (address, GSTIN, phone, logo) aren't sensitive and
+            everyone needs to verify how their org appears on PDFs.
+            Editing is still gated on admin via `canEdit`. */}
+        {org && (
           <section className="rounded-2xl border border-border bg-card card-elevated p-6">
-            <div className="mb-5 border-b border-border pb-3">
+            <div className="mb-5 flex items-center justify-between border-b border-border pb-3">
               <h2 className="text-base font-semibold text-foreground">{t("organisation")}</h2>
+              {!isAdmin && (
+                <span className="text-xs text-muted-foreground">
+                  Read-only — ask an admin to edit
+                </span>
+              )}
             </div>
             <OrgSettingsForm
               org={org}
               orgLogoSignedUrl={orgLogoSignedUrl}
               bankAccounts={bankAccounts}
+              canEdit={isAdmin}
             />
           </section>
         )}
