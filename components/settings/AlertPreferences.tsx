@@ -7,7 +7,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { upsertAlertPreference } from "@/app/[locale]/(dashboard)/settings/actions";
+import { callAction } from "@/lib/utils/call-action";
 import type { AlertPreference, AlertType } from "@/lib/types/database";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -114,10 +114,15 @@ export function AlertPreferences({ preferences, canEdit }: Props) {
   function handleSave(row: PrefRow) {
     setSavingType(row.alert_type);
     startTransition(async () => {
-      const res = await upsertAlertPreference(row);
-      if (res.error) toast.error(res.error);
-      else toast.success("Preference saved");
-      setSavingType(null);
+      try {
+        const res = await callAction<{ error?: string }>("upsertAlertPreference", row);
+        if (res.error) toast.error(res.error);
+        else toast.success("Preference saved");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      } finally {
+        setSavingType(null);
+      }
     });
   }
 

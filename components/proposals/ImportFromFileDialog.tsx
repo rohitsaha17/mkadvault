@@ -33,10 +33,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  createSitesFromImport,
-  type ImportSiteInput,
-} from "@/app/[locale]/(dashboard)/sites/actions";
+import type { ImportSiteInput } from "@/app/[locale]/(dashboard)/sites/actions";
+import { callAction } from "@/lib/utils/call-action";
 
 // The raw shape we receive from /api/proposals/extract. Every field is
 // optional because the AI may not find everything — the review UI lets
@@ -215,22 +213,32 @@ export function ImportFromFileDialog({ onDone }: Props) {
       image_storage_path: r.image_storage_path,
     }));
 
-    const result = await createSitesFromImport(payload);
-    if ("error" in result) {
+    type ImportResult = {
+      error?: string;
+      createdSiteIds?: string[];
+      errors?: { siteIdx: number; message: string }[];
+    };
+    const result = await callAction<ImportResult>(
+      "createSitesFromImport",
+      payload,
+    );
+    if (result.error) {
       toast.error(result.error);
       setStep("review");
       return;
     }
 
-    if (result.errors.length > 0) {
+    const createdIds = result.createdSiteIds ?? [];
+    const errs = result.errors ?? [];
+    if (errs.length > 0) {
       toast.error(
-        `${result.createdSiteIds.length} created, ${result.errors.length} failed. First error: ${result.errors[0].message}`
+        `${createdIds.length} created, ${errs.length} failed. First error: ${errs[0].message}`,
       );
     } else {
-      toast.success(`${result.createdSiteIds.length} site${result.createdSiteIds.length === 1 ? "" : "s"} imported`);
+      toast.success(`${createdIds.length} site${createdIds.length === 1 ? "" : "s"} imported`);
     }
 
-    onDone?.(result.createdSiteIds);
+    onDone?.(createdIds);
     setOpen(false);
     reset();
   }

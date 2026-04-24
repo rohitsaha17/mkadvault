@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { contractSchema, contractDefaults, type ContractFormValues } from "@/lib/validations/contract";
-import { createContract, updateContract } from "@/app/[locale]/(dashboard)/contracts/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -112,9 +112,10 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
-        const result = existing
-          ? await updateContract(existing.id, clean)
-          : await createContract(clean);
+        const result = await callAction<{ error?: string; id?: string }>(
+          existing ? "updateContract" : "createContract",
+          ...(existing ? [existing.id, clean] : [clean]),
+        );
         if ("error" in result) { toast.error(result.error); return; }
         toast.success(existing ? "Contract updated" : "Contract created");
         router.push(`/contracts/${result.id}`);

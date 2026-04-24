@@ -6,7 +6,7 @@ import { Send, Trash2, IndianRupee } from "lucide-react";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { RecordInvoicePaymentDialog } from "./RecordInvoicePaymentDialog";
-import { updateInvoiceStatus, deleteInvoice } from "@/app/[locale]/(dashboard)/billing/actions";
+import { callAction } from "@/lib/utils/call-action";
 import type { InvoiceStatus } from "@/lib/types/database";
 import type { InvoiceDocumentProps } from "./InvoiceDocument";
 
@@ -36,20 +36,32 @@ export function InvoiceDetailActions({ invoiceId, invoiceNumber, currentStatus, 
 
   function handleMarkSent() {
     startTransition(async () => {
-      const result = await updateInvoiceStatus(invoiceId, "sent");
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("Invoice marked as sent");
-      router.refresh();
+      try {
+        const result = await callAction<{ error?: string }>(
+          "updateInvoiceStatus",
+          invoiceId,
+          "sent",
+        );
+        if (result.error) { toast.error(result.error); return; }
+        toast.success("Invoice marked as sent");
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Update failed");
+      }
     });
   }
 
   function handleDelete() {
     if (!confirm(`Delete invoice ${invoiceNumber}? This cannot be undone.`)) return;
     startTransition(async () => {
-      const result = await deleteInvoice(invoiceId);
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("Invoice deleted");
-      router.push("/billing/invoices");
+      try {
+        const result = await callAction<{ error?: string }>("deleteInvoice", invoiceId);
+        if (result.error) { toast.error(result.error); return; }
+        toast.success("Invoice deleted");
+        router.push("/billing/invoices");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Delete failed");
+      }
     });
   }
 

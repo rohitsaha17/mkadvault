@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn, inr } from "@/lib/utils";
-import { createProposal, updateProposal, saveOrgProposalTermsTemplate } from "@/app/[locale]/(dashboard)/proposals/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { ProposalExportButtons } from "./ProposalExportButtons";
 import { ImportFromFileDialog } from "./ImportFromFileDialog";
@@ -154,7 +154,10 @@ export function ProposalWizard({
       return;
     }
     startSaveTemplate(async () => {
-      const result = await saveOrgProposalTermsTemplate(text);
+      const result = await callAction<{ error?: string }>(
+        "saveOrgProposalTermsTemplate",
+        text,
+      );
       if (result.error) toast.error(result.error);
       else toast.success("Saved as organization default");
     });
@@ -246,9 +249,10 @@ export function ProposalWizard({
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
-        const result = editProposalId
-          ? await updateProposal(editProposalId, clean)
-          : await createProposal(clean);
+        const result = await callAction<{ error?: string; id?: string }>(
+          editProposalId ? "updateProposal" : "createProposal",
+          ...(editProposalId ? [editProposalId, clean] : [clean]),
+        );
 
         if ("error" in result && result.error) { toast.error(result.error); return; }
 

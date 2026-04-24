@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { recordPaymentSchema, type RecordPaymentValues } from "@/lib/validations/contract";
-import { recordPayment } from "@/app/[locale]/(dashboard)/contracts/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +41,12 @@ export function RecordPaymentDialog({ paymentRowId, amountDuePaise, dueDate, onS
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
-        const result = await recordPayment(paymentRowId, amountDuePaise, clean);
+        const result = await callAction<{ error?: string }>(
+          "recordContractPayment",
+          paymentRowId,
+          amountDuePaise,
+          clean,
+        );
         if (result.error) { toast.error(result.error); return; }
         toast.success("Payment recorded");
         setOpen(false);

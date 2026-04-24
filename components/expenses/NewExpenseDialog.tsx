@@ -15,10 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import {
-  createExpense,
-  uploadExpenseDoc,
-} from "@/app/[locale]/(dashboard)/expenses/actions";
+import { callAction } from "@/lib/utils/call-action";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_PAYEE_TYPES,
@@ -123,13 +120,23 @@ export function NewExpenseDialog({
     setUploading(true);
     try {
       const b64 = await fileToBase64(file);
-      const res = await uploadExpenseDoc(file.name, b64, "inbox", "receipt");
+      // Routed through the /api/action dispatcher for stable URLs —
+      // see lib/actions/registry.ts for the rationale.
+      const res = await callAction<{ error?: string; path?: string }>(
+        "uploadExpenseDoc",
+        file.name,
+        b64,
+        "inbox",
+        "receipt",
+      );
       if (res.error || !res.path) {
         toast.error(res.error ?? "Upload failed");
         return;
       }
       setDocs((prev) => [...prev, { path: res.path!, name: file.name }]);
       toast.success(`Attached ${file.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -170,15 +177,22 @@ export function NewExpenseDialog({
     };
 
     startTransition(async () => {
-      const res = await createExpense(values);
-      if (res.error) {
-        toast.error(res.error);
-        return;
+      try {
+        const res = await callAction<{ error?: string; id?: string }>(
+          "createExpense",
+          values,
+        );
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success("Payment request created");
+        setOpen(false);
+        resetAll();
+        onCreated?.();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
       }
-      toast.success("Payment request created");
-      setOpen(false);
-      resetAll();
-      onCreated?.();
     });
   }
 

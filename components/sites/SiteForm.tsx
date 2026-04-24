@@ -9,8 +9,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, ChevronLeft, ChevronRight, Check, Plus, Trash2, UserPlus } from "lucide-react";
 import { siteSchema, siteFormDefaults, type SiteFormValues } from "@/lib/validations/site";
-import { createSite, updateSite } from "@/app/[locale]/(dashboard)/sites/actions";
-import { createLandowner } from "@/app/[locale]/(dashboard)/landowners/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -159,9 +158,10 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
     });
     startTransition(async () => {
       try {
-        const result = existingSite
-          ? await updateSite(existingSite.id, cleaned)
-          : await createSite(cleaned);
+        const result = await callAction<{ error?: string; siteId?: string }>(
+          existingSite ? "updateSite" : "createSite",
+          ...(existingSite ? [existingSite.id, cleaned] : [cleaned]),
+        );
 
         if ("error" in result) {
           toast.error(result.error);
@@ -192,13 +192,16 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
     }
     setLwSaving(true);
     try {
-      const result = await createLandowner({
-        full_name: lwName.trim(),
-        phone: lwPhone.trim() || undefined,
-        email: lwEmail.trim() || undefined,
-      });
-      if ("error" in result) {
-        toast.error(result.error);
+      const result = await callAction<{ error?: string; id?: string }>(
+        "createLandowner",
+        {
+          full_name: lwName.trim(),
+          phone: lwPhone.trim() || undefined,
+          email: lwEmail.trim() || undefined,
+        },
+      );
+      if (result.error || !result.id) {
+        toast.error(result.error ?? "Failed to add landowner");
         return;
       }
       // Append to local list + select it

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Lock } from "lucide-react";
 import { landownerSchema, landownerDefaults, type LandownerFormValues } from "@/lib/validations/landowner";
-import { createLandowner, updateLandowner } from "@/app/[locale]/(dashboard)/landowners/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,9 +62,10 @@ export function LandownerForm({ existing }: Props) {
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
-        const result = existing
-          ? await updateLandowner(existing.id, clean)
-          : await createLandowner(clean);
+        const result = await callAction<{ error?: string; id?: string }>(
+          existing ? "updateLandowner" : "createLandowner",
+          ...(existing ? [existing.id, clean] : [clean]),
+        );
         if ("error" in result) { toast.error(result.error); return; }
         toast.success(existing ? "Landowner updated" : "Landowner created");
         router.push(`/landowners/${result.id}`);

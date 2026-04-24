@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { inr } from "@/lib/utils";
-import { recordPayment } from "@/app/[locale]/(dashboard)/billing/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 
 // Coerce cleared number inputs (NaN from react-hook-form's valueAsNumber)
@@ -60,7 +60,11 @@ export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDu
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
-        const result = await recordPayment(invoiceId, clean);
+        const result = await callAction<{ error?: string }>(
+          "recordInvoicePayment",
+          invoiceId,
+          clean,
+        );
         if (result.error) { toast.error(result.error); return; }
         toast.success("Payment recorded");
         onSuccess();

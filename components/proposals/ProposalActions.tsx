@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Copy, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { duplicateProposal, deleteProposal } from "@/app/[locale]/(dashboard)/proposals/actions";
+import { callAction } from "@/lib/utils/call-action";
 
 interface Props {
   proposalId: string;
@@ -17,21 +17,35 @@ export function ProposalActions({ proposalId, proposalName }: Props) {
 
   function handleDuplicate() {
     startTransition(async () => {
-      const result = await duplicateProposal(proposalId);
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("Proposal duplicated");
-      if (result.id) router.push(`/proposals/${result.id}/edit`);
+      try {
+        const result = await callAction<{ error?: string; id?: string }>(
+          "duplicateProposal",
+          proposalId,
+        );
+        if (result.error) { toast.error(result.error); return; }
+        toast.success("Proposal duplicated");
+        if (result.id) router.push(`/proposals/${result.id}/edit`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Duplicate failed");
+      }
     });
   }
 
   function handleDelete() {
     if (!confirm(`Delete "${proposalName}"? This cannot be undone.`)) return;
     startTransition(async () => {
-      const result = await deleteProposal(proposalId);
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("Proposal deleted");
-      router.push("/proposals");
-      router.refresh();
+      try {
+        const result = await callAction<{ error?: string }>(
+          "deleteProposal",
+          proposalId,
+        );
+        if (result.error) { toast.error(result.error); return; }
+        toast.success("Proposal deleted");
+        router.push("/proposals");
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Delete failed");
+      }
     });
   }
 

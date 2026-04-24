@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { updateProfile } from "@/app/[locale]/(dashboard)/settings/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { profileSchema, type ProfileFormValues } from "@/lib/validations/settings";
 import type { Profile } from "@/lib/types/database";
 
@@ -33,9 +33,13 @@ export function ProfileForm({ profile, email }: Props) {
 
   function onSubmit(values: ProfileFormValues) {
     startTransition(async () => {
-      const res = await updateProfile(values);
-      if (res.error) toast.error(res.error);
-      else toast.success("Profile updated");
+      try {
+        const res = await callAction<{ error?: string }>("updateProfile", values);
+        if (res.error) toast.error(res.error);
+        else toast.success("Profile updated");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

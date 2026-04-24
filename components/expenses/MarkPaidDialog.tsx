@@ -14,10 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, inr } from "@/lib/utils";
-import {
-  markExpensePaid,
-  uploadExpenseDoc,
-} from "@/app/[locale]/(dashboard)/expenses/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { PAYMENT_MODES } from "@/lib/constants/expenses";
 import type { PaymentMode } from "@/lib/types/database";
 
@@ -74,13 +71,21 @@ export function MarkPaidDialog({
     setUploading(true);
     try {
       const b64 = await fileToBase64(file);
-      const res = await uploadExpenseDoc(file.name, b64, expenseId, "proof");
+      const res = await callAction<{ error?: string; path?: string }>(
+        "uploadExpenseDoc",
+        file.name,
+        b64,
+        expenseId,
+        "proof",
+      );
       if (res.error || !res.path) {
         toast.error(res.error ?? "Upload failed");
         return;
       }
       setProofs((prev) => [...prev, { path: res.path!, name: file.name }]);
       toast.success(`Attached ${file.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -113,24 +118,28 @@ export function MarkPaidDialog({
     }
 
     startTransition(async () => {
-      const res = await markExpensePaid({
-        expense_id: expenseId,
-        paid_at,
-        payment_mode,
-        payment_reference,
-        tds_rupees,
-        payment_proof_urls: proofs.map((p) => p.path),
-        notes,
-      });
-      if (res.error) {
-        toast.error(res.error);
-        return;
+      try {
+        const res = await callAction<{ error?: string }>("markExpensePaid", {
+          expense_id: expenseId,
+          paid_at,
+          payment_mode,
+          payment_reference,
+          tds_rupees,
+          payment_proof_urls: proofs.map((p) => p.path),
+          notes,
+        });
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success("Marked paid");
+        setOpen(false);
+        setProofs([]);
+        formRef.current?.reset();
+        onSuccess?.();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
       }
-      toast.success("Marked paid");
-      setOpen(false);
-      setProofs([]);
-      formRef.current?.reset();
-      onSuccess?.();
     });
   }
 

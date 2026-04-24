@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { agencySchema, agencyDefaults, type AgencyFormValues } from "@/lib/validations/agency";
-import { createAgency, updateAgency } from "@/app/[locale]/(dashboard)/agencies/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,9 +57,10 @@ export function AgencyForm({ existing }: Props) {
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
-        const result = existing
-          ? await updateAgency(existing.id, clean)
-          : await createAgency(clean);
+        const result = await callAction<{ error?: string; id?: string }>(
+          existing ? "updateAgency" : "createAgency",
+          ...(existing ? [existing.id, clean] : [clean]),
+        );
         if ("error" in result) { toast.error(result.error); return; }
         toast.success(existing ? "Agency updated" : "Agency created");
         router.push(`/agencies/${result.id}`);

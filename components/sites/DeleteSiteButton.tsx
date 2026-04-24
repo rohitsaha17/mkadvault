@@ -13,7 +13,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { deleteSite } from "@/app/[locale]/(dashboard)/sites/actions";
+import { callAction } from "@/lib/utils/call-action";
 
 interface Props {
   siteId: string;
@@ -29,15 +29,19 @@ export function DeleteSiteButton({ siteId, siteName, redirectAfter }: Props) {
 
   function handleDelete() {
     startTransition(async () => {
-      const result = await deleteSite(siteId);
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success("Site deleted");
-      setOpen(false);
-      if (redirectAfter) {
-        router.push("/sites");
+      try {
+        const result = await callAction<{ error?: string }>("deleteSite", siteId);
+        if (result.error) {
+          toast.error(result.error);
+          return;
+        }
+        toast.success("Site deleted");
+        setOpen(false);
+        if (redirectAfter) {
+          router.push("/sites");
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Delete failed");
       }
     });
   }

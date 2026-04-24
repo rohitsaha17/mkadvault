@@ -12,7 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, inr } from "@/lib/utils";
-import { createInvoice, getCampaignLineItems } from "@/app/[locale]/(dashboard)/billing/actions";
+import { callAction } from "@/lib/utils/call-action";
+// getCampaignLineItems is read-only (no mutation) and called on
+// focus — keep the direct Server Action import for it since it's
+// lower-risk than the create path. It could be moved to a GET
+// Route Handler later if it ever breaks.
+import { getCampaignLineItems } from "@/app/[locale]/(dashboard)/billing/actions";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import type { Client, Campaign, OrganizationBankAccount } from "@/lib/types/database";
 
@@ -250,7 +255,10 @@ export function InvoiceForm({
     const clean = sanitizeForTransport(finalValues);
     startTransition(async () => {
       try {
-        const result = await createInvoice(clean);
+        const result = await callAction<{ error?: string; id?: string }>(
+          "createInvoice",
+          clean,
+        );
         if ("error" in result) { toast.error(result.error); return; }
         toast.success(submitStatus === "draft" ? "Draft saved" : "Invoice created");
         router.push(`/billing/invoices/${result.id}`);

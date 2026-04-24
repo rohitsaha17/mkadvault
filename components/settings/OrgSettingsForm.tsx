@@ -8,7 +8,7 @@ import { Loader2, Upload, Trash2, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { updateOrganization } from "@/app/[locale]/(dashboard)/settings/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { orgSettingsSchema, type OrgSettingsFormValues } from "@/lib/validations/settings";
 import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
 import { BankAccountsManager } from "@/components/settings/BankAccountsManager";
@@ -111,9 +111,13 @@ export function OrgSettingsForm({ org, orgLogoSignedUrl, bankAccounts = [] }: Pr
 
   function onSubmit(values: OrgSettingsFormValues) {
     startTransition(async () => {
-      const res = await updateOrganization(values);
-      if (res.error) toast.error(res.error);
-      else toast.success("Organisation updated");
+      try {
+        const res = await callAction<{ error?: string }>("updateOrganization", values);
+        if (res.error) toast.error(res.error);
+        else toast.success("Organisation updated");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Save failed");
+      }
     });
   }
 

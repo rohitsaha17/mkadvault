@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { clientSchema, clientDefaults, type ClientFormValues } from "@/lib/validations/client";
-import { createClientRecord, updateClientRecord } from "@/app/[locale]/(dashboard)/clients/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,9 +91,10 @@ export function ClientForm({ existing }: Props) {
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
-        const result = existing
-          ? await updateClientRecord(existing.id, clean)
-          : await createClientRecord(clean);
+        const result = await callAction<{ error?: string; id?: string }>(
+          existing ? "updateClient" : "createClient",
+          ...(existing ? [existing.id, clean] : [clean]),
+        );
         if ("error" in result) { toast.error(result.error); return; }
         toast.success(existing ? "Client updated" : "Client created");
         router.push(`/clients/${result.id}`);

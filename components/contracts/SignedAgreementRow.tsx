@@ -8,7 +8,7 @@ import { format } from "date-fns";
 import { ExternalLink, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
-import { deleteSignedAgreement } from "@/app/[locale]/(dashboard)/contracts/actions";
+import { callAction } from "@/lib/utils/call-action";
 
 interface Props {
   id: string;
@@ -42,12 +42,16 @@ export function SignedAgreementRow({
   function handleDelete() {
     if (!window.confirm(`Delete "${title}"? The uploaded file will stay in storage but the record will be removed.`)) return;
     startTransition(async () => {
-      const res = await deleteSignedAgreement(id);
-      if (res.error) {
-        toast.error(res.error);
-        return;
+      try {
+        const res = await callAction<{ error?: string }>("deleteSignedAgreement", id);
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success("Agreement deleted");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Delete failed");
       }
-      toast.success("Agreement deleted");
     });
   }
 

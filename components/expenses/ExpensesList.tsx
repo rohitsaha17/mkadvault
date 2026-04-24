@@ -31,10 +31,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { MarkPaidDialog } from "./MarkPaidDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { inr, fmt, cn } from "@/lib/utils";
-import {
-  setExpenseStatus,
-  deleteExpense,
-} from "@/app/[locale]/(dashboard)/expenses/actions";
+import { callAction } from "@/lib/utils/call-action";
 import {
   expenseCategoryLabel,
   paymentModeLabel,
@@ -198,29 +195,37 @@ function ExpenseRowActions({
 
   function doSetStatus(status: "pending" | "approved" | "rejected") {
     startTransition(async () => {
-      const res = await setExpenseStatus({
-        expense_id: expense.id,
-        status,
-      });
-      if (res.error) {
-        toast.error(res.error);
-        return;
+      try {
+        const res = await callAction<{ error?: string }>("setExpenseStatus", {
+          expense_id: expense.id,
+          status,
+        });
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success(status === "approved" ? "Approved" : "Updated");
+        onChange();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Update failed");
       }
-      toast.success(status === "approved" ? "Approved" : "Updated");
-      onChange();
     });
   }
 
   function doDelete() {
     startTransition(async () => {
-      const res = await deleteExpense(expense.id);
-      if (res.error) {
-        toast.error(res.error);
-        return;
+      try {
+        const res = await callAction<{ error?: string }>("deleteExpense", expense.id);
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+        toast.success("Removed");
+        setConfirmingDelete(false);
+        onChange();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Delete failed");
       }
-      toast.success("Removed");
-      setConfirmingDelete(false);
-      onChange();
     });
   }
 
