@@ -83,6 +83,9 @@ export function CampaignJobsTab({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Row click opens a details panel — see JobDetailsDialog below.
+  const [detailJobId, setDetailJobId] = useState<string | null>(null);
+  const detailJob = jobs.find((j) => j.id === detailJobId) ?? null;
 
   // ── Row actions ────────────────────────────────────────────────────────
   function handleMarkComplete(job: CampaignJob) {
@@ -182,6 +185,7 @@ export function CampaignJobsTab({
           <table className="w-full text-sm min-w-[900px]">
             <thead className="bg-muted">
               <tr>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">ID</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Job</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Site</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Source / Vendor</th>
@@ -197,7 +201,19 @@ export function CampaignJobsTab({
                 const site = siteOptions.find((s) => s.campaign_site_id === job.campaign_site_id);
                 const isBusy = busyId === job.id;
                 return (
-                  <tr key={job.id} className="hover:bg-muted/30">
+                  <tr
+                    key={job.id}
+                    className="cursor-pointer hover:bg-muted/30"
+                    onClick={() => setDetailJobId(job.id)}
+                  >
+                    <td className="px-4 py-3">
+                      <code
+                        className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground"
+                        title={job.id}
+                      >
+                        {job.id.slice(0, 8)}
+                      </code>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-start gap-2">
                         <Icon className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
@@ -259,6 +275,7 @@ export function CampaignJobsTab({
                             <Link
                               href={`/finance/requests`}
                               className="text-[11px] text-primary hover:underline inline-flex items-center gap-0.5"
+                              onClick={(e) => e.stopPropagation()}
                             >
                               Payment req
                               <ExternalLink className="h-3 w-3" />
@@ -272,7 +289,10 @@ export function CampaignJobsTab({
                     <td className="px-4 py-3">
                       <StatusBadge status={job.status} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <div className="flex items-center justify-end gap-1">
                         {isBusy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                         {canEdit && job.status !== "completed" && job.status !== "cancelled" && (
@@ -307,6 +327,15 @@ export function CampaignJobsTab({
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Job details dialog — click any row to open */}
+      {detailJob && (
+        <JobDetailsDialog
+          job={detailJob}
+          site={siteOptions.find((s) => s.campaign_site_id === detailJob.campaign_site_id)}
+          onClose={() => setDetailJobId(null)}
+        />
       )}
 
       {/* Add Job dialog */}
@@ -633,6 +662,127 @@ function AddJobDialog({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ─── Job details dialog ──────────────────────────────────────────────
+// Opened by clicking any job row. Shows the full UUIDs (job, site,
+// campaign_site, linked expense) alongside the human-readable fields,
+// so ops / finance can cross-reference when something's off.
+function JobDetailsDialog({
+  job,
+  site,
+  onClose,
+}: {
+  job: CampaignJob;
+  site: SiteOption | undefined;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg max-h-[85vh] overflow-auto rounded-xl border border-border bg-background p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              {JOB_TYPE_LABEL[job.job_type]} job
+            </h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">{job.description}</p>
+          </div>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <dl className="space-y-3 text-sm">
+          <DetailRow label="Job ID" value={job.id} mono />
+          <DetailRow label="Status" value={<StatusBadge status={job.status} />} />
+          {site && (
+            <>
+              <DetailRow label="Site" value={`${site.site_name}${site.site_code ? ` (${site.site_code})` : ""}`} />
+              <DetailRow label="Site ID" value={site.site_id} mono />
+              <DetailRow label="Campaign-site ID" value={job.campaign_site_id ?? "—"} mono />
+            </>
+          )}
+          <DetailRow
+            label="Source"
+            value={
+              job.source === "internal"
+                ? "Internal team"
+                : `External — ${job.vendor_name ?? "vendor"}`
+            }
+          />
+          {job.vendor_agency_id && (
+            <DetailRow label="Vendor agency ID" value={job.vendor_agency_id} mono />
+          )}
+          {job.vendor_contact && (
+            <DetailRow label="Vendor contact" value={job.vendor_contact} />
+          )}
+          {job.scheduled_date && (
+            <DetailRow label="Scheduled" value={fmt(job.scheduled_date)} />
+          )}
+          {job.completed_date && (
+            <DetailRow label="Completed" value={fmt(job.completed_date)} />
+          )}
+          {job.cost_paise != null && (
+            <DetailRow label="Cost" value={inr(job.cost_paise)} />
+          )}
+          {job.expense_id ? (
+            <DetailRow
+              label="Payment request"
+              value={
+                <Link
+                  href="/finance/requests"
+                  className="text-primary hover:underline inline-flex items-center gap-1 font-mono text-xs"
+                >
+                  {job.expense_id}
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+              }
+            />
+          ) : (
+            <DetailRow label="Payment request" value="— none linked" />
+          )}
+          {job.notes && (
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-muted-foreground">Notes</dt>
+              <dd className="mt-1 whitespace-pre-wrap text-sm text-foreground">{job.notes}</dd>
+            </div>
+          )}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <dt className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          "min-w-0 flex-1 break-all text-right text-sm text-foreground",
+          mono && "font-mono text-xs",
+        )}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

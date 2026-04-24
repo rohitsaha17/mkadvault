@@ -104,9 +104,17 @@ export function ExpensesList({
             <TableRow key={e.id}>
               <TableCell className="max-w-[280px]">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {e.description}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {e.description}
+                    </p>
+                    <code
+                      className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+                      title={`ID: ${e.id}`}
+                    >
+                      {e.id.slice(0, 8)}
+                    </code>
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {e.needed_by
                       ? `Needed by ${fmt(e.needed_by)}`

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { Loader2, CheckCircle2, XCircle, Clock } from "lucide-react";
-import { reviewChangeRequest } from "@/app/[locale]/(dashboard)/campaigns/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { CampaignChangeRequest } from "@/lib/types/database";
@@ -34,29 +34,45 @@ export function ChangeRequestsTab({ requests, userRoles }: Props) {
 
   function handleApprove(requestId: string) {
     startTransition(async () => {
-      const result = await reviewChangeRequest(requestId, { status: "approved" });
-      if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast.success("Change request approved — campaign reverted to Enquiry");
-        router.refresh();
+      try {
+        const result = await callAction<{ error?: string }>(
+          "reviewCampaignChangeRequest",
+          requestId,
+          { status: "approved" },
+        );
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.success("Change request approved");
+          router.refresh();
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Approve failed");
       }
     });
   }
 
   function handleReject(requestId: string) {
     startTransition(async () => {
-      const result = await reviewChangeRequest(requestId, {
-        status: "rejected",
-        rejection_reason: rejectionReason.trim() || undefined,
-      });
-      if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast.success("Change request rejected");
-        setReviewingId(null);
-        setRejectionReason("");
-        router.refresh();
+      try {
+        const result = await callAction<{ error?: string }>(
+          "reviewCampaignChangeRequest",
+          requestId,
+          {
+            status: "rejected",
+            rejection_reason: rejectionReason.trim() || undefined,
+          },
+        );
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.success("Change request rejected");
+          setReviewingId(null);
+          setRejectionReason("");
+          router.refresh();
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Reject failed");
       }
     });
   }

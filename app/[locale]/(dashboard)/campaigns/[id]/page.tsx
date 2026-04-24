@@ -248,9 +248,13 @@ export default async function CampaignDetailPage({
   const servicesTotal = campServices.reduce((sum, cs) => sum + (cs.total_paise ?? 0), 0);
   const totalValue = campaign.total_value_paise ?? (sitesTotal + servicesTotal);
 
+  // Services and Jobs covered the same concept (work-orders tied to a
+  // campaign / site). Services was dropped — Jobs is the single
+  // source of truth going forward. The campaign_services table stays
+  // in the DB for now so existing invoices + line items keep working;
+  // it's just no longer surfaced in the UI.
   const TABS = [
     { key: "sites", label: `Sites (${campSites.length})` },
-    { key: "services", label: `Services (${campServices.length})` },
     { key: "jobs", label: `Jobs (${jobs.length})` },
     { key: "photos", label: `Photos (${campaignPhotos.length})` },
     { key: "invoices", label: `Invoices (${invoices.length})` },
@@ -281,6 +285,14 @@ export default async function CampaignDetailPage({
                 {campaign.campaign_code}
               </span>
             )}
+            {/* UUID shown alongside the friendly code so ops can copy
+                the exact row id when cross-referencing. */}
+            <span
+              className="font-mono text-[10px] text-muted-foreground/70"
+              title={`Campaign ID: ${campaign.id}`}
+            >
+              {campaign.id.slice(0, 8)}
+            </span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
             {campaign.client && (
@@ -419,45 +431,7 @@ export default async function CampaignDetailPage({
               )
             )}
 
-            {/* Services tab */}
-            {tab === "services" && (
-              campServices.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border py-10 text-center">
-                  <Wrench className="mx-auto mb-2 h-8 w-8 text-muted-foreground/60" />
-                  <p className="text-sm text-muted-foreground">No services added.</p>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted">
-                      <tr>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Service</th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Qty</th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Rate</th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {campServices.map((cs) => (
-                        <tr key={cs.id} className="hover:bg-muted/50 transition-colors">
-                          <td className="px-4 py-3">
-                            <p className="font-medium text-foreground">
-                              {SERVICE_TYPE_LABELS[cs.service_type] ?? cs.service_type}
-                            </p>
-                            {cs.description && (
-                              <p className="mt-0.5 text-xs text-muted-foreground">{cs.description}</p>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground tabular-nums">{cs.quantity}</td>
-                          <td className="px-4 py-3 text-foreground tabular-nums">{inr(cs.rate_paise)}</td>
-                          <td className="px-4 py-3 font-medium text-foreground tabular-nums">{inr(cs.total_paise)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            )}
+            {/* Services tab removed — see TABS comment. */}
 
             {/* Jobs tab */}
             {tab === "jobs" && (
@@ -518,8 +492,8 @@ export default async function CampaignDetailPage({
                     <p className="mt-1 text-2xl font-semibold text-foreground tabular-nums">{campSites.length}</p>
                   </div>
                   <div className="rounded-xl border border-border bg-card p-4">
-                    <p className="text-xs text-muted-foreground">Total Services</p>
-                    <p className="mt-1 text-2xl font-semibold text-foreground tabular-nums">{campServices.length}</p>
+                    <p className="text-xs text-muted-foreground">Total Jobs</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground tabular-nums">{jobs.length}</p>
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-card p-5 space-y-3 text-sm">
@@ -529,10 +503,15 @@ export default async function CampaignDetailPage({
                         <span>Sites ({campSites.length})</span>
                         <span className="tabular-nums text-foreground">{inr(sitesTotal)}</span>
                       </div>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Services ({campServices.length})</span>
-                        <span className="tabular-nums text-foreground">{inr(servicesTotal)}</span>
-                      </div>
+                      {/* Services total is preserved (legacy campaign_services rows
+                          may exist for old invoices) but hidden from the UI unless
+                          non-zero. The tab itself is gone. */}
+                      {servicesTotal > 0 && (
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>Services (legacy, {campServices.length})</span>
+                          <span className="tabular-nums text-foreground">{inr(servicesTotal)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-semibold text-foreground border-t border-border pt-3">
                         <span>Total</span>
                         <span className="tabular-nums">{inr(totalValue)}</span>
@@ -588,8 +567,8 @@ export default async function CampaignDetailPage({
                 <dd className="tabular-nums text-foreground">{campSites.length}</dd>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <dt className="text-muted-foreground">Services</dt>
-                <dd className="tabular-nums text-foreground">{campServices.length}</dd>
+                <dt className="text-muted-foreground">Jobs</dt>
+                <dd className="tabular-nums text-foreground">{jobs.length}</dd>
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-border pt-2.5">
                 <dt className="text-muted-foreground">Total Value</dt>

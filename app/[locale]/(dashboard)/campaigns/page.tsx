@@ -283,12 +283,20 @@ export default async function CampaignsPage({
                 {campaigns.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell>
-                      <Link
-                        href={`/campaigns/${c.id}`}
-                        className="font-medium text-foreground hover:text-primary transition-colors"
-                      >
-                        {c.campaign_name}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/campaigns/${c.id}`}
+                          className="font-medium text-foreground hover:text-primary transition-colors"
+                        >
+                          {c.campaign_name}
+                        </Link>
+                        <code
+                          className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+                          title={`ID: ${c.id}`}
+                        >
+                          {c.id.slice(0, 8)}
+                        </code>
+                      </div>
                       {c.campaign_code && (
                         <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
                           {c.campaign_code}

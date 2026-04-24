@@ -3,7 +3,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, PenLine } from "lucide-react";
-import { createChangeRequest } from "@/app/[locale]/(dashboard)/campaigns/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -32,14 +32,22 @@ export function ChangeRequestButton({ campaignId, hasPendingRequest }: Props) {
       return;
     }
     startTransition(async () => {
-      const result = await createChangeRequest(campaignId, { reason: reason.trim() });
-      if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast.success("Change request submitted for approval");
-        setOpen(false);
-        setReason("");
-        router.refresh();
+      try {
+        const result = await callAction<{ error?: string }>(
+          "createCampaignChangeRequest",
+          campaignId,
+          { reason: reason.trim() },
+        );
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.success("Change request submitted for approval");
+          setOpen(false);
+          setReason("");
+          router.refresh();
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Submit failed");
       }
     });
   }

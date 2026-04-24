@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CalendarPlus, FileText, Receipt, Loader2, Trash2 } from "lucide-react";
-import { extendCampaign } from "@/app/[locale]/(dashboard)/campaigns/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CampaignStatus } from "@/lib/types/database";
@@ -61,11 +61,19 @@ export function CampaignDetailActions({
   function handleExtend() {
     if (!newEndDate) { toast.error("Please select a new end date"); return; }
     startTransition(async () => {
-      const result = await extendCampaign(campaignId, newEndDate);
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("Campaign extended");
-      setShowExtend(false);
-      router.refresh();
+      try {
+        const result = await callAction<{ error?: string }>(
+          "extendCampaign",
+          campaignId,
+          newEndDate,
+        );
+        if (result.error) { toast.error(result.error); return; }
+        toast.success("Campaign extended");
+        setShowExtend(false);
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Extend failed");
+      }
     });
   }
 

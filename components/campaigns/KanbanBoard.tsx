@@ -3,7 +3,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Link from "next/link";
-import { updateCampaignStatus } from "@/app/[locale]/(dashboard)/campaigns/actions";
+import { callAction } from "@/lib/utils/call-action";
 import { fmt, inr } from "@/lib/utils";
 import type { Campaign, CampaignStatus } from "@/lib/types/database";
 
@@ -81,14 +81,23 @@ export function KanbanBoard({ campaigns }: Props) {
     if (campaign.status === newStatus) { setDraggingId(null); return; }
 
     startTransition(async () => {
-      const result = await updateCampaignStatus(id, newStatus);
-      if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast.success(`Moved to ${COLUMNS.find((c) => c.status === newStatus)?.label}`);
-        router.refresh();
+      try {
+        const result = await callAction<{ error?: string }>(
+          "updateCampaignStatus",
+          id,
+          newStatus,
+        );
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.success(`Moved to ${COLUMNS.find((c) => c.status === newStatus)?.label}`);
+          router.refresh();
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Update failed");
+      } finally {
+        setDraggingId(null);
       }
-      setDraggingId(null);
     });
   }
 
