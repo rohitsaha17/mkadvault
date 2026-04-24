@@ -17,6 +17,7 @@ import {
   XCircle,
   Trash2,
   Paperclip,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,9 +106,15 @@ export function ExpensesList({
               <TableCell className="max-w-[280px]">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-foreground truncate">
+                    {/* Description is the anchor into the full detail
+                        page — users want a clear drill-down from the
+                        list, matching the campaigns/invoices UX. */}
+                    <Link
+                      href={`/finance/requests/${e.id}`}
+                      className="text-sm font-medium text-foreground hover:text-primary hover:underline truncate"
+                    >
                       {e.description}
-                    </p>
+                    </Link>
                     <code
                       className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
                       title={`ID: ${e.id}`}
@@ -244,6 +251,15 @@ function ExpenseRowActions({
   return (
     <div className="flex items-center justify-end gap-1">
       {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+
+      {/* Always-visible "view details" entry — same drill-down as the
+          description link but also discoverable inside the action
+          column. */}
+      <Link href={`/finance/requests/${expense.id}`}>
+        <Button size="icon-sm" variant="ghost" aria-label="View details" title="View details">
+          <Eye className="h-3.5 w-3.5" />
+        </Button>
+      </Link>
 
       {isSettleable && (
         <MarkPaidDialog
