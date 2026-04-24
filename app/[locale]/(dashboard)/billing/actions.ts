@@ -20,16 +20,26 @@ async function getOrgAndUser() {
 function str(v?: string | null) { return v?.trim() || null; }
 function n(v: number | undefined | null) { return v != null ? Math.round(v * 100) : 0; }
 
-// Receipt number generator: RCP-YYYYMM-NNNN
-async function generateReceiptNumber(supabase: Awaited<ReturnType<typeof createClient>>, orgId: string, date: string): Promise<string> {
+// Receipt number generator: MKACS-RCP-YYYYMM-NNNN (migration 038
+// adopted MKACS- as the org-wide prefix on every sequential code).
+// The count() scope includes BOTH the new prefix and the legacy
+// RCP-… prefix for the same month so the sequence stays monotonic
+// across the prefix switch.
+async function generateReceiptNumber(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  date: string,
+): Promise<string> {
   const ym = date.slice(0, 7).replace("-", "");
   const { count } = await supabase
     .from("payments_received")
     .select("id", { count: "exact", head: true })
     .eq("organization_id", orgId)
-    .ilike("receipt_number", `RCP-${ym}-%`);
+    .or(
+      `receipt_number.ilike.MKACS-RCP-${ym}-%,receipt_number.ilike.RCP-${ym}-%`,
+    );
   const seq = (count ?? 0) + 1;
-  return `RCP-${ym}-${String(seq).padStart(4, "0")}`;
+  return `MKACS-RCP-${ym}-${String(seq).padStart(4, "0")}`;
 }
 
 // ─── Invoice line item schema ─────────────────────────────────────────────────
