@@ -194,19 +194,27 @@ export async function DELETE(req: NextRequest) {
 
   const supabase = await createClient();
 
-  // Soft-delete + clear is_primary so the partial unique index stays happy
-  // and this row stops showing up in the invoice dropdown.
-  const { error } = await supabase
+  // Two-step soft-delete:
+  //   (1) clear is_primary / is_active via a regular UPDATE — row is
+  //       still SELECT-visible so RLS is happy.
+  //   (2) call the SECURITY DEFINER soft_delete_row RPC (migration 037)
+  //       to set deleted_at without tripping the RETURNING-vs-SELECT
+  //       policy clash that broke direct UPDATEs.
+  const { error: flagsErr } = await supabase
     .from("organization_bank_accounts")
     .update({
-      deleted_at: new Date().toISOString(),
       is_primary: false,
       is_active: false,
       updated_by: g.userId,
     })
     .eq("id", id)
     .eq("organization_id", g.orgId);
+  if (flagsErr) return jsonErr(flagsErr.message);
 
+  const { error } = await supabase.rpc("soft_delete_row", {
+    p_table: "organization_bank_accounts",
+    p_id: id,
+  });
   if (error) return jsonErr(error.message);
   return NextResponse.json({ success: true });
 }

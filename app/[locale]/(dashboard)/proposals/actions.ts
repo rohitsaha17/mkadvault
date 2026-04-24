@@ -180,11 +180,10 @@ export async function deleteProposal(id: string): Promise<{ error?: string }> {
     const ctx = await getCtx();
     if (!ctx) return { error: "Not authenticated" };
 
-    const { error } = await ctx.supabase
-      .from("proposals")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", id);
-
+    const { error } = await ctx.supabase.rpc("soft_delete_row", {
+      p_table: "proposals",
+      p_id: id,
+    });
     if (error) return { error: error.message };
     revalidatePath("/proposals");
     return {};

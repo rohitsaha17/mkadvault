@@ -306,11 +306,10 @@ export async function deleteSite(siteId: string): Promise<{ error?: string }> {
       return { error: "Cannot delete site with active campaigns" };
     }
 
-    const { error } = await supabase
-      .from("sites")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", siteId);
-
+    const { error } = await supabase.rpc("soft_delete_row", {
+      p_table: "sites",
+      p_id: siteId,
+    });
     if (error) return { error: error.message };
 
     revalidatePath("/sites");

@@ -141,11 +141,12 @@ export async function deleteClientRecord(id: string): Promise<{ error?: string }
       return { error: "Cannot delete client with active campaigns" };
     }
 
-    const { error } = await ctx.supabase
-      .from("clients")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", id);
-
+    // RLS + RETURNING clash forces us through the generic soft-delete
+    // RPC (migration 037). See expenses/actions.ts for the full story.
+    const { error } = await ctx.supabase.rpc("soft_delete_row", {
+      p_table: "clients",
+      p_id: id,
+    });
     if (error) return { error: error.message };
     revalidatePath("/clients");
     return {};

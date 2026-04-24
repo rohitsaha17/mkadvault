@@ -128,11 +128,10 @@ export async function deleteLandowner(id: string): Promise<{ error?: string }> {
       return { error: "Cannot delete landowner with active contracts" };
     }
 
-    const { error } = await ctx.supabase
-      .from("landowners")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", id);
-
+    const { error } = await ctx.supabase.rpc("soft_delete_row", {
+      p_table: "landowners",
+      p_id: id,
+    });
     if (error) return { error: error.message };
     revalidatePath("/landowners");
     return {};

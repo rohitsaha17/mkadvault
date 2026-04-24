@@ -312,14 +312,15 @@ export async function deleteExpense(
       return { error: "You can only delete requests you created" };
     }
 
-    const { error } = await supabase
-      .from("site_expenses")
-      .update({
-        deleted_at: new Date().toISOString(),
-        updated_by: who.ctx.userId,
-      })
-      .eq("id", expenseId);
-
+    // Route through the SECURITY DEFINER RPC (migration 037). A direct
+    // UPDATE from the authenticated role fails: the SELECT policy
+    // filters `deleted_at IS NULL`, PostgREST applies it to the
+    // RETURNING rows, and the just-deleted row fails. The RPC bypasses
+    // RLS for the UPDATE itself while still verifying org match in SQL.
+    const { error } = await supabase.rpc("soft_delete_row", {
+      p_table: "site_expenses",
+      p_id: expenseId,
+    });
     if (error) return { error: error.message };
 
     revalidateFinance();

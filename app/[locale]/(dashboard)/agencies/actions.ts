@@ -117,11 +117,10 @@ export async function deleteAgency(id: string): Promise<{ error?: string }> {
       return { error: "Cannot delete agency with active contracts" };
     }
 
-    const { error } = await ctx.supabase
-      .from("partner_agencies")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", id);
-
+    const { error } = await ctx.supabase.rpc("soft_delete_row", {
+      p_table: "partner_agencies",
+      p_id: id,
+    });
     if (error) return { error: error.message };
     revalidatePath("/agencies");
     return {};

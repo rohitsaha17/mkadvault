@@ -372,10 +372,13 @@ export async function DELETE(request: Request) {
     return jsonErr("Cross-organisation access blocked");
   }
 
-  const { error: delErr } = await supabase
-    .from("campaign_jobs")
-    .update({ deleted_at: new Date().toISOString(), updated_by: userId })
-    .eq("id", id);
+  // soft_delete_row RPC bypasses the RETURNING + SELECT-policy clash
+  // that breaks direct authenticated UPDATEs on tables filtered by
+  // `deleted_at IS NULL`. See migration 037.
+  const { error: delErr } = await supabase.rpc("soft_delete_row", {
+    p_table: "campaign_jobs",
+    p_id: id,
+  });
   if (delErr) return jsonErr(`Delete failed: ${delErr.message}`);
 
   await supabase.from("campaign_activity_log").insert({

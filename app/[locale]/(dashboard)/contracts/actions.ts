@@ -243,12 +243,22 @@ export async function deleteContract(id: string): Promise<{ error?: string }> {
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
-    const { error } = await ctx.supabase
+    // Two-step: set status='terminated' via a normal UPDATE first
+    // (doesn't flip the row out of SELECT visibility, so RLS is fine),
+    // then soft-delete via the RPC that bypasses the RETURNING-vs-SELECT
+    // clash. See migration 037.
+    const { error: statusErr } = await ctx.supabase
       .from("contracts")
-      .update({ deleted_at: new Date().toISOString(), status: "terminated" })
+      .update({ status: "terminated" })
       .eq("id", id);
+    if (statusErr) return { error: statusErr.message };
 
+    const { error } = await ctx.supabase.rpc("soft_delete_row", {
+      p_table: "contracts",
+      p_id: id,
+    });
     if (error) return { error: error.message };
+
     revalidatePath("/contracts");
     return {};
   } catch (err) {
@@ -459,10 +469,10 @@ export async function deleteSignedAgreement(
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
-    const { error } = await ctx.supabase
-      .from("signed_agreements")
-      .update({ deleted_at: new Date().toISOString(), updated_by: ctx.user.id })
-      .eq("id", id);
+    const { error } = await ctx.supabase.rpc("soft_delete_row", {
+      p_table: "signed_agreements",
+      p_id: id,
+    });
     if (error) return { error: error.message };
     revalidatePath("/contracts/signed");
     return {};

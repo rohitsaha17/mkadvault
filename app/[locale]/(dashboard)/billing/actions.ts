@@ -190,11 +190,10 @@ export async function deleteInvoice(id: string): Promise<{ error?: string }> {
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
-    const { error } = await ctx.supabase
-      .from("invoices")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", id);
-
+    const { error } = await ctx.supabase.rpc("soft_delete_row", {
+      p_table: "invoices",
+      p_id: id,
+    });
     if (error) return { error: error.message };
     revalidatePath("/billing/invoices");
     return {};
