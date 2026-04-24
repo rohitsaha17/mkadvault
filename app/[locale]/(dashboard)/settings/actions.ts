@@ -139,9 +139,16 @@ export async function updateOrganization(data: {
         .from("organizations")
         .update({ proposal_terms_template: value })
         .eq("id", profile.org_id);
-      // 42703 = undefined_column; ignore so the save as a whole still
-      // succeeds when migration 026 hasn't been applied.
-      if (tplErr && tplErr.code !== "42703") return { error: tplErr.message };
+      // Two codes mean the same thing in practice: migration 026 isn't
+      // applied so the column isn't addressable.
+      //   42703    = Postgres "undefined_column"
+      //   PGRST204 = PostgREST "column not in schema cache"
+      // Either way, skip the template write instead of failing the whole save.
+      const missingColumn =
+        tplErr?.code === "42703" ||
+        tplErr?.code === "PGRST204" ||
+        /proposal_terms_template/.test(tplErr?.message ?? "");
+      if (tplErr && !missingColumn) return { error: tplErr.message };
     }
     revalidatePath("/settings");
     revalidatePath("/proposals");
