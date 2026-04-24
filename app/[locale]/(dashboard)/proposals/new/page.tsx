@@ -5,7 +5,7 @@ import { getSession } from "@/lib/supabase/session";
 import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { ProposalWizard } from "@/components/proposals/ProposalWizard";
 import { PageHeader } from "@/components/shared/PageHeader";
-import type { Client, Organization } from "@/lib/types/database";
+import type { Client, Organization, PartnerAgency } from "@/lib/types/database";
 
 export const metadata = { title: "Create Proposal" };
 
@@ -50,6 +50,7 @@ export default async function NewProposalPage({
     { data: sitesData },
     { data: photosData },
     { data: clientsData },
+    { data: agenciesData },
     { data: orgData },
   ] = await Promise.all([
     supabase
@@ -66,6 +67,13 @@ export default async function NewProposalPage({
       .select("id, company_name")
       .is("deleted_at", null)
       .order("company_name"),
+    // Partner agencies — valid recipients for a rate card / proposal
+    // alongside direct clients. Migration 039 added proposals.agency_id.
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .is("deleted_at", null)
+      .order("agency_name"),
     supabase
       .from("organizations")
       .select("name, address, city, state, pin_code, gstin, phone, email, logo_url, proposal_terms_template")
@@ -111,6 +119,7 @@ export default async function NewProposalPage({
   }));
 
   const clients = (clientsData ?? []) as Pick<Client, "id" | "company_name">[];
+  const agencies = (agenciesData ?? []) as Pick<PartnerAgency, "id" | "agency_name">[];
   const orgRaw = orgData as
     | (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email">
         & { logo_url?: string | null; proposal_terms_template?: string | null })
@@ -160,6 +169,7 @@ export default async function NewProposalPage({
       <ProposalWizard
         sites={sites}
         clients={clients}
+        agencies={agencies}
         org={org}
         orgLogoUrl={orgLogoUrl}
         orgTermsTemplate={orgTermsTemplate}

@@ -721,7 +721,13 @@ export interface Proposal {
   deleted_at: string | null;
 
   proposal_name: string;
+  // Recipient can be a direct client or a partner agency (see
+  // migration 039). recipient_type is the explicit hint for the UI;
+  // exactly one of client_id / agency_id is populated when
+  // recipient_type is set, both NULL otherwise.
   client_id: string | null;
+  agency_id: string | null;
+  recipient_type: "client" | "agency" | null;
 
   template_type: TemplateType;
   show_rates: ShowRatesType;

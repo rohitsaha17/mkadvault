@@ -23,6 +23,7 @@ export const metadata = { title: "Proposals" };
 
 interface ProposalRow extends Proposal {
   client?: { company_name: string } | null;
+  agency?: { agency_name: string } | null;
 }
 
 export default async function ProposalsPage({
@@ -45,7 +46,7 @@ export default async function ProposalsPage({
   const { data, count } = await supabase
     .from("proposals")
     .select(
-      "id, proposal_name, status, template_type, created_at, updated_at, client_id, client:clients(company_name)",
+      "id, proposal_name, status, template_type, created_at, updated_at, client_id, agency_id, recipient_type, client:clients(company_name), agency:partner_agencies(agency_name)",
       { count: "exact" }
     )
     .is("deleted_at", null)
@@ -108,7 +109,7 @@ export default async function ProposalsPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>Proposal Name</TableHead>
-                  <TableHead>Client</TableHead>
+                  <TableHead>Recipient</TableHead>
                   <TableHead className="text-right">Sites</TableHead>
                   <TableHead>Layout</TableHead>
                   <TableHead>Status</TableHead>
@@ -128,8 +129,20 @@ export default async function ProposalsPage({
                       </Link>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {p.client?.company_name ?? (
-                        <span className="text-xs text-muted-foreground/60">No client</span>
+                      {/* Recipient can be a partner agency OR a client;
+                          show whichever is populated (migration 039). */}
+                      {p.agency?.agency_name ? (
+                        <span>
+                          {p.agency.agency_name}
+                          <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">· Agency</span>
+                        </span>
+                      ) : p.client?.company_name ? (
+                        <span>
+                          {p.client.company_name}
+                          <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">· Client</span>
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/60">No recipient</span>
                       )}
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground tabular-nums">

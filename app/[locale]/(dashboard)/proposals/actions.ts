@@ -29,7 +29,12 @@ const proposalSiteSchema = z.object({
 
 const proposalSchema = z.object({
   proposal_name: z.string().min(1, "Proposal name required"),
-  client_id: z.string().uuid().optional(),
+  // Recipient can be either a client or a partner agency (migration 039).
+  // The wizard sends null when the recipient isn't picked (valid — rate
+  // cards are often drafted with no specific recipient).
+  recipient_type: z.enum(["client", "agency"]).nullable().optional(),
+  client_id: z.string().uuid().nullable().optional(),
+  agency_id: z.string().uuid().nullable().optional(),
   template_type: z.enum(["grid", "list", "one_per_page", "compact"]),
   show_rates: z.enum(["exact", "range", "request_quote", "hidden"]),
   show_photos: z.boolean(),
@@ -68,7 +73,11 @@ export async function createProposal(values: unknown): Promise<{ error: string }
         created_by: ctx.user.id,
         updated_by: ctx.user.id,
         proposal_name: d.proposal_name,
-        client_id: d.client_id ?? null,
+        recipient_type: d.recipient_type ?? null,
+        // Only the id matching recipient_type survives — defensive
+        // enforcement so we never end up with both columns populated.
+        client_id: d.recipient_type === "client" ? (d.client_id ?? null) : null,
+        agency_id: d.recipient_type === "agency" ? (d.agency_id ?? null) : null,
         template_type: d.template_type,
         show_rates: d.show_rates,
         show_photos: d.show_photos,
@@ -128,7 +137,9 @@ export async function updateProposal(id: string, values: unknown): Promise<{ err
       .update({
         updated_by: ctx.user.id,
         proposal_name: d.proposal_name,
-        client_id: d.client_id ?? null,
+        recipient_type: d.recipient_type ?? null,
+        client_id: d.recipient_type === "client" ? (d.client_id ?? null) : null,
+        agency_id: d.recipient_type === "agency" ? (d.agency_id ?? null) : null,
         template_type: d.template_type,
         show_rates: d.show_rates,
         show_photos: d.show_photos,
@@ -220,7 +231,9 @@ export async function duplicateProposal(id: string): Promise<{ error?: string; i
         created_by: ctx.user.id,
         updated_by: ctx.user.id,
         proposal_name: `${original.proposal_name} (Copy)`,
+        recipient_type: original.recipient_type,
         client_id: original.client_id,
+        agency_id: original.agency_id,
         template_type: original.template_type,
         show_rates: original.show_rates,
         show_photos: original.show_photos,

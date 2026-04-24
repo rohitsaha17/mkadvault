@@ -5,7 +5,7 @@ import { getSession } from "@/lib/supabase/session";
 import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import { ProposalWizard } from "@/components/proposals/ProposalWizard";
 import { PageHeader } from "@/components/shared/PageHeader";
-import type { Client, Organization, Proposal, ProposalSite } from "@/lib/types/database";
+import type { Client, Organization, PartnerAgency, Proposal, ProposalSite } from "@/lib/types/database";
 import type { SiteForProposal } from "../../new/page";
 
 export const metadata = { title: "Edit Proposal" };
@@ -30,6 +30,7 @@ export default async function EditProposalPage({
     { data: sitesData },
     { data: photosData },
     { data: clientsData },
+    { data: agenciesData },
     { data: orgData },
   ] = await Promise.all([
     supabase.from("proposals").select("*").eq("id", id).is("deleted_at", null).single(),
@@ -37,6 +38,8 @@ export default async function EditProposalPage({
     supabase.from("sites").select("id, site_code, name, media_type, status, city, state, address, width_ft, height_ft, total_sqft, base_rate_paise, illumination, facing, visibility_distance_m").is("deleted_at", null).order("city").order("name"),
     supabase.from("site_photos").select("site_id, photo_url").eq("is_primary", true),
     supabase.from("clients").select("id, company_name").is("deleted_at", null).order("company_name"),
+    // Partner agencies — alternative recipient for a proposal (migration 039).
+    supabase.from("partner_agencies").select("id, agency_name").is("deleted_at", null).order("agency_name"),
     supabase.from("organizations").select("name, address, city, state, pin_code, gstin, phone, email, logo_url, proposal_terms_template").eq("id", profile.org_id).single(),
   ]);
 
@@ -79,6 +82,7 @@ export default async function EditProposalPage({
   }));
 
   const clients = (clientsData ?? []) as Pick<Client, "id" | "company_name">[];
+  const agencies = (agenciesData ?? []) as Pick<PartnerAgency, "id" | "agency_name">[];
   const orgRaw = orgData as
     | (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email">
         & { logo_url?: string | null; proposal_terms_template?: string | null })
@@ -119,6 +123,7 @@ export default async function EditProposalPage({
       <ProposalWizard
         sites={sites}
         clients={clients}
+        agencies={agencies}
         org={org}
         orgLogoUrl={orgLogoUrl}
         orgTermsTemplate={orgTermsTemplate}

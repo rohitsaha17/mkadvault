@@ -65,7 +65,7 @@ export default async function ProposalDetailPage({
   ] = await Promise.all([
     supabase
       .from("proposals")
-      .select("*, client:clients(id, company_name)")
+      .select("*, client:clients(id, company_name), agency:partner_agencies(id, agency_name)")
       .eq("id", id)
       .is("deleted_at", null)
       .single(),
@@ -83,7 +83,10 @@ export default async function ProposalDetailPage({
 
   if (!proposalData) notFound();
 
-  const proposal = proposalData as unknown as Proposal & { client?: { id: string; company_name: string } | null };
+  const proposal = proposalData as unknown as Proposal & {
+    client?: { id: string; company_name: string } | null;
+    agency?: { id: string; agency_name: string } | null;
+  };
   const proposalSites = (proposalSitesData ?? []) as unknown as (ProposalSite & { site: Site })[];
   const org = orgData as (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
 
@@ -166,7 +169,19 @@ export default async function ProposalDetailPage({
               {proposal.status.charAt(0).toUpperCase() + proposal.status.slice(1)}
             </Badge>
           </div>
-          {proposal.client && (
+          {/* Show whichever recipient is attached — client or agency. */}
+          {proposal.agency && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Agency:{" "}
+              <Link
+                href={`/agencies/${proposal.agency.id}`}
+                className="text-primary hover:underline"
+              >
+                {proposal.agency.agency_name}
+              </Link>
+            </p>
+          )}
+          {!proposal.agency && proposal.client && (
             <p className="mt-1 text-sm text-muted-foreground">
               Client:{" "}
               <Link

@@ -12,7 +12,7 @@ import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { ProposalExportButtons } from "./ProposalExportButtons";
 import { ImportFromFileDialog } from "./ImportFromFileDialog";
-import type { Proposal, ProposalSite, Client, Organization } from "@/lib/types/database";
+import type { Proposal, ProposalSite, Client, PartnerAgency, Organization } from "@/lib/types/database";
 import type { SiteForProposal } from "@/app/[locale]/(dashboard)/proposals/new/page";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,7 +26,13 @@ interface SelectedSiteRow {
 
 interface ProposalConfig {
   proposal_name: string;
+  // A proposal / rate card can be addressed to either a direct
+  // client or a partner agency. `recipient_type` drives which id is
+  // meaningful; "" means no recipient picked (valid — rate cards
+  // are sometimes drafted without one).
+  recipient_type: "client" | "agency" | "";
   client_id: string;
+  agency_id: string;
   template_type: "grid" | "list" | "one_per_page" | "compact";
   show_rates: "exact" | "range" | "request_quote" | "hidden";
   show_photos: boolean;
@@ -47,6 +53,9 @@ interface ProposalConfig {
 interface Props {
   sites: SiteForProposal[];
   clients: Pick<Client, "id" | "company_name">[];
+  // Partner agencies are valid recipients for a rate card / proposal
+  // too — user picks Client or Agency in Step 1.
+  agencies?: Pick<PartnerAgency, "id" | "agency_name">[];
   org: (Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "phone" | "email"> & { logo_url?: string | null }) | null;
   // Signed URL (1-hour TTL) for the org logo, if one's uploaded. The
   // wizard passes this to the PPTX export button which embeds the
@@ -97,6 +106,7 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 export function ProposalWizard({
   sites,
   clients,
+  agencies = [],
   org,
   orgLogoUrl = null,
   orgTermsTemplate = null,
@@ -126,9 +136,22 @@ export function ProposalWizard({
     ? (existingProposal.include_terms ?? false)
     : hasOrgTemplate;
 
+  // Seed recipient_type: prefer the saved hint, otherwise infer from
+  // whichever id column is populated on the existing row, otherwise
+  // blank.
+  const seededRecipientType: "client" | "agency" | "" =
+    existingProposal?.recipient_type ??
+    (existingProposal?.agency_id
+      ? "agency"
+      : existingProposal?.client_id
+        ? "client"
+        : "");
+
   const [config, setConfig] = useState<ProposalConfig>({
     proposal_name: existingProposal?.proposal_name ?? (isRateCard ? "Rate Card" : ""),
+    recipient_type: seededRecipientType,
     client_id: existingProposal?.client_id ?? "",
+    agency_id: existingProposal?.agency_id ?? "",
     template_type: existingProposal?.template_type ?? "grid",
     show_rates: existingProposal?.show_rates ?? (isRateCard ? "exact" : "exact"),
     show_photos: existingProposal?.show_photos ?? true,
@@ -240,9 +263,17 @@ export function ProposalWizard({
     if (!config.proposal_name.trim()) { toast.error("Enter a proposal name"); return; }
     if (selectedSites.length === 0) { toast.error("Select at least one site"); return; }
 
+    // Normalize recipient fields: only the id matching recipient_type
+    // survives. A blank recipient_type means both ids are blank too.
+    const recipientType = config.recipient_type || null;
+    const clientId = recipientType === "client" ? (config.client_id || null) : null;
+    const agencyId = recipientType === "agency" ? (config.agency_id || null) : null;
+
     const values = {
       ...config,
-      client_id: config.client_id || undefined,
+      recipient_type: recipientType,
+      client_id: clientId,
+      agency_id: agencyId,
       sites: selectedSites,
     };
 
@@ -313,17 +344,71 @@ export function ProposalWizard({
               />
             </div>
             <div>
-              <Label>Client (optional)</Label>
-              <select
-                value={config.client_id}
-                onChange={(e) => setConfig((c) => ({ ...c, client_id: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="">No specific client</option>
-                {clients.map((cl) => (
-                  <option key={cl.id} value={cl.id}>{cl.company_name}</option>
-                ))}
-              </select>
+              {/* Recipient picker — a rate card / proposal can be addressed
+                  to either a direct client or a partner agency. The user
+                  picks the type first, then picks the specific party. */}
+              <Label>Recipient (optional)</Label>
+              <div className="mt-1 flex gap-2">
+                <div className="inline-flex rounded-md border border-input bg-background p-0.5 text-sm">
+                  {(["client", "agency"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() =>
+                        setConfig((c) => ({
+                          ...c,
+                          recipient_type: c.recipient_type === t ? "" : t,
+                          // Reset the other id when switching type so we
+                          // never save both columns at once.
+                          client_id: t === "client" ? c.client_id : "",
+                          agency_id: t === "agency" ? c.agency_id : "",
+                        }))
+                      }
+                      className={cn(
+                        "px-3 py-1.5 rounded text-xs font-medium capitalize transition-colors",
+                        config.recipient_type === t
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                {config.recipient_type === "client" && (
+                  <select
+                    value={config.client_id}
+                    onChange={(e) =>
+                      setConfig((c) => ({ ...c, client_id: e.target.value }))
+                    }
+                    className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Select a client…</option>
+                    {clients.map((cl) => (
+                      <option key={cl.id} value={cl.id}>{cl.company_name}</option>
+                    ))}
+                  </select>
+                )}
+                {config.recipient_type === "agency" && (
+                  <select
+                    value={config.agency_id}
+                    onChange={(e) =>
+                      setConfig((c) => ({ ...c, agency_id: e.target.value }))
+                    }
+                    className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Select an agency…</option>
+                    {agencies.map((a) => (
+                      <option key={a.id} value={a.id}>{a.agency_name}</option>
+                    ))}
+                  </select>
+                )}
+                {config.recipient_type === "" && (
+                  <span className="flex items-center text-xs text-muted-foreground">
+                    Pick Client or Agency to attach a recipient, or leave blank for a generic rate card.
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -712,7 +797,9 @@ export function ProposalWizard({
                   viewed_at: null,
                   pdf_url: null,
                   pptx_url: null,
-                  client_id: config.client_id || null,
+                  client_id: config.recipient_type === "client" ? (config.client_id || null) : null,
+                  agency_id: config.recipient_type === "agency" ? (config.agency_id || null) : null,
+                  recipient_type: config.recipient_type || null,
                   terms_text: config.terms_text || null,
                   custom_header_text: config.custom_header_text || null,
                   custom_footer_text: config.custom_footer_text || null,
