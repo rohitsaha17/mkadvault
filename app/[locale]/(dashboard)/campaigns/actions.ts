@@ -770,31 +770,18 @@ export async function deleteCampaign(id: string): Promise<{ error?: string }> {
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
-    // Capture the name for the audit entry before soft-deleting.
-    const { data: existing } = await ctx.supabase
-      .from("campaigns")
-      .select("campaign_name")
-      .eq("id", id)
-      .single();
-
-    const { error } = await ctx.supabase
-      .from("campaigns")
-      .update({ deleted_at: new Date().toISOString(), updated_by: ctx.user.id })
-      .eq("id", id);
-
-    if (error) return { error: error.message };
-
-    // Log so the Activity tab retains a record of who deleted the
-    // campaign (soft-delete keeps the row queryable).
-    await ctx.supabase.from("campaign_activity_log").insert({
-      organization_id: ctx.orgId,
-      campaign_id: id,
-      user_id: ctx.user.id,
-      action: "deleted",
-      description: existing?.campaign_name
-        ? `Campaign "${existing.campaign_name}" deleted`
-        : "Campaign deleted",
+    // Soft-delete via SECURITY DEFINER RPC (migration 036). We can't
+    // do the UPDATE from the authenticated role because Postgres
+    // applies the SELECT RLS policy to the RETURNING rows, and the
+    // SELECT policy requires `deleted_at IS NULL` — so a direct
+    // UPDATE that sets deleted_at flips the row out of visibility
+    // and raises "new row violates row-level security policy". The
+    // RPC runs as definer, validates org + role in SQL, performs
+    // the soft-delete, and logs the audit entry in one transaction.
+    const { error } = await ctx.supabase.rpc("soft_delete_campaign", {
+      p_id: id,
     });
+    if (error) return { error: error.message };
 
     revalidatePath("/campaigns");
     return {};
