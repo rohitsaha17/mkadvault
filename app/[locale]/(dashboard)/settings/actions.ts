@@ -97,12 +97,24 @@ export async function updateOrganization(data: {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("org_id, role")
+      .select("org_id, role, roles")
       .eq("id", user.id)
       .single();
 
     if (!profile) return { error: "Profile not found" };
-    if (!["super_admin", "admin"].includes(profile.role)) {
+    // Check the full roles array — migration 020 introduced multi-role
+    // users, and an admin whose primary `role` column is set to
+    // something else (or a legacy row with role null and roles
+    // populated) should still be allowed to save org settings.
+    const rolesArr: string[] = Array.isArray(profile.roles) && profile.roles.length > 0
+      ? (profile.roles as string[])
+      : profile.role
+      ? [profile.role as string]
+      : [];
+    const isAdmin = rolesArr.some((r) =>
+      ["super_admin", "admin"].includes(r),
+    );
+    if (!isAdmin) {
       return { error: "Only admins can update organization settings" };
     }
 

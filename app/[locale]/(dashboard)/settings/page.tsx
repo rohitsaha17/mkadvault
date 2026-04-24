@@ -72,7 +72,19 @@ export default async function SettingsPage({
     orgLogoSignedUrl = signed?.signedUrl ?? null;
   }
 
-  const isAdmin = ["super_admin", "admin"].includes(profile.role ?? "");
+  // Admin check must look at the full `roles` array (migration 020
+  // introduced multi-role users — e.g. an executive+accounts combo).
+  // The old `profile.role` check hid the Organisation card for any
+  // admin whose primary role column was set to something else.
+  const rolesArr: string[] =
+    Array.isArray(profile.roles) && profile.roles.length > 0
+      ? profile.roles
+      : profile.role
+      ? [profile.role]
+      : [];
+  const isAdmin = rolesArr.some((r) =>
+    ["super_admin", "admin"].includes(r),
+  );
 
   return (
     <div className="max-w-3xl">
