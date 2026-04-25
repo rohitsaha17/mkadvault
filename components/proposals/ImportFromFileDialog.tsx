@@ -141,31 +141,75 @@ export function ImportFromFileDialog({ onDone }: Props) {
 
   async function handleExtract() {
     if (!file) return;
-    // Server enforces its own size cap (currently 50 MB) and returns a
-    // clean JSON error if exceeded. Vercel's serverless body limit on
-    // some plans is ~4.5 MB, but plenty of users are on plans that
-    // accept more — and the dev server has no limit at all. Don't
-    // pre-block here; let the request go through and rely on the
-    // improved error surface to show what actually happened.
+    // Two-step upload that bypasses Vercel's ~4.5 MB serverless body
+    // cap (FUNCTION_PAYLOAD_TOO_LARGE / 413):
+    //   1. Ask the server for a signed upload URL bound to a path
+    //      under the user's org folder in site-photos.
+    //   2. PUT the bytes straight to Supabase Storage. This goes
+    //      direct to Supabase's host, so Vercel's body limit doesn't
+    //      apply — files up to 50 MB sail through.
+    //   3. POST the resulting filePath as a tiny JSON request to the
+    //      extract endpoint, which downloads the bytes server-side
+    //      and runs the AI extractor.
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
+      // ── 1. Get a signed upload URL ──────────────────────────────
+      const initRes = await fetch("/api/proposals/extract/upload-url", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileMime: file.type,
+          fileSize: file.size,
+        }),
+      });
+      const initBody = await initRes.text();
+      let initJson: {
+        error?: string;
+        filePath?: string;
+        signedUrl?: string;
+        token?: string;
+      } = {};
+      try {
+        initJson = initBody ? JSON.parse(initBody) : {};
+      } catch {
+        /* fall through */
+      }
+      if (!initRes.ok || !initJson.signedUrl || !initJson.filePath) {
+        const excerpt = initBody.slice(0, 240).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        toast.error(
+          initJson.error ??
+            (excerpt ? `Couldn't start upload (${initRes.status}): ${excerpt}` : `Couldn't start upload (${initRes.status})`),
+        );
+        return;
+      }
+
+      // ── 2. Upload the file directly to Supabase Storage ─────────
+      // The signed URL returned by Supabase wants a PUT with the
+      // file's bytes as the body. Setting Content-Type matters so
+      // the storage tier records the right MIME on the object.
+      const putRes = await fetch(initJson.signedUrl, {
+        method: "PUT",
+        headers: { "content-type": file.type },
+        body: file,
+      });
+      if (!putRes.ok) {
+        toast.error(`Upload to storage failed (${putRes.status}). Try again.`);
+        return;
+      }
+
+      // ── 3. Hand the path to the extract endpoint ────────────────
       const res = await fetch("/api/proposals/extract", {
         method: "POST",
-        body: fd,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ filePath: initJson.filePath }),
       });
-      // Always read the response body as text first so we can show the
-      // server's actual error even when it's not valid JSON (e.g. the
-      // dev compiler's HTML 500 page or Vercel's plain-text 413). Falling
-      // back to a generic "Network error" toast was hiding real causes
-      // like a missing ANTHROPIC_API_KEY from the user.
       const rawBody = await res.text();
       let json: { error?: string; sites?: ExtractedSite[] } = {};
       try {
         json = rawBody ? JSON.parse(rawBody) : {};
       } catch {
-        // Non-JSON response — keep going, we'll surface status + excerpt.
+        /* see below */
       }
       if (!res.ok) {
         const excerpt = rawBody
@@ -188,7 +232,6 @@ export function ImportFromFileDialog({ onDone }: Props) {
       setStep("review");
     } catch (err) {
       // True network / abort failure — the fetch never got a response.
-      // Show the actual error so a CORS / timeout / size issue is legible.
       console.error("[import] fetch failed:", err);
       const detail = err instanceof Error ? err.message : String(err);
       toast.error(`Upload failed: ${detail}. Check your connection or try a smaller file.`);

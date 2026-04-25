@@ -201,29 +201,94 @@ async function extractHandler(req: Request): Promise<Response> {
   const orgId = profile.org_id as string;
 
   // ── 2. File read + validation ────────────────────────────────────────────
-  const form = await req.formData();
-  const file = form.get("file") as File | null;
-  if (!file) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 });
-  }
-  if (file.size > MAX_FILE_BYTES) {
-    return NextResponse.json(
-      { error: `File too large. Max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB.` },
-      { status: 400 }
-    );
-  }
-  if (!ALLOWED_MIME_TYPES.has(file.type)) {
-    return NextResponse.json(
-      {
-        error:
-          "Unsupported file type. Upload a PDF or PPTX file (presentation).",
-      },
-      { status: 400 }
-    );
-  }
+  // Two intake modes, both end up with `fileBytes` + `fileMime`:
+  //   (a) Direct upload via multipart/form-data — used for small files in
+  //       development. Vercel rejects bodies >4.5 MB before the function
+  //       runs, so this path is only viable for tiny test uploads in
+  //       hosted envs.
+  //   (b) Storage handoff — client uploaded to site-photos via a signed
+  //       URL (see /api/proposals/extract/upload-url) then POSTs JSON
+  //       { filePath } here. The server downloads with the admin client,
+  //       sidestepping the 4.5 MB Vercel cap entirely. This is the path
+  //       the new ImportFromFileDialog uses for every upload.
+  let fileBytes: Buffer;
+  let fileMime: string;
 
-  const arrayBuffer = await file.arrayBuffer();
-  const fileBytes = Buffer.from(arrayBuffer);
+  const contentTypeHeader = req.headers.get("content-type") ?? "";
+  const isJson = contentTypeHeader.includes("application/json");
+
+  if (isJson) {
+    const body = (await req.json().catch(() => ({}))) as {
+      filePath?: string;
+    };
+    const filePath = body.filePath;
+    if (!filePath || typeof filePath !== "string") {
+      return NextResponse.json(
+        { error: "Missing filePath" },
+        { status: 400 },
+      );
+    }
+    // Path must live under the caller's org folder — same shape RLS
+    // enforces on direct reads. Refuse anything outside that prefix
+    // so a crafted payload can't read another org's storage.
+    if (!filePath.startsWith(`${orgId}/_imports/sources/`)) {
+      return NextResponse.json(
+        { error: "filePath is outside your organisation's import folder" },
+        { status: 400 },
+      );
+    }
+
+    const admin = createAdminClient();
+    const { data: blob, error: dlErr } = await admin.storage
+      .from("site-photos")
+      .download(filePath);
+    if (dlErr || !blob) {
+      return NextResponse.json(
+        { error: dlErr?.message ?? "Couldn't read uploaded file" },
+        { status: 400 },
+      );
+    }
+    fileBytes = Buffer.from(await blob.arrayBuffer());
+    // Supabase doesn't always echo the original MIME, infer from path.
+    fileMime = filePath.endsWith(".pdf")
+      ? "application/pdf"
+      : filePath.endsWith(".pptx")
+        ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        : (blob.type || "application/octet-stream");
+
+    if (fileBytes.byteLength > MAX_FILE_BYTES) {
+      return NextResponse.json(
+        { error: `File too large. Max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB.` },
+        { status: 400 },
+      );
+    }
+    if (!ALLOWED_MIME_TYPES.has(fileMime)) {
+      return NextResponse.json(
+        { error: "Unsupported file type. Upload a PDF or PPTX file." },
+        { status: 400 },
+      );
+    }
+  } else {
+    const form = await req.formData();
+    const file = form.get("file") as File | null;
+    if (!file) {
+      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      return NextResponse.json(
+        { error: `File too large. Max ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB.` },
+        { status: 400 },
+      );
+    }
+    if (!ALLOWED_MIME_TYPES.has(file.type)) {
+      return NextResponse.json(
+        { error: "Unsupported file type. Upload a PDF or PPTX file (presentation)." },
+        { status: 400 },
+      );
+    }
+    fileBytes = Buffer.from(await file.arrayBuffer());
+    fileMime = file.type;
+  }
 
   // ── 3. Build Claude content blocks + track images we extracted ────────────
   // For PPTX we physically unzip the file and pull out each ppt/media image.
@@ -235,7 +300,7 @@ async function extractHandler(req: Request): Promise<Response> {
   const content: ContentBlock[] = [];
   const extractedImages: { bytes: Buffer; mime: SupportedImageMime; name: string }[] = [];
 
-  if (file.type === "application/pdf") {
+  if (fileMime === "application/pdf") {
     content.push({
       type: "document",
       source: {
@@ -358,7 +423,7 @@ Rules:
   let extracted: ExtractedSite[] = [];
   try {
     if (provider === "gemini") {
-      extracted = await callGemini(geminiKey!, content, fileBytes, file.type);
+      extracted = await callGemini(geminiKey!, content, fileBytes, fileMime);
     } else {
       extracted = await callAnthropic(anthropicKey!, content);
     }
