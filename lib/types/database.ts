@@ -182,8 +182,25 @@ export interface Site {
   // Direct link to a landowner — only set when ownership_model = "owned".
   // Rented sites are linked to a partner_agency via the contracts table.
   landowner_id: string | null;
-  // Stored as integer paise (1 INR = 100 paise). Display: value / 100
+  // Stored as integer paise (1 INR = 100 paise). Display: value / 100.
+  // Interpretation depends on pricing_basis — for per_kiosk_monthly
+  // this is the rate per kiosk, for per_slot it's the rate per slot,
+  // and so on. computeEffectiveMonthlyRate(site) is the helper that
+  // collapses (basis × rate × units) into a comparable monthly figure.
   base_rate_paise: number | null;
+
+  // Per-document pricing model + the count the rate multiplies against
+  // (migration 041). Sane defaults preserve the legacy
+  // "flat_monthly × 1" behaviour for old rows, so adoption is
+  // incremental.
+  pricing_basis: PricingBasis;
+  billable_units: number;
+
+  // Type-specific specs blob. Shape varies by media_type — see the
+  // MediaSpecs discriminated union below. Null on legacy rows; the
+  // form treats null as "no extra specs" and renders the flat
+  // hoarding layout.
+  media_specs: MediaSpecs | null;
 
   municipal_permission_number: string | null;
   municipal_permission_expiry: string | null; // DATE stored as ISO string
@@ -192,6 +209,102 @@ export interface Site {
   is_marketplace_listed: boolean;
   marketplace_visibility_settings: Record<string, unknown>;
 }
+
+// ─── Pricing model (migration 041) ────────────────────────────────────────
+// Kept here next to Site since most consumers import both.
+
+export type PricingBasis =
+  | "flat_monthly" // hoarding, billboard, or unipole sold as a package
+  | "per_face_monthly" // unipole sold per face
+  | "per_kiosk_monthly" // kiosk strip, partial rentals OK
+  | "per_panel_monthly" // bus shelter
+  | "per_slot_monthly" // DOOH sold as a monthly slot package
+  | "per_slot" // DOOH ad-hoc per-slot pricing
+  | "per_second" // DOOH per-second pricing
+  | "per_sqft_monthly" // wall wraps / irregular surfaces
+  | "custom"; // escape hatch — totals ignored, rate displayed verbatim
+
+// ─── Media-type-specific specs (migration 041) ────────────────────────────
+// Discriminated union keyed by `kind`. Persisted on sites.media_specs
+// as JSONB. Add new media types by extending the union — Postgres only
+// stores the bytes, so no migration is needed for new shapes.
+
+export interface MediaSpecsHoarding {
+  kind: "billboard" | "hoarding";
+  // No extra fields — width/height + facing/illumination on Site itself
+  // are enough.
+}
+
+export interface MediaSpecsDooh {
+  kind: "dooh";
+  // How a DOOH loop is structured. Useful even when pricing is flat
+  // monthly because clients ask "how many slots will I get?"
+  slots_per_loop: number;
+  slot_duration_seconds: number;
+  loop_duration_seconds: number;
+  operating_hours_per_day: number;
+  // Optional context fields for buyers.
+  screen_tech?: "led" | "lcd" | "p10" | "p6" | "other" | null;
+  brightness_nits?: number | null;
+  resolution_label?: string | null; // e.g. "1920×1080", "P10"
+}
+
+export interface MediaSpecsUnipoleSide {
+  face: FacingDirection;
+  width_ft: number;
+  height_ft: number;
+  illumination: IlluminationType;
+}
+
+export interface MediaSpecsUnipole {
+  kind: "unipole";
+  // Physical configuration.
+  shape: "single" | "L" | "T" | "V";
+  sides: MediaSpecsUnipoleSide[];
+  // Sales mode — defaults to "package" per the builder's preference.
+  // When `per_face`, base_rate_paise is the per-face monthly and
+  // billable_units = sides.length (or however many are available).
+  sale_mode: "package" | "per_face";
+}
+
+export interface MediaSpecsKiosk {
+  kind: "kiosk";
+  // Total kiosks in the strip and how many we can sell. Partial
+  // rentals are allowed (3 of 8) — a campaign just sets its own
+  // billable_units on the booking. The Site-level units field reflects
+  // current availability.
+  kiosk_count: number;
+  kiosks_sellable: number;
+  kiosk_dimensions_ft?: { width: number; height: number } | null;
+}
+
+export interface MediaSpecsBusShelter {
+  kind: "bus_shelter";
+  panel_count: number;
+  lit_panels: number;
+  seating_capacity?: number | null;
+}
+
+export interface MediaSpecsWallWrap {
+  kind: "wall_wrap";
+  area_sqft: number;
+  ceiling_height_ft?: number | null;
+  irregular_shape: boolean;
+}
+
+export interface MediaSpecsCustom {
+  kind: "custom";
+  notes: string;
+}
+
+export type MediaSpecs =
+  | MediaSpecsHoarding
+  | MediaSpecsDooh
+  | MediaSpecsUnipole
+  | MediaSpecsKiosk
+  | MediaSpecsBusShelter
+  | MediaSpecsWallWrap
+  | MediaSpecsCustom;
 
 export type SiteInsert = Omit<Site, "id" | "created_at" | "updated_at" | "total_sqft"> & {
   id?: string;
