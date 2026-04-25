@@ -17,6 +17,14 @@ const nextConfig: NextConfig = {
     ],
   },
 
+  // pdfkit ships .afm font metric files alongside its JS modules and
+  // loads them from disk at runtime via fs.readFileSync. If webpack
+  // bundles pdfkit those .afm files don't make it into the chunk and
+  // PDF generation crashes with ENOENT. Marking pdfkit external means
+  // the route handler `require`s it from node_modules at runtime where
+  // the data files exist.
+  serverExternalPackages: ["pdfkit"],
+
   // Image optimisation — allow Supabase Storage buckets through the
   // Next.js image optimiser (smaller payloads, automatic webp/avif).
   images: {

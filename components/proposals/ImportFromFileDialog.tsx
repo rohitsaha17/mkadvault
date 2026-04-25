@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ImportSiteInput } from "@/app/[locale]/(dashboard)/sites/actions";
 import { callAction } from "@/lib/utils/call-action";
+import { createClient } from "@/lib/supabase/client";
 
 // The raw shape we receive from /api/proposals/extract. Every field is
 // optional because the AI may not find everything — the review UI lets
@@ -185,16 +186,26 @@ export function ImportFromFileDialog({ onDone }: Props) {
       }
 
       // ── 2. Upload the file directly to Supabase Storage ─────────
-      // The signed URL returned by Supabase wants a PUT with the
-      // file's bytes as the body. Setting Content-Type matters so
-      // the storage tier records the right MIME on the object.
-      const putRes = await fetch(initJson.signedUrl, {
-        method: "PUT",
-        headers: { "content-type": file.type },
-        body: file,
-      });
-      if (!putRes.ok) {
-        toast.error(`Upload to storage failed (${putRes.status}). Try again.`);
+      // Use the SDK helper rather than a raw fetch — it sets the
+      // exact headers Supabase Storage expects for signed uploads
+      // (cache-control, content-type, optional x-upsert) and routes
+      // the request through the same CORS-allowed path the rest of
+      // the app uses. Raw fetch was failing browser-side with
+      // "Failed to fetch" because the upload endpoint rejected the
+      // request shape silently.
+      if (!initJson.token) {
+        toast.error("Couldn't start upload (missing token).");
+        return;
+      }
+      const supabase = createClient();
+      const { error: putErr } = await supabase.storage
+        .from("site-photos")
+        .uploadToSignedUrl(initJson.filePath, initJson.token, file, {
+          contentType: file.type,
+          upsert: true,
+        });
+      if (putErr) {
+        toast.error(`Upload to storage failed: ${putErr.message}`);
         return;
       }
 

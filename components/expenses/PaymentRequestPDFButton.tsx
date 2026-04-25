@@ -1,43 +1,29 @@
 "use client";
-// Dynamic-import wrapper around @react-pdf/renderer's PDFDownloadLink.
-// We must keep @react-pdf off the server — it pulls in browser-only
-// canvas / DOM APIs that throw during SSR. Mirrors InvoicePDFButton.
-import dynamic from "next/dynamic";
-import { Loader2, Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import type { PaymentRequestDocumentProps } from "./PaymentRequestDocument";
+// Plain anchor styled like a Button. Hits /api/pdf/payment-request/[id]
+// which renders the PDF server-side. We keep client-side @react-pdf
+// out of the bundle entirely — its v4.x reconciler crashes under
+// React 19 with "su is not a function" the moment PDFDownloadLink
+// mounts, taking the whole page down with it.
 
-const PDFDownloadLink = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFDownloadLink),
-  { ssr: false },
-);
+import { Download } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-const PaymentRequestDocument = dynamic(
-  () =>
-    import("./PaymentRequestDocument").then((m) => m.PaymentRequestDocument),
-  { ssr: false },
-);
-
-interface Props extends PaymentRequestDocumentProps {
-  filename: string;
+interface Props {
+  expenseId: string;
 }
 
-export function PaymentRequestPDFButton({ filename, ...docProps }: Props) {
+export function PaymentRequestPDFButton({ expenseId }: Props) {
   return (
-    <PDFDownloadLink
-      document={<PaymentRequestDocument {...docProps} />}
-      fileName={filename}
+    <a
+      href={`/api/pdf/payment-request/${expenseId}`}
+      // The browser uses the route's content-disposition filename
+      // when `download` is set; the empty value here just opts in.
+      download
+      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-2")}
     >
-      {({ loading }: { loading: boolean }) => (
-        <Button variant="outline" size="sm" disabled={loading}>
-          {loading ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4 mr-2" />
-          )}
-          {loading ? "Generating PDF…" : "Download PDF"}
-        </Button>
-      )}
-    </PDFDownloadLink>
+      <Download className="h-4 w-4" />
+      Download PDF
+    </a>
   );
 }

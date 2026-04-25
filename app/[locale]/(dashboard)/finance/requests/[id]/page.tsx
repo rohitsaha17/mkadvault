@@ -222,19 +222,7 @@ export default async function PaymentRequestDetailPage({
         </div>
 
         <div className="flex items-center gap-2">
-          {org && (
-            <PaymentRequestPDFButton
-              expense={expense}
-              org={org}
-              orgLogoUrl={orgLogoUrl}
-              site={expense.site}
-              campaign={expense.campaign}
-              createdByName={profileMap[expense.created_by ?? ""] ?? null}
-              paidByName={profileMap[expense.paid_by ?? ""] ?? null}
-              termsText={paymentVoucherTerms}
-              filename={`PaymentRequest-${shortId}.pdf`}
-            />
-          )}
+          {org && <PaymentRequestPDFButton expenseId={expense.id} />}
         </div>
       </div>
 

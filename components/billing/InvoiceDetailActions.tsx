@@ -3,29 +3,24 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Send, Trash2, IndianRupee } from "lucide-react";
-import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { RecordInvoicePaymentDialog } from "./RecordInvoicePaymentDialog";
+import { InvoicePDFButton } from "./InvoicePDFButton";
 import { callAction } from "@/lib/utils/call-action";
 import type { InvoiceStatus } from "@/lib/types/database";
-import type { InvoiceDocumentProps } from "./InvoiceDocument";
-
-// Dynamic import with ssr:false keeps @react-pdf/renderer out of the SSR bundle
-const InvoicePDFButton = dynamic(
-  () => import("./InvoicePDFButton").then((m) => m.InvoicePDFButton),
-  { ssr: false }
-);
 
 interface Props {
   invoiceId: string;
   invoiceNumber: string;
   currentStatus: InvoiceStatus;
   balanceDuePaise: number;
-  // PDF props (optional — shown when all data is available)
-  pdfProps?: InvoiceDocumentProps & { filename: string };
+  // Whether to show the Download PDF link. The page passes false when
+  // critical fields (client, org) are missing — the server route
+  // would 400 otherwise.
+  showPdf?: boolean;
 }
 
-export function InvoiceDetailActions({ invoiceId, invoiceNumber, currentStatus, balanceDuePaise, pdfProps }: Props) {
+export function InvoiceDetailActions({ invoiceId, invoiceNumber, currentStatus, balanceDuePaise, showPdf = true }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -67,7 +62,7 @@ export function InvoiceDetailActions({ invoiceId, invoiceNumber, currentStatus, 
 
   return (
     <>
-      {pdfProps && <InvoicePDFButton {...pdfProps} />}
+      {showPdf && <InvoicePDFButton invoiceId={invoiceId} />}
 
       {canSend && (
         <Button variant="outline" size="sm" onClick={handleMarkSent} disabled={isPending}>

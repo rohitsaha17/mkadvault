@@ -1,42 +1,24 @@
 "use client";
-// PDF download button — uses react-pdf's PDFDownloadLink with dynamic import (no SSR)
-import dynamic from "next/dynamic";
-import { Loader2, Download } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import type { InvoiceDocumentProps } from "./InvoiceDocument";
+// Plain anchor styled like a Button. Server-side PDF rendering — see
+// PaymentRequestPDFButton for the full rationale.
 
-// Dynamically import PDFDownloadLink to avoid SSR
-const PDFDownloadLink = dynamic(
-  () => import("@react-pdf/renderer").then((m) => m.PDFDownloadLink),
-  { ssr: false }
-);
+import { Download } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-// Dynamically import the document itself so @react-pdf doesn't run server-side
-const InvoiceDocument = dynamic(
-  () => import("./InvoiceDocument").then((m) => m.InvoiceDocument),
-  { ssr: false }
-);
-
-interface Props extends InvoiceDocumentProps {
-  filename: string;
+interface Props {
+  invoiceId: string;
 }
 
-export function InvoicePDFButton(props: Props) {
+export function InvoicePDFButton({ invoiceId }: Props) {
   return (
-    <PDFDownloadLink
-      document={<InvoiceDocument {...props} />}
-      fileName={props.filename}
+    <a
+      href={`/api/pdf/invoice/${invoiceId}`}
+      download
+      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-2")}
     >
-      {({ loading }: { loading: boolean }) => (
-        <Button variant="outline" size="sm" disabled={loading}>
-          {loading ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4 mr-2" />
-          )}
-          {loading ? "Generating PDF…" : "Download PDF"}
-        </Button>
-      )}
-    </PDFDownloadLink>
+      <Download className="h-4 w-4" />
+      Download PDF
+    </a>
   );
 }

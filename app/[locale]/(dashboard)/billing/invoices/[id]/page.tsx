@@ -161,15 +161,7 @@ export default async function InvoiceDetailPage({
             invoiceNumber={invoice.invoice_number}
             currentStatus={invoice.status}
             balanceDuePaise={invoice.balance_due_paise ?? 0}
-            pdfProps={pdfReady && org && client ? {
-              invoice: invoice as Invoice,
-              lineItems,
-              client,
-              org,
-              bankAccount,
-              orgLogoUrl,
-              filename: `${invoice.invoice_number}.pdf`,
-            } : undefined}
+            showPdf={Boolean(pdfReady && org && client)}
           />
         </div>
       </div>
