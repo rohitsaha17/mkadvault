@@ -33,9 +33,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const maxDuration = 300;
 export const runtime = "nodejs";
 
-// Keep uploads reasonable. 25 MB matches our PPTX practical ceiling and
-// sits below the document size limits of both providers.
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+// Cap upload size. PPTX rate cards from large agencies routinely run
+// 30–40 MB once they include uncompressed photos, so 50 MB gives us
+// headroom while still staying under both providers' limits:
+//   • Anthropic document blocks accept up to ~32 MB raw bytes.
+//   • Gemini inline data accepts up to ~20 MB per part — but for PPTX
+//     we explode the deck into per-image parts (each well under 20 MB)
+//     and for PDFs Gemini handles the document in a single inlineData
+//     part.
+// The provider call layer downsizes if needed; this cap is just the
+// outer guardrail.
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 // Provider selection: prefer Gemini when its key is set (cheaper + the
 // builder has Google credits), otherwise Anthropic. Either alone is

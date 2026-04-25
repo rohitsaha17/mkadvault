@@ -141,17 +141,12 @@ export function ImportFromFileDialog({ onDone }: Props) {
 
   async function handleExtract() {
     if (!file) return;
-    // Vercel serverless functions cap request bodies at ~4.5 MB (Hobby /
-    // Pro). Anything larger fails BEFORE the route handler runs, which
-    // the browser surfaces as a generic network failure with no server
-    // body to parse. Warn up front so the user doesn't waste a long wait.
-    const VERCEL_BODY_LIMIT = 4.5 * 1024 * 1024;
-    if (file.size > VERCEL_BODY_LIMIT && process.env.NODE_ENV === "production") {
-      toast.error(
-        `File is ${(file.size / (1024 * 1024)).toFixed(1)} MB — hosted uploads are capped at 4.5 MB. Try exporting a smaller PDF (fewer pages or compressed images).`,
-      );
-      return;
-    }
+    // Server enforces its own size cap (currently 50 MB) and returns a
+    // clean JSON error if exceeded. Vercel's serverless body limit on
+    // some plans is ~4.5 MB, but plenty of users are on plans that
+    // accept more — and the dev server has no limit at all. Don't
+    // pre-block here; let the request go through and rely on the
+    // improved error surface to show what actually happened.
     setUploading(true);
     try {
       const fd = new FormData();
@@ -309,7 +304,7 @@ export function ImportFromFileDialog({ onDone }: Props) {
             <div className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg py-12 px-6 gap-4">
               <Upload className="h-10 w-10 text-muted-foreground" />
               <p className="text-sm text-muted-foreground text-center max-w-md">
-                Accepted: PDF, PPTX (up to 25 MB). Works best with decks that
+                Accepted: PDF, PPTX (up to 50 MB). Works best with decks that
                 have one site per slide/page with a photo + details.
               </p>
               <div className="flex flex-col items-stretch gap-2 w-full max-w-sm">
