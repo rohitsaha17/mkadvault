@@ -132,7 +132,11 @@ export async function createSite(values: unknown): Promise<ActionResult> {
       landowner_id,
       base_rate_paise,
       municipal_permission_number: d.municipal_permission_number ?? null,
-      municipal_permission_expiry: d.municipal_permission_expiry ?? null,
+      // Postgres' date column rejects empty string ("") — only null or
+      // a valid YYYY-MM-DD value is accepted. The HTML <input type=date>
+      // submits "" when the user hasn't picked anything, so convert
+      // explicitly. (?? misses "" because it only catches null/undefined.)
+      municipal_permission_expiry: d.municipal_permission_expiry?.trim() || null,
       notes: d.notes ?? null,
     };
 
@@ -235,7 +239,11 @@ export async function updateSite(
       ownership_model: d.ownership_model,
       base_rate_paise,
       municipal_permission_number: d.municipal_permission_number ?? null,
-      municipal_permission_expiry: d.municipal_permission_expiry ?? null,
+      // Postgres' date column rejects empty string ("") — only null or
+      // a valid YYYY-MM-DD value is accepted. The HTML <input type=date>
+      // submits "" when the user hasn't picked anything, so convert
+      // explicitly. (?? misses "" because it only catches null/undefined.)
+      municipal_permission_expiry: d.municipal_permission_expiry?.trim() || null,
       notes: d.notes ?? null,
     };
 
