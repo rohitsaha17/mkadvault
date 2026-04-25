@@ -23,24 +23,28 @@
 
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
 import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// Allow up to 5 minutes for the Claude call — parsing a 20-slide deck
-// with lots of images routinely takes 30–90 seconds.
+// Allow up to 5 minutes for the AI call — parsing a 20-slide deck with
+// lots of images routinely takes 30–90 seconds.
 export const maxDuration = 300;
 export const runtime = "nodejs";
 
 // Keep uploads reasonable. 25 MB matches our PPTX practical ceiling and
-// sits comfortably below Claude's 32 MB document block limit.
+// sits below the document size limits of both providers.
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-// The model we point at. Haiku is fast + cheap but doesn't always grok
-// complex OOH decks — Sonnet handles extraction reliably. Keep configurable
-// via env so ops can swap without a deploy.
-const CLAUDE_MODEL =
+// Provider selection: prefer Gemini when its key is set (cheaper + the
+// builder has Google credits), otherwise Anthropic. Either alone is
+// enough — both give us PDF + image vision and JSON output. The model
+// IDs are env-configurable so ops can swap without a redeploy.
+const ANTHROPIC_MODEL =
   process.env.ANTHROPIC_EXTRACT_MODEL ?? "claude-sonnet-4-5-20250929";
+const GEMINI_MODEL =
+  process.env.GEMINI_EXTRACT_MODEL ?? "gemini-2.5-flash";
 
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
@@ -149,13 +153,22 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 async function extractHandler(req: Request): Promise<Response> {
-  // ── 0. API-key sanity check ──────────────────────────────────────────────
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  // ── 0. Provider selection ────────────────────────────────────────────────
+  // Pick whichever provider has a key configured. Gemini takes priority
+  // when both are present — typically cheaper, and the builder has
+  // Google credits to burn.
+  const geminiKey = process.env.GOOGLE_GEMINI_API_KEY ?? process.env.GEMINI_API_KEY;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const provider: "gemini" | "anthropic" | null = geminiKey
+    ? "gemini"
+    : anthropicKey
+      ? "anthropic"
+      : null;
+  if (!provider) {
     return NextResponse.json(
       {
         error:
-          "Import needs the ANTHROPIC_API_KEY environment variable. Set it in .env.local (and in Vercel) before using this feature.",
+          "Import needs an AI provider key. Set GOOGLE_GEMINI_API_KEY (preferred — uses Gemini 2.5 Flash) or ANTHROPIC_API_KEY in .env.local (and in Vercel) before using this feature.",
       },
       { status: 500 }
     );
@@ -330,40 +343,19 @@ Rules:
 
   content.push({ type: "text", text: instruction });
 
-  // ── 5. Call Claude ───────────────────────────────────────────────────────
-  const anthropic = new Anthropic({ apiKey });
+  // ── 5. Call the chosen provider ──────────────────────────────────────────
+  // Both branches return the same `ExtractedSite[]` shape so the rest of
+  // the handler is provider-agnostic. Each branch wraps its own API
+  // call in try/catch so we can return a clean JSON error to the client.
   let extracted: ExtractedSite[] = [];
   try {
-    const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 4096,
-      messages: [{ role: "user", content }],
-    });
-
-    // Collect all text output and try to parse it as JSON.
-    const textOut = response.content
-      .filter((c): c is { type: "text"; text: string } & typeof c => c.type === "text")
-      .map((c) => c.text)
-      .join("\n")
-      .trim();
-
-    // Strip stray markdown fences just in case.
-    const cleaned = textOut
-      .replace(/^```(?:json)?/i, "")
-      .replace(/```$/i, "")
-      .trim();
-
-    const parsed: unknown = JSON.parse(cleaned);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "sites" in parsed &&
-      Array.isArray((parsed as { sites: unknown }).sites)
-    ) {
-      extracted = (parsed as { sites: ExtractedSite[] }).sites;
+    if (provider === "gemini") {
+      extracted = await callGemini(geminiKey!, content, fileBytes, file.type);
+    } else {
+      extracted = await callAnthropic(anthropicKey!, content);
     }
   } catch (err) {
-    console.error("[extract] Claude call or JSON parse failed:", err);
+    console.error(`[extract] ${provider} call or JSON parse failed:`, err);
     return NextResponse.json(
       {
         error:
@@ -414,4 +406,113 @@ Rules:
     sessionId,
     sites: results,
   });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Provider implementations
+// ───────────────────────────────────────────────────────────────────────────
+
+// Strip any markdown fences the model wraps the JSON in and parse out
+// the `sites` array. Returns [] if the response isn't shaped as
+// expected — the caller decides whether to surface that to the user.
+function parseSitesJson(rawText: string): ExtractedSite[] {
+  const cleaned = rawText
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  const parsed: unknown = JSON.parse(cleaned);
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    "sites" in parsed &&
+    Array.isArray((parsed as { sites: unknown }).sites)
+  ) {
+    return (parsed as { sites: ExtractedSite[] }).sites;
+  }
+  return [];
+}
+
+async function callAnthropic(
+  apiKey: string,
+  content: ContentBlock[],
+): Promise<ExtractedSite[]> {
+  const anthropic = new Anthropic({ apiKey });
+  const response = await anthropic.messages.create({
+    model: ANTHROPIC_MODEL,
+    max_tokens: 4096,
+    messages: [{ role: "user", content }],
+  });
+  const textOut = response.content
+    .filter((c): c is { type: "text"; text: string } & typeof c => c.type === "text")
+    .map((c) => c.text)
+    .join("\n");
+  return parseSitesJson(textOut);
+}
+
+// Convert our provider-neutral content blocks into Gemini's `Part[]`
+// shape. The mapping:
+//   text     → { text }
+//   image    → { inlineData: { mimeType, data } }
+//   document → { inlineData: { mimeType: "application/pdf", data } }
+// For PPTX uploads we already explode the deck into per-image blocks,
+// so the document path is only hit for raw PDFs.
+function toGeminiParts(content: ContentBlock[]): Part[] {
+  return content.map((c): Part => {
+    if (c.type === "text") return { text: c.text };
+    if (c.type === "image") {
+      return {
+        inlineData: { mimeType: c.source.media_type, data: c.source.data },
+      };
+    }
+    return {
+      inlineData: { mimeType: c.source.media_type, data: c.source.data },
+    };
+  });
+}
+
+async function callGemini(
+  apiKey: string,
+  content: ContentBlock[],
+  pdfBytes: Buffer,
+  fileMime: string,
+): Promise<ExtractedSite[]> {
+  const genai = new GoogleGenerativeAI(apiKey);
+  const model = genai.getGenerativeModel({
+    model: GEMINI_MODEL,
+    // Force a JSON response so we don't fight markdown fences. The
+    // generationConfig instructs Gemini to skip its usual prose
+    // preamble; combined with our prompt's "JSON only" clause the
+    // output parses cleanly with JSON.parse.
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  // For PDFs, Gemini natively reads the document — pass the bytes as a
+  // single inlineData part instead of using our PPTX-style image blocks
+  // (which the existing builder already handled by going down the
+  // image-extraction path). This mirrors the Anthropic side: Anthropic
+  // gets a `document` block, Gemini gets an `application/pdf` part.
+  let parts: Part[];
+  if (fileMime === "application/pdf") {
+    // Replace the upstream document block (if present) with Gemini's
+    // inlineData PDF; carry over text/image parts unchanged.
+    const nonDoc = content.filter((c) => c.type !== "document");
+    parts = [
+      {
+        inlineData: {
+          mimeType: "application/pdf",
+          data: pdfBytes.toString("base64"),
+        },
+      },
+      ...toGeminiParts(nonDoc),
+    ];
+  } else {
+    parts = toGeminiParts(content);
+  }
+
+  const result = await model.generateContent({
+    contents: [{ role: "user", parts }],
+  });
+  const textOut = result.response.text();
+  return parseSitesJson(textOut);
 }

@@ -331,6 +331,12 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
                   { value: "available", label: "Available" },
                   { value: "maintenance", label: "Under Maintenance" },
                   { value: "blocked", label: "Blocked" },
+                  // Expired = the structure has been dismantled or the
+                  // permission ended permanently. We keep the row for
+                  // historical campaigns / P&L but never offer it for
+                  // booking again. "booked" stays out of this dropdown
+                  // since it's set automatically by the campaign flow.
+                  { value: "expired", label: "Expired (no longer with us)" },
                 ]}
                 error={!!errors.status}
               />
