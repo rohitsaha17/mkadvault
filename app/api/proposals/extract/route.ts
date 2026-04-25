@@ -22,6 +22,7 @@
 //      action copies the blob to its final per-site path.
 
 import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
 import JSZip from "jszip";
@@ -335,7 +336,21 @@ async function extractHandler(req: Request): Promise<Response> {
       slideTexts.push(extractSlideText(xml));
     }
 
-    // Media → image blocks.
+    // Media → image blocks. Real agency decks routinely list 50–100+
+    // sites with one hero photo per slide, plus a fistful of repeating
+    // template assets (logos, dividers, icons). The previous extractor
+    // capped at 20 images and skipped anything under 15 KB, so most
+    // sites past slide 20 came back without a photo. New strategy:
+    //   1. Pull every supported image from ppt/media/.
+    //   2. Skip very-small icons (<5 KB).
+    //   3. De-dup repeating template assets by SHA-256 — a slide
+    //      master that uses the same divider on every page only needs
+    //      to be sent once.
+    //   4. Sort by size descending — bigger = more likely the hero
+    //      shot — and pack into the request until we hit the per-call
+    //      budget (≤100 images, ≤18 MB total raw bytes, well under
+    //      Gemini's inline-data ceiling).
+    const seenHashes = new Set<string>();
     const mediaNames = Object.keys(zip.files)
       .filter((n) => n.startsWith("ppt/media/"))
       .sort();
@@ -343,23 +358,78 @@ async function extractHandler(req: Request): Promise<Response> {
       const mime = mimeFromName(mediaPath);
       if (!mime) continue;
       const bytes = Buffer.from(await zip.files[mediaPath].async("uint8array"));
-      // Skip tiny icons / logos — they're rarely the site hero shot.
-      if (bytes.length < 15 * 1024) continue;
+      if (bytes.length < 5 * 1024) continue; // tiny icon / spacer
+      // De-dup by content hash so a template logo that ships on every
+      // slide doesn't take up 60 image slots.
+      const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+      if (seenHashes.has(hash)) continue;
+      seenHashes.add(hash);
       extractedImages.push({ bytes, mime, name: mediaPath });
     }
 
-    // Preamble text tells Claude how to read the rest.
+    // Preamble text tells the model how to read the rest. Note the
+    // explicit count so it knows it has access to all slides + photos.
     content.push({
       type: "text",
       text:
-        "You will receive a PowerPoint deck as extracted slide text plus the slide media images.\n\nSlide text (ordered by slide number):\n" +
+        `You will receive a PowerPoint deck as extracted slide text plus ${extractedImages.length} unique slide media images.\n\nSlide text (ordered by slide number):\n` +
         slideTexts
           .map((t, i) => `Slide ${i + 1}: ${t || "(no text)"}`)
           .join("\n"),
     });
 
-    // Limit to 20 images so we don't blow the request budget.
-    for (const img of extractedImages.slice(0, 20)) {
+    // Pack images into the request. Largest first → if we hit the
+    // budget the dropped items are the smallest (template snippets),
+    // not the hero shots.
+    const MAX_IMAGES = 100;
+    const MAX_TOTAL_IMAGE_BYTES = 18 * 1024 * 1024;
+    const sortedBySize = [...extractedImages].sort(
+      (a, b) => b.bytes.length - a.bytes.length,
+    );
+    let runningBytes = 0;
+    let imagesAdded = 0;
+    // We need to preserve the original `extractedImages` order so the
+    // image_index Claude/Gemini returns lines up — instead of dropping
+    // entries from `extractedImages`, mark which ones are skipped and
+    // remember their indices so the post-AI image_index resolution
+    // can find the right blob.
+    const skipped = new Set<number>();
+    const sizeRank = new Map(extractedImages.map((img, idx) => [idx, img.bytes.length]));
+    for (const img of sortedBySize) {
+      const idx = extractedImages.indexOf(img);
+      if (imagesAdded >= MAX_IMAGES) {
+        skipped.add(idx);
+        continue;
+      }
+      if (runningBytes + img.bytes.length > MAX_TOTAL_IMAGE_BYTES) {
+        skipped.add(idx);
+        continue;
+      }
+      runningBytes += img.bytes.length;
+      imagesAdded += 1;
+    }
+    // Drop the skipped entries so the index returned by the model
+    // matches the array we keep around for storage upload.
+    if (skipped.size > 0) {
+      const filtered: typeof extractedImages = [];
+      extractedImages.forEach((img, idx) => {
+        if (!skipped.has(idx)) filtered.push(img);
+      });
+      extractedImages.length = 0;
+      extractedImages.push(...filtered);
+    }
+    // Logging so a future "where did my photo go?" report shows up
+    // clearly in the server console.
+    console.info(
+      `[extract] PPTX: ${mediaNames.length} media files, ${seenHashes.size} unique, ${extractedImages.length} sent (~${(runningBytes / 1024 / 1024).toFixed(1)} MB), avg size ${
+        extractedImages.length
+          ? Math.round(runningBytes / extractedImages.length / 1024)
+          : 0
+      } KB. Largest in source: ${
+        Array.from(sizeRank.values()).sort((a, b) => b - a)[0] ?? 0
+      } bytes.`,
+    );
+    for (const img of extractedImages) {
       content.push({
         type: "image",
         source: {
