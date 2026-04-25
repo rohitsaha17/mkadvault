@@ -4,6 +4,8 @@
 
 import {
   C,
+  FONT_BODY,
+  FONT_BOLD,
   PAGE_MARGIN_X,
   createDoc,
   docToBuffer,
@@ -91,14 +93,14 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Buffer> 
   sectionLabel(doc, "Bill to");
   doc.moveDown(0.25);
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.ink)
     .fontSize(11)
     .text(client.company_name + (client.brand_name ? `  •  ${client.brand_name}` : ""), {
       width: contentWidth,
     });
   doc.moveDown(0.1);
-  doc.font("Helvetica").fillColor(C.muted).fontSize(9);
+  doc.font(FONT_BODY).fillColor(C.muted).fontSize(9);
   if (client.billing_address) doc.text(client.billing_address, { width: contentWidth });
   const billCity = [client.billing_city, client.billing_state, client.billing_pin_code]
     .filter(Boolean)
@@ -132,7 +134,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Buffer> 
     sectionLabel(doc, "Terms & Conditions");
     doc.moveDown(0.2);
     doc
-      .font("Helvetica")
+      .font(FONT_BODY)
       .fillColor(C.muted)
       .fontSize(8.5)
       .text(trailingTerms, { width: contentWidth, lineGap: 2 });
@@ -142,7 +144,7 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Buffer> 
     sectionLabel(doc, "Notes");
     doc.moveDown(0.2);
     doc
-      .font("Helvetica")
+      .font(FONT_BODY)
       .fillColor(C.muted)
       .fontSize(8.5)
       .text(invoice.notes.trim(), { width: contentWidth, lineGap: 2 });
@@ -161,12 +163,12 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Buffer> 
     .stroke()
     .restore();
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.ink)
     .fontSize(9)
     .text("Authorised Signatory", sigX, sigY + 32, { width: sigW, align: "center" });
   doc
-    .font("Helvetica")
+    .font(FONT_BODY)
     .fillColor(C.muted)
     .fontSize(8)
     .text(`for ${org.name}`, sigX, sigY + 44, { width: sigW, align: "center" });
@@ -206,7 +208,7 @@ function drawLineItemsTable(
 
   const headerTextY = headerY + 7;
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.ink)
     .fontSize(8.5);
   let cx = PAGE_MARGIN_X + 8;
@@ -222,7 +224,7 @@ function drawLineItemsTable(
 
   doc.y = headerY + headerH;
 
-  doc.font("Helvetica").fillColor(C.ink).fontSize(9);
+  doc.font(FONT_BODY).fillColor(C.ink).fontSize(9);
   for (const item of lineItems) {
     const rowY = doc.y;
     const rowH = 22;
@@ -281,14 +283,14 @@ function drawTotalsBlock(
         .restore();
     }
     doc
-      .font(emphasise ? "Helvetica-Bold" : "Helvetica")
+      .font(emphasise ? FONT_BOLD : FONT_BODY)
       .fillColor(emphasise ? C.accent : C.muted)
       .fontSize(emphasise ? 11 : 9.5);
     doc.text(label, blockX + 12, y + (rowH - (emphasise ? 11 : 9.5)) / 2, {
       width: blockW / 2,
     });
     doc
-      .font(emphasise ? "Helvetica-Bold" : "Helvetica-Bold")
+      .font(emphasise ? FONT_BOLD : FONT_BOLD)
       .fillColor(emphasise ? C.accent : C.ink)
       .text(value, blockX + blockW / 2 - 12, y + (rowH - (emphasise ? 11 : 9.5)) / 2, {
         width: blockW / 2,
@@ -344,12 +346,12 @@ function drawBankBlock(
     const w = colW;
     const y = col === "left" ? leftY : rightY;
     doc
-      .font("Helvetica")
+      .font(FONT_BODY)
       .fillColor(C.muted)
       .fontSize(8)
       .text(label.toUpperCase(), x, y, { width: w, characterSpacing: 0.6 });
     doc
-      .font("Helvetica-Bold")
+      .font(FONT_BOLD)
       .fillColor(C.ink)
       .fontSize(9.5)
       .text(value, x, doc.y, { width: w });

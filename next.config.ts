@@ -25,6 +25,16 @@ const nextConfig: NextConfig = {
   // the data files exist.
   serverExternalPackages: ["pdfkit"],
 
+  // Force the .ttf files we read from `lib/pdf/fonts/` into the
+  // serverless deployment trace. Next's static-analysis output tracing
+  // misses files referenced by computed paths (path.join with
+  // process.cwd()), and without these the Vercel build would ship the
+  // route handler without the fonts and PDF generation would crash
+  // with ENOENT just like it did locally before.
+  outputFileTracingIncludes: {
+    "/api/pdf/**": ["./lib/pdf/fonts/*.ttf"],
+  },
+
   // Image optimisation — allow Supabase Storage buckets through the
   // Next.js image optimiser (smaller payloads, automatic webp/avif).
   images: {

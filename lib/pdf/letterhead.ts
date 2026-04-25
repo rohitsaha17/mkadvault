@@ -11,6 +11,24 @@
 //   sidesteps the whole React layer.
 
 import PDFDocument from "pdfkit";
+import path from "node:path";
+
+// Bundled Unicode TTF fonts. PDFKit's built-in Helvetica is WinAnsi-
+// encoded and silently falls back to "1" for any glyph outside that
+// range — the rupee sign ₹ (U+20B9) being the most common offender.
+// Noto Sans covers Indian + global glyphs with two ~620 KB files.
+//
+// We resolve the path against process.cwd() so the same code works in
+// dev (`pnpm dev` from project root) and in the Vercel runtime where
+// node modules live alongside the .next output.
+const FONT_DIR = path.join(process.cwd(), "lib", "pdf", "fonts");
+const FONT_REGULAR_PATH = path.join(FONT_DIR, "NotoSans-Regular.ttf");
+const FONT_BOLD_PATH = path.join(FONT_DIR, "NotoSans-Bold.ttf");
+
+// Aliases used throughout the document modules. Switching to a
+// different family is then a one-line change here.
+export const FONT_BODY = "Body";
+export const FONT_BOLD = "Body-Bold";
 
 // ─── Brand palette (hex — PDFKit accepts hex/RGB) ─────────────────────────
 export const C = {
@@ -62,7 +80,7 @@ export interface DocMeta {
  * expose neatly (line spacing, hairline rule, two-column grid).
  */
 export function createDoc(): InstanceType<typeof PDFDocument> {
-  return new PDFDocument({
+  const doc = new PDFDocument({
     size: "A4",
     margins: {
       top: PAGE_MARGIN_TOP,
@@ -75,6 +93,13 @@ export function createDoc(): InstanceType<typeof PDFDocument> {
     },
     autoFirstPage: true,
   });
+  // Register the Noto Sans TTFs as named fonts and set the regular
+  // weight as the document default. Subsequent font(...) calls in
+  // letterhead / document modules pass FONT_BODY or FONT_BOLD.
+  doc.registerFont(FONT_BODY, FONT_REGULAR_PATH);
+  doc.registerFont(FONT_BOLD, FONT_BOLD_PATH);
+  doc.font(FONT_BODY);
+  return doc;
 }
 
 /**
@@ -163,14 +188,14 @@ export function drawLetterhead(
 
   // Org name
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.ink)
     .fontSize(13)
     .text(org.name, textX, cursorY, { width: textW, lineGap: 2 });
   cursorY = doc.y + 2;
 
   // Address lines
-  doc.font("Helvetica").fillColor(C.muted).fontSize(8.5);
+  doc.font(FONT_BODY).fillColor(C.muted).fontSize(8.5);
   if (org.address) {
     doc.text(org.address, textX, cursorY, { width: textW });
     cursorY = doc.y;
@@ -207,7 +232,7 @@ export function drawLetterhead(
 
   // ── RIGHT: doc label / number / dates / status ──
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.accent)
     .fontSize(15)
     .text(meta.label, rightX, topY, {
@@ -219,7 +244,7 @@ export function drawLetterhead(
 
   if (meta.number) {
     doc
-      .font("Helvetica-Bold")
+      .font(FONT_BOLD)
       .fillColor(C.ink)
       .fontSize(10)
       .text(meta.number, rightX, rightCursorY, { width: rightW, align: "right" });
@@ -227,7 +252,7 @@ export function drawLetterhead(
   }
 
   if (meta.dateLines && meta.dateLines.length > 0) {
-    doc.font("Helvetica").fillColor(C.muted).fontSize(8.5);
+    doc.font(FONT_BODY).fillColor(C.muted).fontSize(8.5);
     for (const [label, value] of meta.dateLines) {
       doc.text(`${label}: ${value}`, rightX, rightCursorY, {
         width: rightW,
@@ -242,7 +267,7 @@ export function drawLetterhead(
     const pillText = meta.status.label;
     const pillH = 16;
     const pillFontSize = 8;
-    doc.font("Helvetica-Bold").fontSize(pillFontSize);
+    doc.font(FONT_BOLD).fontSize(pillFontSize);
     const pillW = doc.widthOfString(pillText) + 16;
     const pillX = rightX + rightW - pillW;
     const pillY = rightCursorY;
@@ -290,11 +315,11 @@ export function sectionLabel(
   text: string,
 ): void {
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.muted)
     .fontSize(8)
     .text(text.toUpperCase(), { characterSpacing: 0.8, lineGap: 2 });
-  doc.fillColor(C.ink).font("Helvetica");
+  doc.fillColor(C.ink).font(FONT_BODY);
 }
 
 /**
@@ -318,7 +343,7 @@ export function drawFooter(
     .lineTo(PAGE_MARGIN_X + w, y - 6)
     .stroke()
     .restore();
-  doc.font("Helvetica").fillColor(C.muted).fontSize(8);
+  doc.font(FONT_BODY).fillColor(C.muted).fontSize(8);
   doc.text(centerText, PAGE_MARGIN_X, y, { width: w, align: "left" });
   doc.text(
     `Page ${pageIndex + 1} of ${pageCount}`,

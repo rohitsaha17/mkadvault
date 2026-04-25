@@ -3,6 +3,8 @@
 
 import {
   C,
+  FONT_BODY,
+  FONT_BOLD,
   PAGE_MARGIN_X,
   createDoc,
   docToBuffer,
@@ -107,7 +109,7 @@ export async function renderPaymentRequestPdf(
     .fill(C.accentSoft)
     .restore();
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.accent)
     .fontSize(9)
     .text("AMOUNT REQUESTED", PAGE_MARGIN_X + 16, cardY + 12, {
@@ -115,7 +117,7 @@ export async function renderPaymentRequestPdf(
       characterSpacing: 0.6,
     });
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.accent)
     .fontSize(20)
     .text(inr(expense.amount_paise), PAGE_MARGIN_X + 16, cardY + 24, {
@@ -124,7 +126,7 @@ export async function renderPaymentRequestPdf(
     });
   if (tds > 0) {
     doc
-      .font("Helvetica")
+      .font(FONT_BODY)
       .fillColor(C.muted)
       .fontSize(8.5)
       .text(
@@ -168,7 +170,7 @@ export async function renderPaymentRequestPdf(
   sectionLabel(doc, "Audit");
   doc.moveDown(0.2);
   doc
-    .font("Helvetica")
+    .font(FONT_BODY)
     .fillColor(C.muted)
     .fontSize(9)
     .text(
@@ -183,7 +185,7 @@ export async function renderPaymentRequestPdf(
     sectionLabel(doc, "Terms & Conditions");
     doc.moveDown(0.2);
     doc
-      .font("Helvetica")
+      .font(FONT_BODY)
       .fillColor(C.muted)
       .fontSize(8.5)
       .text(termsText.trim(), { width: contentWidth, lineGap: 2 });
@@ -204,7 +206,7 @@ export async function renderPaymentRequestPdf(
     .stroke()
     .restore();
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.ink)
     .fontSize(9)
     .text("Authorised Signatory", sigX, sigY + 32, {
@@ -212,7 +214,7 @@ export async function renderPaymentRequestPdf(
       align: "center",
     });
   doc
-    .font("Helvetica")
+    .font(FONT_BODY)
     .fillColor(C.muted)
     .fontSize(8)
     .text(`for ${org.name}`, sigX, sigY + 44, { width: sigW, align: "center" });
@@ -235,14 +237,14 @@ function drawTwoColRow(
   label: string,
   value: string | null | undefined,
   valueColor: string = C.ink,
-  valueFont: string = "Helvetica-Bold",
+  valueFont: string = FONT_BOLD,
 ): void {
   if (value === null || value === undefined || value === "") return;
   const labelW = 120;
   const startX = doc.x;
   const startY = doc.y;
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.muted)
     .fontSize(8.5)
     .text(label.toUpperCase(), startX, startY, {
@@ -271,14 +273,14 @@ function drawFullRow(
   const startX = doc.x;
   const w = doc.page.width - PAGE_MARGIN_X * 2;
   doc
-    .font("Helvetica-Bold")
+    .font(FONT_BOLD)
     .fillColor(C.muted)
     .fontSize(8.5)
     .text(label.toUpperCase(), startX, doc.y, {
       width: w,
       characterSpacing: 0.5,
     });
-  doc.fontSize(10).fillColor(C.ink).font("Helvetica").text(value, startX, doc.y, {
+  doc.fontSize(10).fillColor(C.ink).font(FONT_BODY).text(value, startX, doc.y, {
     width: w,
     lineGap: 1,
   });

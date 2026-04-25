@@ -9,7 +9,7 @@ import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { subDays, startOfDay, endOfDay } from "date-fns";
-import { Receipt, IndianRupee, Calendar, ArrowRight } from "lucide-react";
+import { Receipt, IndianRupee, Calendar, ArrowRight, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
 import { inr, fmt } from "@/lib/utils";
@@ -58,6 +58,18 @@ export default async function ReceiptsPage({
   const session = await getSession();
   if (!session) redirect("/login");
   if (!session.profile?.org_id) redirect("/login");
+
+  // Receipt voucher download is finance/accounts/admin/super_admin
+  // only — match the API route's gate so we don't show buttons that
+  // would 403. Multi-role aware (migration 020).
+  const VOUCHER_ROLES = new Set(["super_admin", "admin", "accounts", "finance"]);
+  const rolesArr: string[] =
+    Array.isArray(session.profile.roles) && session.profile.roles.length > 0
+      ? session.profile.roles
+      : session.profile.role
+        ? [session.profile.role]
+        : [];
+  const canIssueVoucher = rolesArr.some((r) => VOUCHER_ROLES.has(r));
 
   const supabase = await createClient();
 
@@ -226,6 +238,7 @@ export default async function ReceiptsPage({
                     <th className="px-4 py-3 text-left">Mode</th>
                     <th className="px-4 py-3 text-left">Reference</th>
                     <th className="px-4 py-3 text-right">Amount</th>
+                    {canIssueVoucher && <th className="px-4 py-3 text-right">Voucher</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -270,6 +283,19 @@ export default async function ReceiptsPage({
                       <td className="px-4 py-3 text-right font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
                         {inr(r.amount_paise)}
                       </td>
+                      {canIssueVoucher && (
+                        <td className="px-4 py-3 text-right">
+                          <a
+                            href={`/api/pdf/receipt-voucher/${r.id}`}
+                            download
+                            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground hover:bg-muted"
+                            title="Download receipt voucher"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Voucher
+                          </a>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
