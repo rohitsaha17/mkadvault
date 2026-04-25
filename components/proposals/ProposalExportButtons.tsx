@@ -7,10 +7,22 @@
 // logo + contact details. Keeping ProposalPDFButton + ProposalDocument
 // in the repo for now in case we need to restore it later, but nothing
 // imports them anymore.
+import dynamic from "next/dynamic";
 import type { Proposal } from "@/lib/types/database";
 import type { SiteForProposal } from "@/app/[locale]/(dashboard)/proposals/new/page";
 import type { ProposalDocumentProps } from "./ProposalDocument";
-import { ProposalPptxButton } from "./ProposalPptxButton";
+
+// pptxgenjs imports node:fs / node:https at module load. Statically
+// importing ProposalPptxButton dragged that into the client bundle and
+// broke the dev compiler with "UnhandledSchemeError: Reading from
+// 'node:fs' is not handled by plugins". Wrapping the button in
+// next/dynamic with ssr:false isolates pptxgenjs into a client-only
+// chunk that's only loaded when the user clicks Download — same pattern
+// PaymentRequestPDFButton already uses for @react-pdf/renderer.
+const ProposalPptxButton = dynamic(
+  () => import("./ProposalPptxButton").then((m) => m.ProposalPptxButton),
+  { ssr: false },
+);
 
 interface Props {
   proposal: Proposal;

@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
+import path from "node:path";
 
 // next-intl plugin — connects the i18n/request.ts config to Next.js
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
@@ -36,6 +37,41 @@ const nextConfig: NextConfig = {
 
   // Drop the "Powered by Next.js" header (tiny perf + security)
   poweredByHeader: false,
+
+  // pptxgenjs imports node:fs / node:https / node:http even though it
+  // never executes them in the browser path. Webpack's default resolver
+  // doesn't handle the `node:` scheme on the client and throws
+  // UnhandledSchemeError, breaking dev compile of every page that
+  // pulls in ProposalWizard.
+  //
+  // resolve.fallback covers bare specifiers ("fs"); for the
+  // node:-prefixed forms we register a NormalModuleReplacementPlugin
+  // that rewrites them to an empty stub. Both pieces are needed —
+  // some packages mix bare and node:-prefixed imports.
+  webpack: (config, { isServer, webpack }) => {
+    if (!isServer) {
+      config.resolve = config.resolve ?? {};
+      config.resolve.fallback = {
+        ...(config.resolve.fallback ?? {}),
+        fs: false,
+        https: false,
+        http: false,
+        path: false,
+        crypto: false,
+        stream: false,
+        zlib: false,
+        os: false,
+      };
+      config.plugins = config.plugins ?? [];
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(
+          /^node:(fs|https|http|path|crypto|stream|zlib|os)$/,
+          path.resolve(process.cwd(), "lib/empty-module.js"),
+        ),
+      );
+    }
+    return config;
+  },
 };
 
 export default withNextIntl(nextConfig);
