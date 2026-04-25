@@ -15,6 +15,7 @@ import {
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { deriveCampaignStatus } from "@/lib/campaigns/derive";
 import { Plus, Search, LayoutList, Columns, Pencil, Megaphone } from "lucide-react";
 import { KanbanBoard } from "@/components/campaigns/KanbanBoard";
 import { ListExportMenu } from "@/components/shared/ListExportMenu";
@@ -362,7 +363,13 @@ export default async function CampaignsPage({
                       {inr(c.total_value_paise)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={c.status} />
+                      {/* Display-only status reflects today's date —
+                          before start_date it shows "Yet to start",
+                          after end_date it shows "Completed", etc.
+                          The DB row only ever moves between live →
+                          completed → cancelled, but the badge gives
+                          the user the more meaningful read at a glance. */}
+                      <StatusBadge status={deriveCampaignStatus(c)} />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">

@@ -6,6 +6,11 @@ import {
   draftCampaignSchema, changeRequestSchema, reviewChangeRequestSchema,
 } from "@/lib/validations/campaign";
 import type { CampaignStatus } from "@/lib/types/database";
+import {
+  computeCampaignValuePaise,
+  initialCampaignDbStatus,
+  recomputeCampaignTotalValue,
+} from "@/lib/campaigns/derive";
 
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 type ActionResult = { error: string } | { success: true; id: string };
@@ -23,17 +28,9 @@ async function getOrgAndUser() {
 function n(v: number | undefined | null) { return v != null ? Math.round(v * 100) : null; }
 function str(v?: string) { return v?.trim() || null; }
 
-// Derive the right initial status from a campaign's end_date. Almost
-// always "live" — only "completed" when the user is back-filling a
-// booking whose end has already passed. This matches the simplified
-// status model from migration 035.
-function campaignStatusFromDates(endDate: string | null): CampaignStatus {
-  if (!endDate) return "live";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const end = new Date(endDate);
-  return end < today ? "completed" : "live";
-}
+// Persisted status comes from lib/campaigns/derive.ts → initialCampaignDbStatus.
+// "Yet to start" is a display-only state derived on read so editing
+// dates instantly flips the badge without us writing back to the DB.
 
 // ─── Create campaign (with optional sites + services) ─────────────────────────
 
@@ -46,6 +43,25 @@ export async function createCampaign(values: unknown): Promise<ActionResult> {
     if (!ctx) return { error: "Not authenticated" };
 
     const d = parsed.data;
+
+    // Compute total_value server-side from the actual sites + services
+    // so the campaign list never shows ₹0 just because the form forgot
+    // to submit a manual total. Bundled mode keeps the user-entered
+    // package price (the whole point of bundled pricing).
+    const totalValuePaise = computeCampaignValuePaise({
+      pricing_type: d.pricing_type,
+      sites: d.sites.map((s) => ({
+        display_rate_inr: s.display_rate_inr,
+        rate_type: s.rate_type ?? "per_month",
+        start_date: s.start_date ?? null,
+        end_date: s.end_date ?? null,
+      })),
+      services: d.services.map((s) => ({
+        rate_inr: s.rate_inr,
+        quantity: s.quantity,
+      })),
+      manualTotalInr: d.total_value_inr,
+    });
 
     // Insert campaign
     //
@@ -76,13 +92,12 @@ export async function createCampaign(values: unknown): Promise<ActionResult> {
             : null,
         start_date: str(d.start_date),
         end_date: str(d.end_date),
-        // A campaign is LIVE the moment it's created. If end_date is
-        // already in the past (rare, but happens when booking historical
-        // bookings for reporting) mark it completed straight away so the
-        // status reflects reality.
-        status: campaignStatusFromDates(str(d.end_date)),
+        // DB only stores live / completed / cancelled. "Yet to start"
+        // is a display-only state derived on read so editing dates
+        // instantly flips the badge without a write.
+        status: initialCampaignDbStatus(str(d.end_date)),
         pricing_type: d.pricing_type,
-        total_value_paise: n(d.total_value_inr),
+        total_value_paise: totalValuePaise,
         notes: str(d.notes),
       })
       .select("id")
@@ -185,12 +200,22 @@ export async function updateCampaign(id: string, values: unknown): Promise<Actio
         start_date: str(d.start_date),
         end_date: str(d.end_date),
         pricing_type: d.pricing_type,
-        total_value_paise: n(d.total_value_inr),
+        // Bundled campaigns trust the user-entered package price.
+        // Itemized campaigns get their value recomputed from existing
+        // sites + services right after this update lands.
+        total_value_paise:
+          d.pricing_type === "bundled" ? n(d.total_value_inr) : undefined,
         notes: str(d.notes),
       })
       .eq("id", id);
 
     if (error) return { error: error.message };
+
+    // For itemized campaigns, recompute the total from the actual
+    // line-item rows so the displayed value tracks reality.
+    if (d.pricing_type === "itemized") {
+      await recomputeCampaignTotalValue(ctx.supabase, id);
+    }
 
     await ctx.supabase.from("campaign_activity_log").insert({
       organization_id: ctx.orgId,
@@ -326,6 +351,11 @@ export async function addCampaignSite(campaignId: string, values: unknown): Prom
 
     if (error) return { error: error.message };
 
+    // Adding a site shifts the campaign value — recompute now so the
+    // list view reflects the new total without waiting for an unrelated
+    // edit.
+    await recomputeCampaignTotalValue(ctx.supabase, campaignId);
+
     await ctx.supabase.from("campaign_activity_log").insert({
       organization_id: ctx.orgId,
       campaign_id: campaignId,
@@ -359,6 +389,9 @@ export async function removeCampaignSite(
       .eq("id", campaignSiteId);
 
     if (error) return { error: error.message };
+
+    // Removing a site shrinks the value — recompute now.
+    await recomputeCampaignTotalValue(ctx.supabase, campaignId);
 
     await ctx.supabase.from("campaign_activity_log").insert({
       organization_id: ctx.orgId,
@@ -482,6 +515,11 @@ export async function extendCampaign(
         .eq("end_date", current.end_date);
     }
 
+    // Per-month rates × days math means extending the date range
+    // bumps the total. Recompute so the value reflects the new
+    // duration immediately.
+    await recomputeCampaignTotalValue(ctx.supabase, campaignId);
+
     await ctx.supabase.from("campaign_activity_log").insert({
       organization_id: ctx.orgId,
       campaign_id: campaignId,
@@ -513,6 +551,25 @@ export async function saveCampaignDraft(values: unknown): Promise<ActionResult> 
 
     const d = parsed.data;
 
+    // Drafts also auto-compute their value so the list view shows a
+    // sensible figure the moment a draft has any line items, instead
+    // of ₹0 until the user fills the manual total.
+    const draftPricingType = d.pricing_type ?? "itemized";
+    const totalValuePaise = computeCampaignValuePaise({
+      pricing_type: draftPricingType,
+      sites: (d.sites ?? []).map((s) => ({
+        display_rate_inr: s.display_rate_inr,
+        rate_type: s.rate_type ?? "per_month",
+        start_date: s.start_date ?? null,
+        end_date: s.end_date ?? null,
+      })),
+      services: (d.services ?? []).map((s) => ({
+        rate_inr: s.rate_inr,
+        quantity: s.quantity,
+      })),
+      manualTotalInr: d.total_value_inr,
+    });
+
     const { data: campaign, error: campError } = await ctx.supabase
       .from("campaigns")
       .insert({
@@ -539,9 +596,9 @@ export async function saveCampaignDraft(values: unknown): Promise<ActionResult> 
         // Drafts and real creates share the same live/completed derivation
         // — drafts are just partial entries, but once saved they behave
         // like any other live campaign.
-        status: campaignStatusFromDates(str(d.end_date)),
-        pricing_type: d.pricing_type ?? "itemized",
-        total_value_paise: n(d.total_value_inr),
+        status: initialCampaignDbStatus(str(d.end_date)),
+        pricing_type: draftPricingType,
+        total_value_paise: totalValuePaise,
         notes: str(d.notes),
       })
       .select("id")

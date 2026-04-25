@@ -16,6 +16,7 @@ import { CampaignActivityTimeline, type ActivityEntry } from "@/components/campa
 import { CampaignPhotosTab } from "@/components/campaigns/CampaignPhotosTab";
 import { SitePreviewModal } from "@/components/sites/SitePreviewModal";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { deriveCampaignStatus } from "@/lib/campaigns/derive";
 import { fmt, inr } from "@/lib/utils";
 import { getSignedUrls } from "@/lib/supabase/signed-urls";
 import type {
@@ -279,7 +280,10 @@ export default async function CampaignDetailPage({
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
               {campaign.campaign_name}
             </h1>
-            <StatusBadge status={campaign.status} />
+            {/* Display-only status: derived from start_date / end_date so
+                date edits flip the badge instantly. DB status (used by
+                the action buttons below) still drives mutations. */}
+            <StatusBadge status={deriveCampaignStatus(campaign)} />
             {campaign.campaign_code && (
               <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
                 {campaign.campaign_code}

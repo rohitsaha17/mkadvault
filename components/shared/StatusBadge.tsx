@@ -41,7 +41,10 @@ const STATUS_TONE: Record<string, Tone> = {
   maintenance: "warning",
   blocked: "neutral",
   expired: "danger",
-  // Campaign statuses — just the three kept after migration 035.
+  // Campaign statuses — DB stores just three after migration 035.
+  // "yet_to_start" is a display-only state derived from start_date so
+  // edits to dates flip the badge without a write back to the DB.
+  yet_to_start: "info",
   live: "live",
   completed: "archived",
   cancelled: "danger",
