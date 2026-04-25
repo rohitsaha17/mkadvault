@@ -564,14 +564,18 @@ function ReviewCard({
             </Field>
             <Field label="Traffic side">
               <select
-                value={row.traffic_side}
-                onChange={(e) =>
+                value={row.traffic_side ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
                   onChange({
-                    traffic_side: e.target.value as ReviewRow["traffic_side"],
-                  })
-                }
+                    traffic_side: v === ""
+                      ? null
+                      : (v as Exclude<ReviewRow["traffic_side"], null | undefined>),
+                  });
+                }}
                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
               >
+                <option value="">— Optional —</option>
                 {TRAFFIC_SIDES.map((m) => (
                   <option key={m} value={m}>
                     {m}

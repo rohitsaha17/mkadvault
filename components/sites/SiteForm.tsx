@@ -543,11 +543,11 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
                 />
               </FormField>
 
-              <FormField label="Traffic Side" error={errors.traffic_side?.message} required>
+              <FormField label="Traffic Side" error={errors.traffic_side?.message}>
                 <NativeSelect
                   {...register("traffic_side")}
                   options={[
-                    { value: "", label: "— Select —" },
+                    { value: "", label: "— Select (optional) —" },
                     { value: "lhs", label: "Left Hand Side" },
                     { value: "rhs", label: "Right Hand Side" },
                     { value: "both", label: "Both Sides" },
@@ -562,7 +562,7 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
                 <NativeSelect
                   {...register("facing")}
                   options={[
-                    { value: "", label: "— Select —" },
+                    { value: "", label: "— Select (optional) —" },
                     { value: "N", label: "North" },
                     { value: "S", label: "South" },
                     { value: "E", label: "East" },

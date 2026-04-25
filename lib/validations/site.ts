@@ -55,9 +55,10 @@ export const siteSchema = z.object({
   longitude: optionalNumber,
 
   // ── Step 3: Specifications ─────────────────────────────────────────────
-  // Width, height, illumination, traffic_side are mandatory per spec — every
-  // physical site must declare these. Facing + visibility distance remain
-  // optional because older stock sometimes lacks this data.
+  // Width, height, illumination are mandatory per spec — every physical site
+  // must declare these. Facing, traffic_side, and visibility distance remain
+  // optional because older stock and imported third-party sites often lack
+  // this data.
   //
   // NaN-safe: preprocess a cleared number input ("" / null / NaN) into
   // undefined so the schema surfaces the intended "X is required" message
@@ -82,10 +83,20 @@ export const siteSchema = z.object({
   illumination: z.enum(["frontlit", "backlit", "digital", "nonlit"], {
     message: "Select an illumination type",
   }),
-  facing: z.enum(["N", "S", "E", "W", "NE", "NW", "SE", "SW"]).optional(),
-  traffic_side: z.enum(["lhs", "rhs", "both"], {
-    message: "Select a traffic side",
-  }),
+  // The placeholder option in the SiteForm submits an empty string when
+  // the user leaves these blank. Coerce "" → undefined so the enum's
+  // .optional() accepts the value instead of erroring with "Invalid enum
+  // value". Same trick we use for landowner_id below.
+  facing: z
+    .preprocess(
+      (v) => (v === "" || v === null ? undefined : v),
+      z.enum(["N", "S", "E", "W", "NE", "NW", "SE", "SW"]).optional(),
+    ),
+  traffic_side: z
+    .preprocess(
+      (v) => (v === "" || v === null ? undefined : v),
+      z.enum(["lhs", "rhs", "both"]).optional(),
+    ),
   visibility_distance_m: optionalPositiveNumber,
   // Extra dimensions the user adds — e.g. {label:"Depth", value:"3 ft"}.
   // Stored as JSONB on the sites table. Each entry must have a non-empty
@@ -116,8 +127,8 @@ export const siteSchema = z.object({
 export type SiteFormValues = z.infer<typeof siteSchema>;
 
 // Default values for a blank new-site form.
-// Width/height/illumination/traffic_side are declared required in the schema
-// but intentionally left undefined here so the user is forced to pick — zod
+// Width/height/illumination are declared required in the schema but
+// intentionally left undefined here so the user is forced to pick — zod
 // surfaces the validation error on submit if they skip them.
 export const siteFormDefaults: Partial<SiteFormValues> = {
   name: "",

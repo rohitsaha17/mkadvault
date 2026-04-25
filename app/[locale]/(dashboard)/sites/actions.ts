@@ -503,7 +503,7 @@ export interface ImportSiteInput {
   height_ft: number;
   illumination: "frontlit" | "backlit" | "digital" | "nonlit";
   facing?: "N" | "S" | "E" | "W" | "NE" | "NW" | "SE" | "SW" | null;
-  traffic_side: "lhs" | "rhs" | "both";
+  traffic_side?: "lhs" | "rhs" | "both" | null;
   visibility_distance_m?: number | null;
   base_rate_inr?: number | null;
   notes?: string | null;
@@ -571,7 +571,7 @@ export async function createSitesFromImport(
         height_ft: row.height_ft,
         illumination: row.illumination,
         facing: row.facing ?? null,
-        traffic_side: row.traffic_side,
+        traffic_side: row.traffic_side ?? null,
         visibility_distance_m: row.visibility_distance_m
           ? Math.round(row.visibility_distance_m)
           : null,
