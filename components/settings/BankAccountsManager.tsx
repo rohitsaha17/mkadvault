@@ -129,9 +129,11 @@ export function BankAccountsManager({ accounts }: Props) {
             is_primary: draft.is_primary,
           }),
         });
-        const data = await res.json().catch(() => ({}));
-        if (data?.error) {
-          toast.error(data.error);
+        const raw = await res.text();
+        let data: { error?: string } = {};
+        try { data = raw ? JSON.parse(raw) : {}; } catch {}
+        if (!res.ok || data.error) {
+          toast.error(data.error ?? `Save failed (${res.status})`);
           return;
         }
         toast.success(isUpdate ? "Bank account updated" : "Bank account added");
@@ -151,9 +153,11 @@ export function BankAccountsManager({ accounts }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_primary: true }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (data?.error) {
-        toast.error(data.error);
+      const raw = await res.text();
+      let data: { error?: string } = {};
+      try { data = raw ? JSON.parse(raw) : {}; } catch {}
+      if (!res.ok || data.error) {
+        toast.error(data.error ?? `Update failed (${res.status})`);
         return;
       }
       toast.success("Primary account updated");
@@ -168,9 +172,11 @@ export function BankAccountsManager({ accounts }: Props) {
         method: "DELETE",
         credentials: "same-origin",
       });
-      const data = await res.json().catch(() => ({}));
-      if (data?.error) {
-        toast.error(data.error);
+      const raw = await res.text();
+      let data: { error?: string } = {};
+      try { data = raw ? JSON.parse(raw) : {}; } catch {}
+      if (!res.ok || data.error) {
+        toast.error(data.error ?? `Remove failed (${res.status})`);
         return;
       }
       toast.success("Bank account removed");

@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Loader2, X, Upload, Trash2, Info, ArrowRight } from "lucide-react";
@@ -89,6 +90,7 @@ export function NewExpenseDialog({
   triggerVariant = "default",
   triggerSize = "sm",
 }: Props) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
@@ -219,7 +221,12 @@ export function NewExpenseDialog({
         toast.success("Payment request created");
         setOpen(false);
         resetAll();
-        onCreated?.();
+        // Refresh whatever list / cost-rollup the parent is showing.
+        // The optional onCreated callback wins over a plain refresh
+        // when the caller wants finer control (e.g. clearing local
+        // selection state too).
+        if (onCreated) onCreated();
+        else router.refresh();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Save failed");
       }

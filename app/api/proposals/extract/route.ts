@@ -23,7 +23,9 @@
 
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import Anthropic from "@anthropic-ai/sdk";
+// Anthropic SDK is dynamically imported inside callAnthropic() so the
+// module isn't loaded on Gemini-only runs (the common case for this
+// app). Saves ~60 KB of route-handler startup cost per invocation.
 import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
 import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/server";
@@ -597,6 +599,10 @@ async function callAnthropic(
   apiKey: string,
   content: ContentBlock[],
 ): Promise<ExtractedSite[]> {
+  // Lazy import — pulls @anthropic-ai/sdk into the route's process
+  // memory only when an Anthropic-bound run is actually about to
+  // happen. The default Gemini path skips this entirely.
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const anthropic = new Anthropic({ apiKey });
   const response = await anthropic.messages.create({
     model: ANTHROPIC_MODEL,

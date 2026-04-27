@@ -87,9 +87,28 @@ const SERVICE_TYPES = [
 
 // ─── GST calculation ──────────────────────────────────────────────────────────
 
+// GSTINs are exactly 15 chars; the first 2 are the state code. We
+// only accept properly-shaped GSTINs as evidence for the state-code
+// comparison so a malformed entry (e.g. "1") doesn't silently flip
+// CGST/SGST → IGST. When either GSTIN is malformed we default to
+// intra-state (CGST + SGST) — that's the safer fallback because
+// CGST/SGST is collected in the supplier's state and IGST routes
+// through a different account; mistakenly issuing IGST when it
+// should have been split is harder to fix than the reverse.
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+
+function gstinStateCode(gstin: string | null | undefined): string | null {
+  if (!gstin) return null;
+  const trimmed = gstin.trim().toUpperCase();
+  if (!GSTIN_RE.test(trimmed)) return null;
+  return trimmed.slice(0, 2);
+}
+
 function calcGST(subtotalPaise: number, supplierGstin: string | null, buyerGstin: string | null) {
-  const ss = supplierGstin?.slice(0, 2);
-  const bs = buyerGstin?.slice(0, 2);
+  const ss = gstinStateCode(supplierGstin);
+  const bs = gstinStateCode(buyerGstin);
+  // Inter-state only when BOTH GSTINs are well-formed AND their state
+  // codes differ. Anything else falls back to intra-state.
   const isInter = !!(ss && bs && ss !== bs);
   const gst18 = Math.round(subtotalPaise * 0.18);
   return {

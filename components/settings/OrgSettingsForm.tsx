@@ -61,12 +61,21 @@ export function OrgSettingsForm({
         credentials: "same-origin",
         body: fd,
       });
-      const data = await res.json().catch(() => ({}));
-      if (data?.error) {
-        toast.error(data.error);
+      const raw = await res.text();
+      let data: { error?: string; signedUrl?: string } = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        // Non-JSON response (HTML 500 page, plain-text 413). Surface
+        // the status + a body excerpt so the user gets a real reason
+        // instead of a silent retry.
+      }
+      if (!res.ok || data.error) {
+        const excerpt = raw.slice(0, 200).replace(/<[^>]+>/g, " ").trim();
+        toast.error(data.error ?? `Upload failed (${res.status})${excerpt ? ": " + excerpt : ""}`);
         return;
       }
-      if (data?.signedUrl) setLogoPreviewUrl(data.signedUrl);
+      if (data.signedUrl) setLogoPreviewUrl(data.signedUrl);
       toast.success("Logo updated");
       router.refresh();
     } catch (err) {
@@ -84,9 +93,16 @@ export function OrgSettingsForm({
         method: "DELETE",
         credentials: "same-origin",
       });
-      const data = await res.json().catch(() => ({}));
-      if (data?.error) {
-        toast.error(data.error);
+      const raw = await res.text();
+      let data: { error?: string } = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        // see logo-upload comment for rationale
+      }
+      if (!res.ok || data.error) {
+        const excerpt = raw.slice(0, 200).replace(/<[^>]+>/g, " ").trim();
+        toast.error(data.error ?? `Remove failed (${res.status})${excerpt ? ": " + excerpt : ""}`);
         return;
       }
       setLogoPreviewUrl(null);
