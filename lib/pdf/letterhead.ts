@@ -11,6 +11,7 @@
 //   sidesteps the whole React layer.
 
 import PDFDocument from "pdfkit";
+import fs from "node:fs";
 import path from "node:path";
 
 // Bundled Unicode TTF fonts. PDFKit's built-in Helvetica is WinAnsi-
@@ -18,12 +19,53 @@ import path from "node:path";
 // range — the rupee sign ₹ (U+20B9) being the most common offender.
 // Noto Sans covers Indian + global glyphs with two ~620 KB files.
 //
-// We resolve the path against process.cwd() so the same code works in
-// dev (`pnpm dev` from project root) and in the Vercel runtime where
-// node modules live alongside the .next output.
-const FONT_DIR = path.join(process.cwd(), "lib", "pdf", "fonts");
-const FONT_REGULAR_PATH = path.join(FONT_DIR, "NotoSans-Regular.ttf");
-const FONT_BOLD_PATH = path.join(FONT_DIR, "NotoSans-Bold.ttf");
+// Path resolution is defensive: we try several candidates because
+//   • `pnpm dev` runs with cwd = project root, so process.cwd() works
+//   • Vercel serverless deploys run with cwd = /var/task and the
+//     traced fonts land at /var/task/lib/pdf/fonts/* — process.cwd()
+//     also works there, but only when outputFileTracingIncludes
+//     successfully shipped the .ttf bytes.
+//   • If the trace step ever drops the files we still want the route
+//     to surface a clear error at boot rather than crash mid-render.
+//
+// Reading the bytes once at module load and caching them as Buffers
+// also lets us pass `Buffer` directly to PDFKit's registerFont,
+// avoiding a fresh fs.readFileSync on every PDF generated.
+const FONT_DIR_CANDIDATES = [
+  path.join(process.cwd(), "lib", "pdf", "fonts"),
+  // Fallback for Vercel/Next that resolves relative to this module's
+  // compiled location. Works whether the bundler ships JS into
+  // .next/server/app/api/... or .next/server/app/...
+  path.join(__dirname, "fonts"),
+];
+
+function resolveFontDir(): string {
+  for (const candidate of FONT_DIR_CANDIDATES) {
+    try {
+      // Statting `Regular` is enough — we only ship two files together.
+      fs.accessSync(path.join(candidate, "NotoSans-Regular.ttf"));
+      return candidate;
+    } catch {
+      // try next
+    }
+  }
+  throw new Error(
+    `[pdf] Couldn't locate Noto Sans fonts. Tried: ${FONT_DIR_CANDIDATES.join(", ")}. ` +
+      `Check next.config.ts:outputFileTracingIncludes for /api/pdf/**.`,
+  );
+}
+
+let cachedFontBytes: { regular: Buffer; bold: Buffer } | null = null;
+
+function loadFontBytes(): { regular: Buffer; bold: Buffer } {
+  if (cachedFontBytes) return cachedFontBytes;
+  const dir = resolveFontDir();
+  cachedFontBytes = {
+    regular: fs.readFileSync(path.join(dir, "NotoSans-Regular.ttf")),
+    bold: fs.readFileSync(path.join(dir, "NotoSans-Bold.ttf")),
+  };
+  return cachedFontBytes;
+}
 
 // Aliases used throughout the document modules. Switching to a
 // different family is then a one-line change here.
@@ -93,11 +135,13 @@ export function createDoc(): InstanceType<typeof PDFDocument> {
     },
     autoFirstPage: true,
   });
-  // Register the Noto Sans TTFs as named fonts and set the regular
-  // weight as the document default. Subsequent font(...) calls in
-  // letterhead / document modules pass FONT_BODY or FONT_BOLD.
-  doc.registerFont(FONT_BODY, FONT_REGULAR_PATH);
-  doc.registerFont(FONT_BOLD, FONT_BOLD_PATH);
+  // Register the Noto Sans TTFs from cached Buffers so PDFKit doesn't
+  // re-read the .ttf bytes from disk on every PDF generated, and so a
+  // missing-file failure on a misconfigured deploy surfaces at module
+  // load (not in the middle of a render).
+  const fonts = loadFontBytes();
+  doc.registerFont(FONT_BODY, fonts.regular);
+  doc.registerFont(FONT_BOLD, fonts.bold);
   doc.font(FONT_BODY);
   return doc;
 }

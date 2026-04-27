@@ -76,7 +76,10 @@ export function ExportMenu({ data, columns, filenameBase }: ExportMenuProps) {
   const exportExcel = useCallback(async () => {
     setBusy(true);
     try {
-      const XLSX = await import("xlsx");
+      // Use @e965/xlsx — a community fork of SheetJS that ships
+      // 0.20.x security fixes (Prototype Pollution + ReDoS) that the
+      // upstream `xlsx` package on npm never received. Same API.
+      const XLSX = await import("@e965/xlsx");
       const aoaData = [
         columns.map((c) => c.header),
         ...data.map((row) => columns.map((col) => cellValue(col, row))),
