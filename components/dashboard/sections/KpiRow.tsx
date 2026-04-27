@@ -56,10 +56,14 @@ export async function KpiRow({ orgId }: { orgId: string }) {
       .eq("status", "paid")
       .gte("payment_date", lastMonthStart)
       .lte("payment_date", lastMonthEnd),
+    // Sites in the "available pool" — counted in the occupancy
+    // denominator. Excludes maintenance / blocked / expired so a
+    // structure under repair doesn't drag the % down.
     supabase
       .from("sites")
       .select("id")
       .eq("organization_id", orgId)
+      .in("status", ["available", "booked"])
       .is("deleted_at", null),
     supabase
       .from("sites")

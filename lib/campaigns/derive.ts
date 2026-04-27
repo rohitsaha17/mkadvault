@@ -200,17 +200,20 @@ export async function recomputeCampaignTotalValue(
     return { totalPaise: (data?.total_value_paise as number | null) ?? 0 };
   }
 
+  // campaign_sites and campaign_services don't have deleted_at —
+  // they cascade via the parent campaign's delete. We're already
+  // gated on a single campaignId so this is safe; any join into
+  // those tables from a list view should still filter on the parent
+  // campaign's deleted_at.
   const [{ data: sites }, { data: services }] = await Promise.all([
     supabase
       .from("campaign_sites")
       .select("display_rate_paise, rate_type, start_date, end_date")
-      .eq("campaign_id", campaignId)
-      .is("deleted_at", null),
+      .eq("campaign_id", campaignId),
     supabase
       .from("campaign_services")
       .select("rate_paise, quantity, total_paise")
-      .eq("campaign_id", campaignId)
-      .is("deleted_at", null),
+      .eq("campaign_id", campaignId),
   ]);
 
   // The DB stores rate as paise; recomputeCampaignTotalValue receives

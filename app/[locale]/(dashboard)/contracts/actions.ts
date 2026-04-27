@@ -173,7 +173,10 @@ export async function createContract(values: unknown): Promise<ActionResult> {
       d.end_date,
       rentPaise,
       d.payment_day_of_month ?? null,
-      d.payment_date ?? null,
+      // str() not "?? null" — the form's <input type=date> submits ""
+      // when blank, which Postgres rejects on a DATE column. Trim and
+      // coerce empty / whitespace to null.
+      str(d.payment_date),
       d.revenue_share_percentage ?? null,
       minGuaranteePaise,
     );

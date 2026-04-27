@@ -122,15 +122,36 @@ export async function getSiteAnalytics(
   const supabase = await createClient();
 
   // ── 1. Campaign bookings that overlap the window ─────────────────────────
-  // Pull every booking where the booking window touches ours.
+  // Pull every booking where the booking window touches ours. We
+  // explicitly filter out rows whose parent campaign has been
+  // soft-deleted — campaign_sites doesn't carry a deleted_at column
+  // of its own, so the embed lets us read the parent's flag and the
+  // post-fetch filter drops orphans. Without this, ghost revenue
+  // from voided campaigns would inflate the per-site P&L.
   const { data: bookings } = await supabase
     .from("campaign_sites")
-    .select("campaign_id, start_date, end_date, display_rate_paise, status")
+    .select(
+      "campaign_id, start_date, end_date, display_rate_paise, status, " +
+        "campaign:campaigns!inner(deleted_at, status)",
+    )
     .eq("site_id", siteId)
     .lte("start_date", toDate)
-    .gte("end_date", fromDate);
+    .gte("end_date", fromDate)
+    .is("campaign.deleted_at", null);
 
-  const bookingRows = bookings ?? [];
+  // Drop rows where the parent campaign is cancelled — cancelled
+  // bookings shouldn't show up as revenue either.
+  type BookingRow = {
+    campaign_id: string;
+    start_date: string | null;
+    end_date: string | null;
+    display_rate_paise: number | null;
+    status: string;
+    campaign: { deleted_at: string | null; status: string } | null;
+  };
+  const bookingRows = ((bookings ?? []) as unknown as BookingRow[]).filter(
+    (b) => b.campaign?.status !== "cancelled",
+  );
 
   // ── 2. Paid expenses for this site in the window ─────────────────────────
   const { data: expensesPaid } = await supabase
@@ -192,8 +213,15 @@ export async function getSiteAnalytics(
   );
 
   // ── 7. Occupancy ─────────────────────────────────────────────────────────
+  // Drop bookings with missing dates — totalCoveredDays needs both
+  // edges. A booking row with null dates is data-entry residue and
+  // contributes 0 days anyway.
   const booked_days = totalCoveredDays(
-    bookingRows.map((b) => ({ start: b.start_date, end: b.end_date })),
+    bookingRows
+      .filter((b): b is typeof b & { start_date: string; end_date: string } =>
+        Boolean(b.start_date && b.end_date),
+      )
+      .map((b) => ({ start: b.start_date, end: b.end_date })),
     fromDate,
     toDate,
   );
@@ -216,6 +244,7 @@ export async function getSiteAnalytics(
   // Revenue — attribute each booking's rate to the month its start_date falls
   // in (approximate; fine for the chart). If start < bucket window, use start.
   for (const b of bookingRows) {
+    if (!b.start_date) continue;
     const k = monthKey(b.start_date < fromDate ? fromDate : b.start_date);
     if (k in buckets) {
       buckets[k].revenue_paise += b.display_rate_paise ?? 0;
