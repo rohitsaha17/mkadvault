@@ -15,6 +15,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Uploads can be chunky — bump beyond the default 1 MB body limit.
 export const maxDuration = 30;
@@ -75,6 +76,19 @@ export async function POST(
     .eq("id", user.id)
     .single();
   if (!profile?.org_id) return jsonErr("No organisation linked to your profile");
+
+  // Rate limit: 60 photo uploads per user per hour. Generous because
+  // legitimate field-team usage uploads 5-10 photos per site visit
+  // and an ops user might add 30 sites in a session. The cap exists
+  // mainly to stop a script from filling our storage in a loop.
+  const rl = rateLimit({
+    key: `photo-upload:${user.id}`,
+    limit: 60,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!rl.allowed) {
+    return jsonErr(rl.reason ?? "Rate limit exceeded", 429);
+  }
 
   // Verify the site belongs to the caller's org so another tenant can't
   // slip files into our bucket.

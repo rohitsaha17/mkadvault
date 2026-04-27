@@ -15,6 +15,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -71,6 +72,23 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json({ error: "No organisation found" }, { status: 400 });
     }
     const orgId = profile.org_id as string;
+
+    // Rate limit: 10 import-uploads per org per hour. Mints a signed
+    // URL costs nothing on its own, but each one ends up triggering
+    // an /api/proposals/extract call (5/hour cap) so the math works
+    // out: an attacker can't get more uploads-per-hour than they can
+    // get extracts.
+    const rl = rateLimit({
+      key: `extract-upload:${orgId}`,
+      limit: 10,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: rl.reason ?? "Rate limit exceeded" },
+        { status: 429 },
+      );
+    }
 
     const sessionId = randomUUID();
     const filePath = `${orgId}/_imports/sources/${sessionId}.${extFor(body.fileMime)}`;

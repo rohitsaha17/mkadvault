@@ -28,6 +28,7 @@ import { GoogleGenerativeAI, type Part } from "@google/generative-ai";
 import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Allow up to 5 minutes for the AI call — parsing a 20-slide deck with
 // lots of images routinely takes 30–90 seconds.
@@ -200,6 +201,22 @@ async function extractHandler(req: Request): Promise<Response> {
     return NextResponse.json({ error: "No organisation found" }, { status: 400 });
   }
   const orgId = profile.org_id as string;
+
+  // Rate limit: 5 extracts per org per hour. Each call burns ~1 of
+  // Gemini's per-minute quota AND can take 30-90 seconds, so a tight
+  // loop here would visibly slow other users in the same org and
+  // potentially blow the AI provider's quota.
+  const rl = rateLimit({
+    key: `extract:${orgId}`,
+    limit: 5,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: rl.reason ?? "Rate limit exceeded" },
+      { status: 429 },
+    );
+  }
 
   // ── 2. File read + validation ────────────────────────────────────────────
   // Two intake modes, both end up with `fileBytes` + `fileMime`:
