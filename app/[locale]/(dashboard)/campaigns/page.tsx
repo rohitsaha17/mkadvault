@@ -122,6 +122,74 @@ export default async function CampaignsPage({
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const hasFilters = !!(q || status || (rangePreset !== "all"));
 
+  // Display-time safety net: any itemized campaign whose
+  // total_value_paise is still null/0 — typically a row created
+  // before migration 042 / the app-side recompute helper landed —
+  // gets its total derived from current line items. Keeps the list
+  // honest even if a future write path skips the trigger.
+  const stale = campaigns.filter(
+    (c) =>
+      c.pricing_type === "itemized" &&
+      (c.total_value_paise == null || c.total_value_paise === 0),
+  );
+  if (stale.length > 0) {
+    const ids = stale.map((c) => c.id);
+    const [{ data: cs }, { data: cv }] = await Promise.all([
+      supabase
+        .from("campaign_sites")
+        .select("campaign_id, display_rate_paise, rate_type, start_date, end_date")
+        .in("campaign_id", ids),
+      supabase
+        .from("campaign_services")
+        .select("campaign_id, total_paise")
+        .in("campaign_id", ids),
+    ]);
+    type SiteRow = {
+      campaign_id: string;
+      display_rate_paise: number | null;
+      rate_type: string | null;
+      start_date: string | null;
+      end_date: string | null;
+    };
+    type SvcRow = { campaign_id: string; total_paise: number | null };
+    const sitesByCampaign = new Map<string, SiteRow[]>();
+    for (const s of (cs ?? []) as SiteRow[]) {
+      const arr = sitesByCampaign.get(s.campaign_id) ?? [];
+      arr.push(s);
+      sitesByCampaign.set(s.campaign_id, arr);
+    }
+    const svcByCampaign = new Map<string, number>();
+    for (const s of (cv ?? []) as SvcRow[]) {
+      svcByCampaign.set(
+        s.campaign_id,
+        (svcByCampaign.get(s.campaign_id) ?? 0) + (s.total_paise ?? 0),
+      );
+    }
+    for (const c of stale) {
+      const sites = sitesByCampaign.get(c.id) ?? [];
+      const siteSum = sites.reduce((acc, s) => {
+        const rate = s.display_rate_paise ?? 0;
+        if (!rate) return acc;
+        if ((s.rate_type ?? "per_month") === "fixed") return acc + rate;
+        if (s.start_date && s.end_date) {
+          const startTs = new Date(s.start_date).getTime();
+          const endTs = new Date(s.end_date).getTime();
+          if (endTs < startTs) return acc + rate; // bad data — flat fallback
+          const days = Math.max(
+            1,
+            Math.ceil((endTs - startTs) / 86_400_000) + 1,
+          );
+          return acc + Math.round((rate * days) / 30);
+        }
+        return acc + rate;
+      }, 0);
+      const svcSum = svcByCampaign.get(c.id) ?? 0;
+      // Patch in-place so the existing render code reads the
+      // derived figure without any further changes downstream.
+      c.total_value_paise = siteSum + svcSum;
+    }
+  }
+
   const buildHref = (extra: Record<string, string>) => {
     const p: Record<string, string> = {};
     if (q) p.q = q;

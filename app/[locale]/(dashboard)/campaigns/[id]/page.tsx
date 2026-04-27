@@ -244,10 +244,33 @@ export default async function CampaignDetailPage({
     ["super_admin", "admin", "manager", "executive"].includes(r),
   );
 
-  // Financials
-  const sitesTotal = campSites.reduce((sum, cs) => sum + (cs.display_rate_paise ?? 0), 0);
+  // Financials. Mirror the per_month / fixed math from
+  // lib/campaigns/derive.ts so the displayed total uses the same
+  // pro-rata rule as the create / edit / recompute paths. Falling
+  // through to a flat sum (the previous behaviour) understated
+  // per_month bookings whenever the campaign duration wasn't a
+  // round 30 days.
+  const sitesTotal = campSites.reduce((sum, cs) => {
+    const rate = cs.display_rate_paise ?? 0;
+    if (!rate) return sum;
+    if ((cs.rate_type ?? "per_month") === "fixed") return sum + rate;
+    if (cs.start_date && cs.end_date) {
+      const startTs = new Date(cs.start_date).getTime();
+      const endTs = new Date(cs.end_date).getTime();
+      if (endTs < startTs) return sum + rate;
+      const days = Math.max(1, Math.ceil((endTs - startTs) / 86_400_000) + 1);
+      return sum + Math.round((rate * days) / 30);
+    }
+    return sum + rate;
+  }, 0);
   const servicesTotal = campServices.reduce((sum, cs) => sum + (cs.total_paise ?? 0), 0);
-  const totalValue = campaign.total_value_paise ?? (sitesTotal + servicesTotal);
+  // For itemized campaigns: prefer the freshly-derived total over a
+  // potentially-stale stored value, so editing dates updates the UI
+  // immediately. Bundled campaigns keep the user-entered figure.
+  const totalValue =
+    campaign.pricing_type === "itemized"
+      ? sitesTotal + servicesTotal
+      : campaign.total_value_paise ?? 0;
 
   // Services and Jobs covered the same concept (work-orders tied to a
   // campaign / site). Services was dropped — Jobs is the single
