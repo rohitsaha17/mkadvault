@@ -63,6 +63,8 @@ export async function GET(
       { data: paymentData },
       { data: orgData },
     ] = await Promise.all([
+      // Defense in depth: scope to caller's org explicitly. See the
+      // payment-request PDF route for the rationale.
       supabase
         .from("payments_received")
         .select(
@@ -71,6 +73,7 @@ export async function GET(
            client:clients(company_name, brand_name, billing_address, billing_city, billing_state, billing_pin_code, gstin)`,
         )
         .eq("id", id)
+        .eq("organization_id", profile.org_id)
         .single(),
       supabase
         .from("organizations")

@@ -45,6 +45,8 @@ export async function GET(
       { data: lineItemsData },
       { data: orgData },
     ] = await Promise.all([
+      // Defense in depth: scope to caller's org explicitly. See the
+      // payment-request PDF route for the rationale.
       supabase
         .from("invoices")
         .select(
@@ -52,12 +54,14 @@ export async function GET(
            client:clients(company_name, brand_name, billing_address, billing_city, billing_state, billing_pin_code, gstin, pan)`,
         )
         .eq("id", id)
+        .eq("organization_id", profile.org_id)
         .is("deleted_at", null)
         .single(),
       supabase
         .from("invoice_line_items")
         .select("*")
         .eq("invoice_id", id)
+        .eq("organization_id", profile.org_id)
         .order("created_at", { ascending: true }),
       supabase
         .from("organizations")

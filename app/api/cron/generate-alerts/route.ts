@@ -13,15 +13,20 @@ export const runtime = "nodejs"; // needs crypto + full Node.js env
 export const maxDuration = 60;  // Vercel function timeout (seconds)
 
 export async function GET(req: NextRequest) {
-  // Verify the cron secret so this can't be triggered by unauthorized callers
+  // Verify the cron secret. Required in every non-localhost environment
+  // — see the same gate in /api/cron/auto-complete-campaigns for the
+  // rationale (Vercel previews fall through with NODE_ENV=production
+  // but no secret, generating retry noise).
   const authHeader = req.headers.get("authorization");
   const expectedToken = process.env.CRON_SECRET;
+  const host = req.headers.get("host") ?? "";
+  const isLocalhost = host.startsWith("localhost") || host.startsWith("127.");
 
   if (!expectedToken) {
-    // If CRON_SECRET isn't set, only allow in development
-    if (process.env.NODE_ENV === "production") {
+    if (!isLocalhost) {
       return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 500 });
     }
+    console.warn("[cron] generate-alerts running without CRON_SECRET (localhost only)");
   } else if (authHeader !== `Bearer ${expectedToken}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

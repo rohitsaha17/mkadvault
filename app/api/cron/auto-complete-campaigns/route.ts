@@ -13,17 +13,29 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
-  // Verify the cron secret
+  // Verify the cron secret. We require CRON_SECRET in EVERY environment
+  // (dev, preview, prod) to avoid the trap where a Vercel preview
+  // deployment runs with NODE_ENV=production but no secret configured
+  // → silent 500 retries that look like cron noise. The only carve-out
+  // is local development against `localhost`, where we don't run a
+  // scheduler and exposing the route via curl is harmless.
   const authHeader = req.headers.get("authorization");
   const expectedToken = process.env.CRON_SECRET;
+  const host = req.headers.get("host") ?? "";
+  const isLocalhost = host.startsWith("localhost") || host.startsWith("127.");
 
   if (!expectedToken) {
-    if (process.env.NODE_ENV === "production") {
+    if (!isLocalhost) {
       return NextResponse.json(
         { error: "CRON_SECRET not configured" },
-        { status: 500 }
+        { status: 500 },
       );
     }
+    // localhost dev with no secret — allow through with a warning so
+    // the dev knows they should set one before deploying.
+    console.warn(
+      "[cron] auto-complete-campaigns running without CRON_SECRET (localhost only)",
+    );
   } else if (authHeader !== `Bearer ${expectedToken}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

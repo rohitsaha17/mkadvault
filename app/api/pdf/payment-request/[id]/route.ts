@@ -48,6 +48,11 @@ export async function GET(
       { data: expenseData },
       { data: orgData },
     ] = await Promise.all([
+      // Defense in depth: scope to the caller's org explicitly so an
+      // RLS policy regression can't leak cross-org PDFs. RLS already
+      // does this, but a misconfigured policy or a future schema
+      // refactor shouldn't be the only thing standing between an
+      // org's docs and someone else's URL guess.
       supabase
         .from("site_expenses")
         .select(
@@ -56,6 +61,7 @@ export async function GET(
            campaign:campaigns(id, campaign_name, campaign_code)`,
         )
         .eq("id", id)
+        .eq("organization_id", profile.org_id)
         .is("deleted_at", null)
         .single(),
       supabase
