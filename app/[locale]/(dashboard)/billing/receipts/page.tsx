@@ -82,7 +82,10 @@ export default async function ReceiptsPage({
     )
     .order("payment_date", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(200);
+    // 50 most recent receipts. Range filter ("Last 7 / 30 / 90 days
+    // / All time") + payment-mode filter narrow the query before
+    // this cap applies, so older receipts stay reachable via filter.
+    .limit(50);
 
   const days = RANGE_OPTIONS[rangeKey].days;
   if (days != null) {
@@ -212,7 +215,7 @@ export default async function ReceiptsPage({
           <h2 className="text-sm font-semibold text-foreground">
             {receipts.length} receipt{receipts.length === 1 ? "" : "s"}
           </h2>
-          <p className="text-xs text-muted-foreground">Showing latest 200</p>
+          <p className="text-xs text-muted-foreground">Showing latest 50 — narrow with the filters above to find older</p>
         </div>
 
         {receipts.length === 0 ? (

@@ -68,13 +68,16 @@ export default async function FinancePaymentsPage({
     .select("id, name, site_code")
     .is("deleted_at", null)
     .order("name")
-    .limit(500);
+    .limit(200);
   const sites = (sitesData ?? []) as {
     id: string;
     name: string;
     site_code: string | null;
   }[];
 
+  // Show the 50 most recent paid expenses by default. Filters above
+  // (date range, site, search) narrow before this limit applies, so
+  // older payments stay reachable via filtering.
   let query = supabase
     .from("site_expenses")
     .select(
@@ -86,7 +89,7 @@ export default async function FinancePaymentsPage({
     .is("deleted_at", null)
     .eq("status", "paid")
     .order("paid_at", { ascending: false })
-    .limit(200);
+    .limit(50);
 
   if (from) query = query.gte("paid_at", `${from}T00:00:00Z`);
   if (to) query = query.lte("paid_at", `${to}T23:59:59Z`);

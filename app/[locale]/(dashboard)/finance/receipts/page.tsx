@@ -87,7 +87,10 @@ export default async function FinanceReceiptsPage({
     )
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
-    .limit(500);
+    // Cap to 100 expense rows. Each can fan out into 1+ doc rows
+    // below, so the rendered table can still hit ~150-200 records,
+    // but the parent JSON stays under 1 MB on most orgs.
+    .limit(100);
 
   // Flatten every doc into its own row so we can list them uniformly.
   const expenses = (data ?? []) as unknown as Array<{

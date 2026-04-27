@@ -70,22 +70,23 @@ export default async function FinanceRequestsPage({
   const canSettle = rolesArr.some((r) => FINANCE_ROLES.includes(r));
 
   const [sitesResult, campaignsResult] = await Promise.all([
+    // Sites + campaigns dropdowns only need to populate the New Request
+    // dialog's site/campaign pickers — 200 is plenty for an agency's
+    // active inventory and avoids dragging a 1 MB JSON payload to the
+    // page on every load.
     supabase
       .from("sites")
       .select("id, name, site_code")
       .is("deleted_at", null)
       .order("name")
-      .limit(500),
-    // Non-archived campaigns — used as the optional campaign tag in
-    // the New Request dialog. Cap at a sensible number so the dropdown
-    // stays usable.
+      .limit(200),
     supabase
       .from("campaigns")
       .select("id, campaign_name, campaign_code, status, start_date")
       .is("deleted_at", null)
       .not("status", "in", "(dismounted,cancelled)")
       .order("start_date", { ascending: false })
-      .limit(500),
+      .limit(200),
   ]);
   const sites = (sitesResult.data ?? []) as {
     id: string;

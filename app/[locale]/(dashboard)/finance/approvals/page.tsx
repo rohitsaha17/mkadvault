@@ -92,7 +92,10 @@ export default async function FinanceApprovalsPage({
     .eq("status", "pending")
     .order("needed_by", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: true })
-    .limit(200);
+    // 100 most urgent pending approvals — anything past that is the
+    // approver's own backlog problem; surface a "you have a backlog"
+    // hint elsewhere rather than dragging the page weight up.
+    .limit(100);
 
   const expenses: ExpenseRow[] = ((data ?? []) as unknown as Array<
     Omit<ExpenseRow, "site"> & {

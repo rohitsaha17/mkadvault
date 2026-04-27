@@ -30,7 +30,10 @@ export default async function NotificationsPage({
     .eq("is_dismissed", false)
     .or(`user_id.eq.${user.id},target_role.eq.${profile.role}`)
     .order("created_at", { ascending: false })
-    .limit(200);
+    // 50 most recent open alerts. Anything older is operationally
+    // stale; the dismiss button + cron-aged purge keep the list
+    // healthy below this cap in practice.
+    .limit(50);
 
   if (error) {
     return <p className="p-6 text-sm text-red-500">Failed to load notifications: {error.message}</p>;
