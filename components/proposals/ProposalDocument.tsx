@@ -430,7 +430,16 @@ function CompactCards({ sites, proposal }: { sites: SiteForProposal[]; proposal:
 // ─── Main Document ────────────────────────────────────────────────────────────
 
 export function ProposalDocument({ proposal, sites, org, clientName }: ProposalDocumentProps) {
-  const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  // Force IST so the footer date doesn't shift across timezones — a
+  // proposal generated at 11pm UK time would otherwise read "tomorrow"
+  // in Indian eyes. We're an India-based agency; IST is correct
+  // regardless of where the rendering happens.
+  const today = new Date().toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
   const footerText = proposal.custom_footer_text ?? `${org?.name ?? ""} • Generated on ${today}`;
   const orgLine = org ? [org.city, org.state].filter(Boolean).join(", ") : "";
 
