@@ -77,9 +77,14 @@ export function CampaignDetailActions({
     });
   }
 
-  // With the simplified status model only a live campaign makes
-  // sense to extend. Invoices can still be raised on completed
-  // campaigns (historical billing), but not on cancelled ones.
+  // Extend covers two cases:
+  //   • live → already running, push the end date later
+  //   • DB status = live but start_date in the future ("yet_to_start"
+  //     as a display state) → pre-extend a booking before it kicks off
+  // The persisted DB status is just "live" in both cases — the
+  // "yet_to_start" badge is derived on read. So this gate stays
+  // status === "live" but the comment captures both intents.
+  // Completed / cancelled campaigns are locked.
   const canExtend = campaignStatus === "live";
   const canCreateInvoice = campaignStatus !== "cancelled";
 

@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { deriveCampaignStatus } from "@/lib/campaigns/derive";
+import { CampaignExtendRowButton } from "@/components/campaigns/CampaignExtendRowButton";
 import { Plus, Search, LayoutList, Columns, Pencil, Megaphone } from "lucide-react";
 import { KanbanBoard } from "@/components/campaigns/KanbanBoard";
 import { ListExportMenu } from "@/components/shared/ListExportMenu";
@@ -441,6 +442,20 @@ export default async function CampaignsPage({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
+                        {/* Extend — disabled for completed / cancelled
+                            campaigns since their end date is locked.
+                            yet_to_start + live can both be extended. */}
+                        {(() => {
+                          const derived = deriveCampaignStatus(c);
+                          const canExtend =
+                            derived === "live" || derived === "yet_to_start";
+                          return canExtend ? (
+                            <CampaignExtendRowButton
+                              campaignId={c.id}
+                              currentEndDate={c.end_date}
+                            />
+                          ) : null;
+                        })()}
                         <Link href={`/campaigns/${c.id}/edit`}>
                           <Button variant="ghost" size="icon-sm" aria-label="Edit">
                             <Pencil className="h-3.5 w-3.5" />
