@@ -493,15 +493,40 @@ export async function extendCampaign(
 
     const { data: current } = await ctx.supabase
       .from("campaigns")
-      .select("end_date")
+      .select("end_date, status")
       .eq("id", campaignId)
       .single();
 
     if (!current) return { error: "Campaign not found" };
 
+    // Cancelled campaigns are locked — extending one would silently
+    // un-cancel it and resurrect bookings that were intentionally
+    // dropped. Force the user to clone instead.
+    if (current.status === "cancelled") {
+      return {
+        error:
+          "Cancelled campaigns can't be extended. Create a new campaign with the same sites instead.",
+      };
+    }
+
+    // If we're extending a completed campaign past today, we have to
+    // reopen it: DB status flips back to live, and the sites that
+    // were released to "available" when it finished need to be
+    // re-booked. End dates in the past are accepted (the user is
+    // back-filling a historical record) and leave status alone.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const reopenAsLive =
+      current.status === "completed" && newEndDate >= todayStr;
+
+    const campaignUpdate: { end_date: string; updated_by: string; status?: "live" } = {
+      end_date: newEndDate,
+      updated_by: ctx.user.id,
+    };
+    if (reopenAsLive) campaignUpdate.status = "live";
+
     const { error } = await ctx.supabase
       .from("campaigns")
-      .update({ end_date: newEndDate, updated_by: ctx.user.id })
+      .update(campaignUpdate)
       .eq("id", campaignId);
 
     if (error) return { error: error.message };
@@ -515,6 +540,26 @@ export async function extendCampaign(
         .eq("end_date", current.end_date);
     }
 
+    // When reopening, re-book the linked sites so the inventory map
+    // shows them as taken again. Skip sites already booked by another
+    // currently-live campaign (they'd otherwise overwrite a different
+    // booking's status).
+    if (reopenAsLive) {
+      const { data: csRows } = await ctx.supabase
+        .from("campaign_sites")
+        .select("site_id")
+        .eq("campaign_id", campaignId);
+      const siteIds = (csRows ?? []).map((r) => r.site_id as string);
+      for (const siteId of siteIds) {
+        await ctx.supabase
+          .from("sites")
+          .update({ status: "booked" })
+          .eq("id", siteId)
+          // Don't overwrite a maintenance / blocked / expired state.
+          .in("status", ["available", "booked"]);
+      }
+    }
+
     // Per-month rates × days math means extending the date range
     // bumps the total. Recompute so the value reflects the new
     // duration immediately.
@@ -525,7 +570,9 @@ export async function extendCampaign(
       campaign_id: campaignId,
       user_id: ctx.user.id,
       action: "updated",
-      description: `Campaign extended to ${newEndDate}`,
+      description: reopenAsLive
+        ? `Campaign reopened and extended to ${newEndDate}`
+        : `Campaign extended to ${newEndDate}`,
       old_value: current.end_date,
       new_value: newEndDate,
     });

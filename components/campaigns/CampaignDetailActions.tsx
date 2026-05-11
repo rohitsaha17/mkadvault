@@ -77,15 +77,19 @@ export function CampaignDetailActions({
     });
   }
 
-  // Extend covers two cases:
-  //   • live → already running, push the end date later
-  //   • DB status = live but start_date in the future ("yet_to_start"
-  //     as a display state) → pre-extend a booking before it kicks off
-  // The persisted DB status is just "live" in both cases — the
-  // "yet_to_start" badge is derived on read. So this gate stays
-  // status === "live" but the comment captures both intents.
-  // Completed / cancelled campaigns are locked.
-  const canExtend = campaignStatus === "live";
+  // Extend covers three cases:
+  //   • live          — already running, push the end date later
+  //   • live + start in future ("yet_to_start" derived state) —
+  //                     pre-extend before the campaign kicks off
+  //   • completed     — renewal use case. Pushing the end past today
+  //                     reopens the campaign: the server action
+  //                     flips status back to live and re-books the
+  //                     linked sites. End in the past is also
+  //                     accepted (back-filling a historical record).
+  // Cancelled campaigns stay locked — extend would silently
+  // resurrect bookings that were intentionally dropped.
+  const canExtend =
+    campaignStatus === "live" || campaignStatus === "completed";
   const canCreateInvoice = campaignStatus !== "cancelled";
 
   return (

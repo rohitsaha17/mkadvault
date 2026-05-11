@@ -442,13 +442,18 @@ export default async function CampaignsPage({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        {/* Extend — disabled for completed / cancelled
-                            campaigns since their end date is locked.
-                            yet_to_start + live can both be extended. */}
+                        {/* Extend — available for live, yet_to_start,
+                            and completed campaigns. Completed campaigns
+                            are common targets when a client renews a
+                            booking: extending past today reopens the
+                            campaign (action flips status to live and
+                            re-books the sites). Cancelled stays locked. */}
                         {(() => {
                           const derived = deriveCampaignStatus(c);
                           const canExtend =
-                            derived === "live" || derived === "yet_to_start";
+                            derived === "live" ||
+                            derived === "yet_to_start" ||
+                            derived === "completed";
                           return canExtend ? (
                             <CampaignExtendRowButton
                               campaignId={c.id}
