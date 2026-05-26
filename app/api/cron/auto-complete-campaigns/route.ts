@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autoCompletePastDueCampaigns } from "@/lib/campaigns/auto-complete";
+import { notifyCronFailure } from "@/lib/alerts/generate";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -68,6 +69,24 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[cron] auto-complete-campaigns fatal error:", message);
+    // Self-care: nudge each org's admins so the failure doesn't sit
+    // silently in Vercel logs until somebody notices stale campaigns.
+    try {
+      const admin = createAdminClient();
+      const { data: orgs } = await admin.from("organizations").select("id");
+      for (const o of orgs ?? []) {
+        await notifyCronFailure(
+          o.id as string,
+          "auto-complete-campaigns",
+          message,
+        );
+      }
+    } catch (notifyErr) {
+      console.error(
+        "[cron] cron_failure notify also failed:",
+        notifyErr,
+      );
+    }
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

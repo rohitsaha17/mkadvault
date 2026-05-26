@@ -169,10 +169,14 @@ export async function notify(input: NotificationInput): Promise<{
       scheduled_for: new Date().toISOString(),
       scheduled_date: new Date().toISOString().slice(0, 10),
     }));
+    // Conflict key matches migration 044's per-user dedup index, so
+    // every recipient gets their own row but a re-run of the same
+    // event for the same entity on the same day is silently skipped.
     const { error: insertErr, count } = await supabase
       .from("alerts")
       .upsert(rowsToInsert, {
-        onConflict: "organization_id,alert_type,related_entity_id,scheduled_date",
+        onConflict:
+          "organization_id,alert_type,related_entity_id,scheduled_date,user_id",
         ignoreDuplicates: true,
         count: "exact",
       });

@@ -7,7 +7,11 @@
 //   { "crons": [{ "path": "/api/cron/generate-alerts", "schedule": "30 0 * * *" }] }
 
 import { NextRequest, NextResponse } from "next/server";
-import { generateAlertsForAllOrgs } from "@/lib/alerts/generate";
+import {
+  generateAlertsForAllOrgs,
+  notifyCronFailure,
+} from "@/lib/alerts/generate";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs"; // needs crypto + full Node.js env
 export const maxDuration = 60;  // Vercel function timeout (seconds)
@@ -52,6 +56,26 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[cron] generate-alerts fatal error:", message);
+    // Best-effort: notify every org's admins that the cron blew up
+    // BEFORE it could run their generators. The inner per-org catch
+    // in generateAlertsForAllOrgs handles partial failures; this top
+    // catch is for "the whole route crashed".
+    try {
+      const admin = createAdminClient();
+      const { data: orgs } = await admin.from("organizations").select("id");
+      for (const o of orgs ?? []) {
+        await notifyCronFailure(
+          o.id as string,
+          "generate-alerts (fatal)",
+          message,
+        );
+      }
+    } catch (notifyErr) {
+      console.error(
+        "[cron] cron_failure notify also failed:",
+        notifyErr,
+      );
+    }
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
