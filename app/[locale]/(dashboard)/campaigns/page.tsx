@@ -17,8 +17,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { deriveCampaignStatus } from "@/lib/campaigns/derive";
 import { CampaignExtendRowButton } from "@/components/campaigns/CampaignExtendRowButton";
-import { Plus, Search, LayoutList, Columns, Pencil, Megaphone } from "lucide-react";
-import { KanbanBoard } from "@/components/campaigns/KanbanBoard";
+import { Plus, Search, Pencil, Megaphone } from "lucide-react";
 import { ListExportMenu } from "@/components/shared/ListExportMenu";
 import { SortableTableHead } from "@/components/shared/SortableTableHead";
 import { sanitizeSearch, fmt, inr } from "@/lib/utils";
@@ -55,13 +54,13 @@ export default async function CampaignsPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ q?: string; status?: string; view?: string; page?: string; sort?: string; dir?: string; range?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; page?: string; sort?: string; dir?: string; range?: string }>;
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations("campaigns");
 
-  const { q, status, view = "table", page, sort, dir, range: rangeParam } = await searchParams;
+  const { q, status, page, sort, dir, range: rangeParam } = await searchParams;
   // Validate sort column against allowlist. Default is "start_date" DESC so
   // the newest campaigns (most recent start date) show first — which is
   // what users mean by "newest first" for bookings. "Created at" is still
@@ -113,9 +112,7 @@ export default async function CampaignsPage({
       .lte("start_date", dateRange.to);
   }
 
-  if (view === "table") {
-    query = query.range(offset, offset + PAGE_SIZE - 1);
-  }
+  query = query.range(offset, offset + PAGE_SIZE - 1);
 
   const { data, count, error } = await query;
   const campaigns = (data ?? []) as unknown as CampaignWithBillingParty[];
@@ -196,7 +193,6 @@ export default async function CampaignsPage({
     if (q) p.q = q;
     if (status) p.status = status;
     if (rangePreset !== "all") p.range = rangePreset;
-    if (view !== "table") p.view = view;
     if (sort) p.sort = sort;
     if (dir) p.dir = dir;
     return `/campaigns?${new URLSearchParams({ ...p, ...extra })}`;
@@ -221,10 +217,13 @@ export default async function CampaignsPage({
         }
       />
 
-      {/* Toolbar */}
+      {/* Toolbar — table-only now; the Kanban view was removed
+          because the simplified live / completed / cancelled status
+          model only had three columns and didn't carry enough
+          information to justify the loss of sortable columns and
+          per-row actions. */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <form method="GET" className="flex flex-1 flex-wrap gap-2">
-          {view !== "table" && <input type="hidden" name="view" value={view} />}
           <div className="relative flex-1 min-w-48 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input name="q" defaultValue={q} placeholder="Search campaigns…" className="pl-9" />
@@ -252,42 +251,14 @@ export default async function CampaignsPage({
           </select>
           <Button type="submit" variant="outline" size="sm">Search</Button>
           {hasFilters && (
-            <Link href={view !== "table" ? `/campaigns?view=${view}` : "/campaigns"}>
+            <Link href="/campaigns">
               <Button variant="ghost" size="sm">Clear</Button>
             </Link>
           )}
         </form>
-
-        {/* View toggle */}
-        <div className="flex overflow-hidden rounded-md border border-border bg-muted/30">
-          <Link href={buildHref({ view: "table" })}>
-            <button
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm transition-colors ${
-                view === "table"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              <LayoutList className="h-4 w-4" />
-              Table
-            </button>
-          </Link>
-          <Link href={buildHref({ view: "kanban" })}>
-            <button
-              className={`flex items-center gap-1.5 border-l border-border px-3 py-2 text-sm transition-colors ${
-                view === "kanban"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              <Columns className="h-4 w-4" />
-              Kanban
-            </button>
-          </Link>
-        </div>
       </div>
 
-      {total > 0 && view === "table" && (
+      {total > 0 && (
         <p className="text-xs text-muted-foreground mb-3 tabular-nums">
           Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total} campaign{total !== 1 ? "s" : ""}
           {dateRange && (
@@ -331,11 +302,7 @@ export default async function CampaignsPage({
         />
       )}
 
-      {!error && campaigns.length > 0 && view === "kanban" && (
-        <KanbanBoard campaigns={campaigns} />
-      )}
-
-      {!error && campaigns.length > 0 && view === "table" && (
+      {!error && campaigns.length > 0 && (
         <>
           <div className="rounded-2xl border border-border bg-card card-elevated overflow-hidden overflow-x-auto">
             <Table className="min-w-[760px]">
