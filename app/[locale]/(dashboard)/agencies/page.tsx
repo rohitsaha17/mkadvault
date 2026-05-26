@@ -163,9 +163,9 @@ export default async function AgenciesPage({
             <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
-                  <SortableTableHead column="agency_name" label="Agency Name" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="agency_name" label="Agency Name" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="agency_name" defaultDir="asc" />
                   <TableHead>Contact</TableHead>
-                  <SortableTableHead column="city" label="Location" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="city" label="Location" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="agency_name" defaultDir="asc" />
                   <TableHead>GSTIN</TableHead>
                   <TableHead className="w-20" />
                 </TableRow>

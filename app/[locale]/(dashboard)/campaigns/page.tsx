@@ -341,11 +341,11 @@ export default async function CampaignsPage({
             <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
-                  <SortableTableHead column="campaign_name" label="Campaign" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="campaign_name" label="Campaign" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="start_date" defaultDir="desc" />
                   <TableHead>Client / Agency</TableHead>
-                  <SortableTableHead column="start_date" label="Dates" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
-                  <SortableTableHead column="total_value_paise" label="Value" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
-                  <SortableTableHead column="status" label="Status" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="start_date" label="Dates" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="start_date" defaultDir="desc" />
+                  <SortableTableHead column="total_value_paise" label="Value" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="start_date" defaultDir="desc" />
+                  <SortableTableHead column="status" label="Status" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="start_date" defaultDir="desc" />
                   <TableHead className="w-20" />
                 </TableRow>
               </TableHeader>

@@ -2,7 +2,7 @@
 // SiteFilters — client component that manages filter state via URL search params.
 // When any filter changes, it pushes a new URL so the server re-fetches data.
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,16 @@ export function SiteFilters({
   const searchParams = useSearchParams();
   const [, startTransition] = useTransition();
 
+  // Controlled search input. We keep a local state so typing feels
+  // instant; a 250 ms debounce pushes the URL update so the server
+  // re-fetches without firing a query on every keystroke.
+  const [searchValue, setSearchValue] = useState(currentSearch);
+  // Re-sync from props when the URL changes externally (e.g. Clear
+  // button, browser back, another filter wiping search).
+  useEffect(() => {
+    setSearchValue(currentSearch);
+  }, [currentSearch]);
+
   const hasActiveFilters =
     currentSearch || currentCity || currentType || currentStatus || currentOwnership;
 
@@ -77,6 +87,33 @@ export function SiteFilters({
     [router, pathname, searchParams]
   );
 
+  // Debounced search-URL writer. Cancels previous pending writes if
+  // the user keeps typing — only the last value within the debounce
+  // window actually navigates.
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const updateSearch = useCallback(
+    (raw: string) => {
+      setSearchValue(raw);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => {
+        // Compare against the URL's current value rather than the prop
+        // so we don't fire a no-op navigation when the user retypes
+        // the same string they already had.
+        if (raw !== (searchParams.get("q") ?? "")) {
+          updateParam("q", raw.trim());
+        }
+      }, 250);
+    },
+    [searchParams, updateParam],
+  );
+
+  // Cleanup any in-flight debounce on unmount.
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
+
   function clearAll() {
     startTransition(() => {
       router.push(pathname);
@@ -85,20 +122,24 @@ export function SiteFilters({
 
   return (
     <div className="flex flex-wrap gap-2 items-center">
-      {/* Search input */}
+      {/* Search input — live filter as you type. 250 ms debounce so
+          rapid typing doesn't fire a SQL query per keystroke. Enter
+          flushes the debounce immediately for users who prefer the
+          old "type then commit" feel. */}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
         <Input
           type="search"
-          defaultValue={currentSearch}
+          value={searchValue}
+          onChange={(e) => updateSearch(e.target.value)}
           placeholder="Search name or code…"
           className="pl-8 h-8 w-48 text-sm"
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              updateParam("q", (e.target as HTMLInputElement).value);
+              if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+              updateParam("q", searchValue.trim());
             }
           }}
-          onBlur={(e) => updateParam("q", e.target.value)}
         />
       </div>
 

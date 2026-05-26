@@ -260,13 +260,13 @@ export default async function SitesPage({ params, searchParams }: Props) {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[60px]">Photo</TableHead>
-                  <SortableTableHead column="site_code" label="Code" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
-                  <SortableTableHead column="name" label="Name" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
-                  <SortableTableHead column="media_type" label="Type" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
-                  <SortableTableHead column="status" label="Status" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
-                  <SortableTableHead column="city" label="City" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="site_code" label="Code" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} defaultSort="city" defaultDir="asc" />
+                  <SortableTableHead column="name" label="Name" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} defaultSort="city" defaultDir="asc" />
+                  <SortableTableHead column="media_type" label="Type" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} defaultSort="city" defaultDir="asc" />
+                  <SortableTableHead column="status" label="Status" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} defaultSort="city" defaultDir="asc" />
+                  <SortableTableHead column="city" label="City" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} defaultSort="city" defaultDir="asc" />
                   <TableHead>Dimensions</TableHead>
-                  <SortableTableHead column="base_rate_paise" label="Rate / mo" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="base_rate_paise" label="Rate / mo" currentSort={sp.sort ?? null} currentDir={(sp.dir as "asc" | "desc") ?? null} defaultSort="city" defaultDir="asc" />
                   <TableHead className="w-20" />
                 </TableRow>
               </TableHeader>

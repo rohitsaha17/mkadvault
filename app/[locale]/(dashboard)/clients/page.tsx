@@ -180,9 +180,9 @@ export default async function ClientsPage({
             <Table className="min-w-[820px]">
               <TableHeader>
                 <TableRow>
-                  <SortableTableHead column="company_name" label="Company / Brand" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="company_name" label="Company / Brand" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="company_name" defaultDir="asc" />
                   <TableHead>Primary Contact</TableHead>
-                  <SortableTableHead column="credit_terms" label="Credit Terms" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} />
+                  <SortableTableHead column="credit_terms" label="Credit Terms" currentSort={sort ?? null} currentDir={(dir as "asc" | "desc") ?? null} defaultSort="company_name" defaultDir="asc" />
                   <TableHead className="w-20" />
                 </TableRow>
               </TableHeader>
