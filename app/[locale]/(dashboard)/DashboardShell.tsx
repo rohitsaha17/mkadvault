@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
+import { PwaRegister } from "@/components/pwa/PwaRegister";
 import type { Profile } from "@/lib/types/database";
 
 interface DashboardShellProps {
@@ -20,6 +21,10 @@ export function DashboardShell({ profile, email, children }: DashboardShellProps
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      {/* PwaRegister is invisible — registers the service worker on
+          mount so Chrome's "Install app" prompt becomes eligible.
+          See public/sw.js + app/manifest.ts. */}
+      <PwaRegister />
       {/* Sidebar — fixed left column, hidden on mobile */}
       <Sidebar profile={profile} email={email} onCollapsedChange={setSidebarCollapsed} />
 

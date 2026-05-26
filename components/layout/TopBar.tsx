@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { MobileSidebar } from "./MobileSidebar";
 import { UserMenu } from "./UserMenu";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { InstallButton } from "@/components/pwa/InstallButton";
 import { useRouter, usePathname } from "@/i18n/navigation";
 import type { Profile } from "@/lib/types/database";
 
@@ -120,6 +121,11 @@ export function TopBar({ profile, email }: TopBarProps) {
 
         {/* ── Right action cluster ─────────────────────────────────────── */}
         <div className="flex items-center gap-1">
+          {/* PWA install — renders a button on Chrome/Edge once the
+              browser fires beforeinstallprompt, and an iOS hint chip
+              on Safari since Apple's policy doesn't expose that event.
+              Self-hides once the app is installed. */}
+          <InstallButton />
           <NotificationBell locale={locale} />
 
           {/* Theme toggle */}
