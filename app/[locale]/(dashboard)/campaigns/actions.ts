@@ -13,6 +13,7 @@ import {
 } from "@/lib/campaigns/derive";
 
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
+import { notify } from "@/lib/notifications/dispatch";
 type ActionResult = { error: string } | { success: true; id: string };
 
 async function getOrgAndUser() {
@@ -418,7 +419,9 @@ export async function cancelCampaign(campaignId: string): Promise<{ error?: stri
 
     const { data: current } = await ctx.supabase
       .from("campaigns")
-      .select("status, campaign_name")
+      .select(
+        "status, campaign_name, campaign_code, start_date, end_date, client:clients(company_name)",
+      )
       .eq("id", campaignId)
       .single();
 
@@ -470,6 +473,34 @@ export async function cancelCampaign(campaignId: string): Promise<{ error?: stri
       description: `Campaign cancelled (was "${current.status}")`,
       old_value: current.status,
       new_value: "cancelled",
+    });
+
+    // Postgrest's embedded relation typing returns `client` as either
+    // a single object or an array depending on the row's cardinality —
+    // narrow it before reading company_name.
+    const clientRel = (current as unknown as {
+      client: { company_name: string | null } | { company_name: string | null }[] | null;
+    }).client;
+    const clientName = Array.isArray(clientRel)
+      ? clientRel[0]?.company_name ?? null
+      : clientRel?.company_name ?? null;
+
+    await notify({
+      organizationId: ctx.orgId,
+      eventType: "campaign_cancelled",
+      entityType: "campaign",
+      entityId: campaignId,
+      severity: "warning",
+      title: `Campaign cancelled — ${current.campaign_name}`,
+      message: `${current.campaign_name} for ${clientName ?? "—"} was cancelled (was "${current.status}"). Linked sites have been released.`,
+      data: {
+        Campaign: current.campaign_name,
+        Code: current.campaign_code ?? "—",
+        Client: clientName ?? "—",
+        "Previous status": current.status,
+        "Start date": current.start_date ?? "—",
+        "End date": current.end_date ?? "—",
+      },
     });
 
     revalidatePath("/campaigns");

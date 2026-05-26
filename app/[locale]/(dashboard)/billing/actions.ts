@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
 import type { InvoiceStatus, PaymentMode } from "@/lib/types/database";
 import { notify } from "@/lib/notifications/dispatch";
+import { inr } from "@/lib/utils";
 
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -155,14 +156,29 @@ export async function updateInvoiceStatus(id: string, status: InvoiceStatus): Pr
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
-    // Fetch current status to validate the transition
-    const { data: invoice } = await ctx.supabase
+    // Fetch current status + details we need for the notification body.
+    // The client join here gives us the company name in one round-trip
+    // so we don't have to refetch after the status flip.
+    const { data: invoiceRaw } = await ctx.supabase
       .from("invoices")
-      .select("status")
+      .select(
+        "status, invoice_number, total_paise, due_date, client:clients(company_name)",
+      )
       .eq("id", id)
       .single();
 
-    if (!invoice) return { error: "Invoice not found" };
+    if (!invoiceRaw) return { error: "Invoice not found" };
+
+    // Postgrest's embedded-relation typing widens `client` to either
+    // a single object OR an array. Cast and normalise so downstream
+    // reads are predictable.
+    const invoice = invoiceRaw as unknown as {
+      status: string;
+      invoice_number: string | null;
+      total_paise: number | null;
+      due_date: string | null;
+      client: { company_name: string | null } | { company_name: string | null }[] | null;
+    };
 
     // Only allow valid status transitions
     const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -187,6 +203,32 @@ export async function updateInvoiceStatus(id: string, status: InvoiceStatus): Pr
     if (error) return { error: error.message };
     revalidatePath("/billing/invoices");
     revalidatePath(`/billing/invoices/${id}`);
+
+    // Tell the team that the invoice is officially "out the door". We
+    // only fire for draft → sent — other transitions (sent → paid etc.)
+    // have their own notifications elsewhere.
+    if (status === "sent") {
+      const clientName = Array.isArray(invoice.client)
+        ? invoice.client[0]?.company_name ?? null
+        : invoice.client?.company_name ?? null;
+      const amountLabel = inr(invoice.total_paise);
+      await notify({
+        organizationId: ctx.orgId,
+        eventType: "invoice_sent",
+        entityType: "invoice",
+        entityId: id,
+        severity: "info",
+        title: `Invoice sent — ${invoice.invoice_number ?? id}`,
+        message: `${invoice.invoice_number ?? "Invoice"} for ${amountLabel} was sent to ${clientName ?? "—"}.`,
+        data: {
+          "Invoice #": invoice.invoice_number ?? "—",
+          Client: clientName ?? "—",
+          Amount: amountLabel,
+          "Due date": invoice.due_date ?? "—",
+        },
+      });
+    }
+
     return {};
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;

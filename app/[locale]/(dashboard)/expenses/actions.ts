@@ -23,6 +23,8 @@ import {
 } from "@/lib/validations/site-expense";
 import type { UserRole } from "@/lib/types/database";
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
+import { notify } from "@/lib/notifications/dispatch";
+import { inr } from "@/lib/utils";
 
 // After any expense mutation, re-render every Finance page so the new
 // state is reflected everywhere (overview KPIs, requests list, approvals
@@ -210,7 +212,9 @@ export async function setExpenseStatus(
     const supabase = await createClient();
     const { data: row, error: lookupErr } = await supabase
       .from("site_expenses")
-      .select("id, organization_id, site_id, status")
+      .select(
+        "id, organization_id, site_id, status, category, description, amount_paise, payee_name",
+      )
       .eq("id", expense_id)
       .single();
     if (lookupErr || !row) return { error: "Expense not found" };
@@ -226,6 +230,35 @@ export async function setExpenseStatus(
 
     revalidateFinance();
     if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
+
+    // ── Fire approval / rejection notification. The owning executive
+    //    needs to hear back; finance / admin track it on the dashboard.
+    //    Errors are swallowed inside notify(), so this never breaks the
+    //    UI flow even if Resend is down.
+    if (status === "approved" || status === "rejected") {
+      const amountLabel = inr(row.amount_paise as number);
+      const isApproved = status === "approved";
+      await notify({
+        organizationId: who.ctx.orgId,
+        eventType: isApproved ? "expense_approved" : "expense_rejected",
+        entityType: "expense",
+        entityId: expense_id,
+        severity: isApproved ? "info" : "warning",
+        title: isApproved
+          ? `Payment request approved — ${amountLabel}`
+          : `Payment request rejected — ${amountLabel}`,
+        message: isApproved
+          ? `Your request for ${row.payee_name ?? "—"} (${row.category}) was approved. Accounts will process it next.`
+          : `Your request for ${row.payee_name ?? "—"} (${row.category}) was rejected. Check the requests page for details.`,
+        data: {
+          Payee: row.payee_name ?? "—",
+          Category: String(row.category ?? ""),
+          Amount: amountLabel,
+          Description: row.description ?? "—",
+        },
+      });
+    }
+
     return { success: true };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
@@ -251,7 +284,9 @@ export async function markExpensePaid(
     const supabase = await createClient();
     const { data: row, error: lookupErr } = await supabase
       .from("site_expenses")
-      .select("id, organization_id, site_id, status, payment_proof_urls, notes")
+      .select(
+        "id, organization_id, site_id, status, payment_proof_urls, notes, category, description, amount_paise, payee_name",
+      )
       .eq("id", v.expense_id)
       .single();
     if (lookupErr || !row) return { error: "Expense not found" };
@@ -288,6 +323,28 @@ export async function markExpensePaid(
 
     revalidateFinance();
     if (row.site_id) revalidatePath(`/sites/${row.site_id}`);
+
+    // ── Notify the requester + finance team that the payment is out.
+    //    Mirrors the approved/rejected pattern above.
+    const amountLabel = inr(row.amount_paise as number);
+    await notify({
+      organizationId: who.ctx.orgId,
+      eventType: "expense_paid",
+      entityType: "expense",
+      entityId: v.expense_id,
+      severity: "info",
+      title: `Payment released — ${amountLabel} to ${row.payee_name ?? "payee"}`,
+      message: `${amountLabel} was paid to ${row.payee_name ?? "—"} via ${v.payment_mode}. Reference: ${v.payment_reference ?? "—"}.`,
+      data: {
+        Payee: row.payee_name ?? "—",
+        Category: String(row.category ?? ""),
+        Amount: amountLabel,
+        Mode: v.payment_mode,
+        Reference: v.payment_reference ?? "—",
+        "Paid on": v.paid_at ?? "—",
+      },
+    });
+
     return { success: true };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;

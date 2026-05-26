@@ -9,6 +9,7 @@
 //  - Free up linked sites (set to "available" if no other active campaign uses them)
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { notify } from "@/lib/notifications/dispatch";
 
 // With the simplified status model (migration 035), "live" is the
 // only non-terminal state — so both COMPLETABLE_STATUSES and
@@ -41,10 +42,14 @@ export async function autoCompletePastDueCampaigns(
   // only complete campaigns whose end_date is strictly before today.
   const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 
-  // Fetch campaigns that should be auto-completed
+  // Fetch campaigns that should be auto-completed. We pull the linked
+  // client name too so the completion notification can mention "X for
+  // ACME" rather than just the bare campaign name.
   const { data: expiredCampaigns, error: fetchError } = await supabase
     .from("campaigns")
-    .select("id, organization_id, campaign_name, end_date")
+    .select(
+      "id, organization_id, campaign_name, campaign_code, end_date, start_date, client:clients(company_name)",
+    )
     .in("status", COMPLETABLE_STATUSES as unknown as string[])
     .lt("end_date", today)
     .is("deleted_at", null)
@@ -97,6 +102,33 @@ export async function autoCompletePastDueCampaigns(
         old_value: null, // unknown — could be any completable status
         new_value: "completed",
       }).then(() => {}, () => {}); // swallow errors
+
+      // 2a. Fire campaign_completed notification. Dispatcher dedupes on
+      //     (org, alert_type, related_entity_id, scheduled_date) so the
+      //     dashboard-page invocation and the cron invocation can both
+      //     land on the same day without duplicate alerts.
+      const clientRel = (campaign as unknown as {
+        client?: { company_name: string | null } | { company_name: string | null }[] | null;
+      }).client;
+      const clientName = Array.isArray(clientRel)
+        ? clientRel[0]?.company_name ?? null
+        : clientRel?.company_name ?? null;
+
+      await notify({
+        organizationId: campaign.organization_id as string,
+        eventType: "campaign_completed",
+        entityType: "campaign",
+        entityId: campaign.id as string,
+        severity: "info",
+        title: `Campaign completed — ${campaign.campaign_name}`,
+        message: `${campaign.campaign_name}${clientName ? ` for ${clientName}` : ""} reached its end date (${campaign.end_date}) and was auto-completed.`,
+        data: {
+          Campaign: campaign.campaign_name as string,
+          Code: (campaign as unknown as { campaign_code?: string | null }).campaign_code ?? "—",
+          Client: clientName ?? "—",
+          "End date": campaign.end_date as string,
+        },
+      });
 
       // 3. Free up linked sites if no other active campaign uses them
       const { data: campSites } = await supabase
