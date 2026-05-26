@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { z } from "zod";
 import type { InvoiceStatus, PaymentMode } from "@/lib/types/database";
+import { notify } from "@/lib/notifications/dispatch";
 
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -237,12 +238,26 @@ export async function recordPayment(
 
     const d = parsed.data;
 
-    // Fetch current invoice
-    const { data: invoice } = await ctx.supabase
+    // Fetch current invoice — plus number + client name so the
+    // outbound notification can name the invoice and the payer
+    // without a second round-trip.
+    const { data: invoiceRaw } = await ctx.supabase
       .from("invoices")
-      .select("client_id, total_paise, amount_paid_paise")
+      .select(
+        "client_id, total_paise, amount_paid_paise, invoice_number, " +
+          "client:clients(company_name)",
+      )
       .eq("id", invoiceId)
       .single();
+    // Postgrest's generated row type doesn't always pick up embedded
+    // relations; assert the shape we just selected.
+    const invoice = invoiceRaw as unknown as {
+      client_id: string;
+      total_paise: number | null;
+      amount_paid_paise: number | null;
+      invoice_number: string;
+      client: { company_name: string | null } | { company_name: string | null }[] | null;
+    } | null;
 
     if (!invoice) return { error: "Invoice not found" };
 
@@ -289,6 +304,42 @@ export async function recordPayment(
       .eq("id", invoiceId);
 
     if (updErr) return { error: updErr.message };
+
+    // Fan out an invoice_paid notification — accounts + admin get
+    // an email by default (see lib/notifications/audience.ts), the
+    // owning executive gets an in-app alert. Fire-and-forget; if
+    // Resend is down or the dispatcher hiccups the user still gets
+    // a successful "payment recorded" response.
+    const clientRel = invoice!.client;
+    const clientName = Array.isArray(clientRel)
+      ? clientRel[0]?.company_name ?? null
+      : clientRel?.company_name ?? null;
+    const amountFormatted = new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(amountPaise / 100);
+    const isFullSettlement = newStatus === "paid";
+    await notify({
+      organizationId: ctx.orgId,
+      eventType: "invoice_paid",
+      entityType: "invoice",
+      entityId: invoiceId,
+      severity: "info",
+      title: isFullSettlement
+        ? `Payment received — ${invoice.invoice_number} settled`
+        : `Partial payment received — ${invoice.invoice_number}`,
+      message: isFullSettlement
+        ? `${clientName ?? "Client"} paid ${amountFormatted} against invoice ${invoice.invoice_number}. The invoice is now fully settled.`
+        : `${clientName ?? "Client"} paid ${amountFormatted} against invoice ${invoice.invoice_number}. Balance remaining will appear on the invoice.`,
+      data: {
+        Invoice: invoice.invoice_number,
+        Client: clientName ?? "—",
+        Amount: amountFormatted,
+        Mode: d.payment_mode,
+        "Receipt #": receiptNumber,
+      },
+    });
 
     revalidatePath("/billing/invoices");
     revalidatePath(`/billing/invoices/${invoiceId}`);
