@@ -169,144 +169,179 @@ export function ProposalPptxButton({
       });
 
       // ─── Site slides ─────────────────────────────────────────────────
+      // Photo-first layout: the site photo is a FULL-BLEED hero across
+      // the top of the slide. The site name + city sit in a dark gradient
+      // strip overlaid on the bottom of the photo so the eye lands on
+      // the image, not on a side panel. Details + rate run as a single
+      // horizontal strip under the photo.
+      //
+      // Slide canvas is 13.33" × 7.5" (LAYOUT_WIDE).
+      //   accent bar    — 0.0 → 0.15  (0.15" tall)
+      //   hero photo    — 0.15 → 5.55 (5.4" tall, full width)
+      //     overlay band — 4.40 → 5.55 (semi-dark, holds title + city)
+      //   detail strip  — 5.7 → 6.95 (1.25" tall — chips + rate)
+      //   footer        — 7.15 → 7.45
       for (const site of sites) {
         const slide = prs.addSlide();
         slide.background = { color: "ffffff" };
 
-        // Thick accent bar at top
+        // Thin accent bar at the very top.
         slide.addShape(prs.ShapeType.rect, {
-          x: 0, y: 0, w: "100%", h: 0.18, fill: { color: BRAND_ACCENT },
+          x: 0, y: 0, w: "100%", h: 0.15, fill: { color: BRAND_ACCENT },
         });
 
-        // Corner logo — small, top-right. Keeps every slide branded.
-        if (logoData) {
-          slide.addImage({
-            data: logoData, x: 11.95, y: 0.35, w: 1, h: 1,
-            sizing: { type: "contain", w: 1, h: 1 },
-          });
-        }
-
-        // Site name (big)
-        slide.addText(site.name, {
-          x: 0.5, y: 0.4, w: 11.3, h: 0.95,
-          fontSize: 36, bold: true, color: BRAND_INK, fontFace: "Calibri",
-          valign: "top",
-        });
-
-        // City / state / address on one subtitle line
-        const locationLine = [
-          site.city,
-          site.state,
-          site.address,
-        ]
-          .filter(Boolean)
-          .join("  •  ");
-        if (locationLine) {
-          slide.addText(locationLine, {
-            x: 0.5, y: 1.32, w: 11.3, h: 0.5,
-            fontSize: 18, color: BRAND_MUTED, fontFace: "Calibri",
-          });
-        }
-
-        // Rate ribbon (bottom-right of image or free-standing)
-        const rateText = displayRate(site.base_rate_paise, proposal.show_rates);
-        const hasRateBadge = proposal.show_rates !== "hidden";
-
-        // Photo area — 8.4" × 5" wide panel on the left.
         const photoData = site.primary_photo_url
           ? photoDataByUrl.get(site.primary_photo_url)
           : null;
         const hasPhoto = proposal.show_photos && !!photoData;
 
+        // ── Hero photo (full bleed) ─────────────────────────────────
         if (hasPhoto && photoData) {
+          // sizing.type "cover" fills the box and crops overflow so the
+          // photo really feels like a hero — no letterboxing.
           slide.addImage({
             data: photoData,
-            x: 0.5, y: 1.95, w: 8.4, h: 5,
-            sizing: { type: "contain", w: 8.4, h: 5 },
+            x: 0, y: 0.15, w: 13.33, h: 5.4,
+            sizing: { type: "cover", w: 13.33, h: 5.4 },
           });
         } else {
-          // Empty-photo placeholder so the slide still looks intentional.
+          // Photo pending placeholder, full bleed so the layout doesn't
+          // jump between "with photo" and "without photo" slides.
           slide.addShape(prs.ShapeType.rect, {
-            x: 0.5, y: 1.95, w: 8.4, h: 5,
+            x: 0, y: 0.15, w: 13.33, h: 5.4,
             fill: { color: BRAND_LIGHT },
-            line: { color: BRAND_HAIRLINE, width: 1 },
+            line: { color: BRAND_HAIRLINE, width: 0 },
           });
           slide.addText("Photo pending", {
-            x: 0.5, y: 4.25, w: 8.4, h: 0.5,
-            fontSize: 16, color: BRAND_MUTED, align: "center",
+            x: 0, y: 2.75, w: 13.33, h: 0.5,
+            fontSize: 20, color: BRAND_MUTED, align: "center",
             fontFace: "Calibri",
           });
         }
 
-        // Rate chip — placed at the top of the details column
-        const detailX = hasPhoto ? 9.1 : 0.5;
-        const detailW = hasPhoto ? 3.85 : 12.3;
+        // ── Title strip overlay on bottom of hero ──────────────────
+        // Semi-transparent dark band so the title reads on any photo
+        // (bright sky, dark night shot, etc.). Transparency is 0–100
+        // in pptxgenjs (% opaque) so 35 = 65% see-through. We keep the
+        // band even when there's no photo — the placeholder is light
+        // so a dark band still pops the title.
+        slide.addShape(prs.ShapeType.rect, {
+          x: 0, y: 4.40, w: 13.33, h: 1.15,
+          fill: { color: BRAND_INK, transparency: 35 },
+          line: { color: BRAND_INK, width: 0 },
+        });
 
-        if (hasRateBadge) {
+        slide.addText(site.name, {
+          x: 0.5, y: 4.5, w: 11.3, h: 0.55,
+          fontSize: 32, bold: true, color: "ffffff", fontFace: "Calibri",
+          valign: "top",
+        });
+
+        const locationLine = [site.city, site.state, site.address]
+          .filter(Boolean)
+          .join("  •  ");
+        if (locationLine) {
+          slide.addText(locationLine, {
+            x: 0.5, y: 5.05, w: 11.3, h: 0.4,
+            fontSize: 14, color: BRAND_HAIRLINE, fontFace: "Calibri",
+          });
+        }
+
+        // Logo badge over the photo, top-right corner. Sits on a soft
+        // white card so it stays legible against any background.
+        if (logoData) {
           slide.addShape(prs.ShapeType.roundRect, {
-            x: detailX, y: 1.95, w: detailW, h: 1.1,
-            fill: { color: BRAND_PRIMARY },
-            line: { color: BRAND_PRIMARY, width: 0 },
+            x: 12.05, y: 0.35, w: 1.05, h: 1.05,
+            fill: { color: "ffffff", transparency: 15 },
+            line: { color: BRAND_HAIRLINE, width: 0 },
             rectRadius: 0.08,
           });
+          slide.addImage({
+            data: logoData, x: 12.15, y: 0.45, w: 0.85, h: 0.85,
+            sizing: { type: "contain", w: 0.85, h: 0.85 },
+          });
+        }
+
+        // ── Detail strip under the photo ────────────────────────────
+        // Build the chip list according to which toggles are on. Each
+        // chip = a small label + bold value pair, laid out left-to-right.
+        const rateText = displayRate(site.base_rate_paise, proposal.show_rates);
+        const hasRateBadge = proposal.show_rates !== "hidden";
+
+        const chips: { label: string; value: string }[] = [
+          { label: "Media", value: site.media_type?.replace(/_/g, " ") ?? "—" },
+        ];
+        if (proposal.show_dimensions && site.width_ft && site.height_ft) {
+          chips.push({
+            label: "Size",
+            value: `${site.width_ft} × ${site.height_ft} ft`,
+          });
+        }
+        if (proposal.show_illumination && site.illumination) {
+          chips.push({ label: "Illumination", value: site.illumination });
+        }
+        if (proposal.show_traffic_info && site.facing) {
+          chips.push({ label: "Facing", value: site.facing });
+        }
+        if (
+          proposal.show_traffic_info &&
+          site.visibility_distance_m
+        ) {
+          chips.push({
+            label: "Visibility",
+            value: `${site.visibility_distance_m}m`,
+          });
+        }
+        if (proposal.show_availability) {
+          chips.push({ label: "Status", value: site.status });
+        }
+
+        // Lay chips out left → right. Rate chip lives on the right edge
+        // so it sticks at a predictable spot regardless of chip count.
+        const stripY = 5.75;
+        const stripLeft = 0.5;
+        const rateChipW = 3.2;
+        const chipsAreaW = hasRateBadge
+          ? 13.33 - stripLeft - rateChipW - 0.4
+          : 13.33 - stripLeft * 2;
+        const chipW = Math.min(2.2, chipsAreaW / Math.max(chips.length, 1));
+
+        chips.slice(0, 5).forEach((c, i) => {
+          const cx = stripLeft + i * chipW;
+          slide.addText(c.label.toUpperCase(), {
+            x: cx, y: stripY, w: chipW - 0.15, h: 0.3,
+            fontSize: 10, color: BRAND_MUTED, fontFace: "Calibri",
+            bold: true, charSpacing: 2,
+          });
+          slide.addText(c.value, {
+            x: cx, y: stripY + 0.3, w: chipW - 0.15, h: 0.55,
+            fontSize: 15, bold: true, color: BRAND_INK,
+            fontFace: "Calibri", valign: "top",
+          });
+        });
+
+        if (hasRateBadge) {
+          const rateX = 13.33 - stripLeft - rateChipW;
+          slide.addShape(prs.ShapeType.roundRect, {
+            x: rateX, y: stripY - 0.05, w: rateChipW, h: 1.15,
+            fill: { color: BRAND_PRIMARY },
+            line: { color: BRAND_PRIMARY, width: 0 },
+            rectRadius: 0.1,
+          });
           slide.addText("MONTHLY RATE", {
-            x: detailX + 0.15, y: 2.05, w: detailW - 0.3, h: 0.3,
-            fontSize: 11, color: "a5b4fc", fontFace: "Calibri",
+            x: rateX + 0.2, y: stripY + 0.05, w: rateChipW - 0.4, h: 0.3,
+            fontSize: 10, color: "a5b4fc", fontFace: "Calibri",
             bold: true, charSpacing: 3,
           });
           slide.addText(
             rateText + (proposal.show_rates === "request_quote" ? "" : " / mo"),
             {
-              x: detailX + 0.15, y: 2.35, w: detailW - 0.3, h: 0.6,
+              x: rateX + 0.2, y: stripY + 0.35, w: rateChipW - 0.4, h: 0.7,
               fontSize: 22, bold: true, color: "ffffff",
               fontFace: "Calibri", valign: "top",
             },
           );
         }
-
-        // Details list — starts under the rate chip (or at top if no rate)
-        const detailsStartY = hasRateBadge ? 3.2 : 1.95;
-        const details: { label: string; value: string }[] = [
-          { label: "Media Type", value: site.media_type?.replace(/_/g, " ") ?? "—" },
-        ];
-        if (proposal.show_dimensions) {
-          details.push({
-            label: "Dimensions",
-            value:
-              site.width_ft && site.height_ft
-                ? `${site.width_ft} × ${site.height_ft} ft`
-                : "—",
-          });
-        }
-        if (proposal.show_illumination) {
-          details.push({ label: "Illumination", value: site.illumination ?? "—" });
-        }
-        if (proposal.show_traffic_info) {
-          details.push({ label: "Facing", value: site.facing ?? "—" });
-          if (site.visibility_distance_m) {
-            details.push({
-              label: "Visibility",
-              value: `${site.visibility_distance_m}m`,
-            });
-          }
-        }
-        if (proposal.show_availability) {
-          details.push({ label: "Status", value: site.status });
-        }
-
-        details.forEach((d, i) => {
-          const yPos = detailsStartY + i * 0.75;
-          slide.addText(d.label.toUpperCase(), {
-            x: detailX, y: yPos, w: detailW, h: 0.25,
-            fontSize: 11, color: BRAND_MUTED, fontFace: "Calibri",
-            bold: true, charSpacing: 2,
-          });
-          slide.addText(d.value, {
-            x: detailX, y: yPos + 0.25, w: detailW, h: 0.45,
-            fontSize: 18, bold: true, color: BRAND_INK, fontFace: "Calibri",
-            valign: "top",
-          });
-        });
 
         // Footer — org name + optional custom footer text
         const footerParts: string[] = [];
