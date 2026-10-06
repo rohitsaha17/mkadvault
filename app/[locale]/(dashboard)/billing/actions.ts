@@ -394,15 +394,29 @@ export async function recordPayment(
 }
 
 // ─── Get campaign line items (for pre-populating invoice form) ─────────────────
+//
+// Returns a line-item array sized to a BILLING PERIOD. If periodFrom /
+// periodTo are given, each per-month site becomes a line billed
+// pro-rata (`quantity = days`, `rate_inr = monthly_rate / 30`), so a
+// line's amount is `days × daily_rate` — the standard "N days @ ₹X/day"
+// invoice format Indian clients expect. Without a period, each site's
+// own date range is used.
+//
+// Services (printing / mounting / design / transport / other) are
+// always billed as stored — those are flat charges, not pro-rated.
 
-export async function getCampaignLineItems(campaignId: string) {
+export async function getCampaignLineItems(
+  campaignId: string,
+  periodFrom?: string,
+  periodTo?: string,
+) {
   try {
     const ctx = await getOrgAndUser();
     if (!ctx) return { items: [], campaignValue: 0, pricingType: "itemized" as const };
 
     const { data: campaign } = await ctx.supabase
       .from("campaigns")
-      .select("pricing_type, total_value_paise, campaign_name")
+      .select("pricing_type, total_value_paise, campaign_name, start_date, end_date")
       .eq("id", campaignId)
       .single();
 
@@ -416,8 +430,8 @@ export async function getCampaignLineItems(campaignId: string) {
           hsn_sac_code: "998361",
           quantity: 1,
           rate_inr: (campaign.total_value_paise ?? 0) / 100,
-          period_from: undefined,
-          period_to: undefined,
+          period_from: periodFrom,
+          period_to: periodTo,
           site_id: undefined,
         }],
         campaignValue: campaign.total_value_paise ?? 0,
@@ -425,25 +439,116 @@ export async function getCampaignLineItems(campaignId: string) {
       };
     }
 
-    const { data: services } = await ctx.supabase
-      .from("campaign_services")
-      .select("service_type, description, quantity, rate_paise, total_paise, site_id")
-      .eq("campaign_id", campaignId);
+    // Itemized: pull both the per-site rental data AND the services. The
+    // site rental lines are new in this flow (previously only services
+    // showed up on invoices generated from a campaign, so the display
+    // rent lived outside the invoice entirely).
+    const [{ data: campSites }, { data: services }] = await Promise.all([
+      ctx.supabase
+        .from("campaign_sites")
+        .select(`
+          id, display_rate_paise, rate_type, start_date, end_date,
+          site:sites(id, name, site_code)
+        `)
+        .eq("campaign_id", campaignId),
+      ctx.supabase
+        .from("campaign_services")
+        .select("service_type, description, quantity, rate_paise, total_paise, site_id")
+        .eq("campaign_id", campaignId),
+    ]);
 
-    const items = (services ?? []).map((s) => ({
-      service_type: s.service_type as "display_rental" | "flex_printing" | "mounting" | "design" | "transport" | "other",
-      description: s.description ?? s.service_type,
-      hsn_sac_code: "998361",
-      quantity: s.quantity ?? 1,
-      rate_inr: (s.rate_paise ?? 0) / 100,
-      period_from: undefined,
-      period_to: undefined,
-      site_id: s.site_id ?? undefined,
-    }));
+    type SiteJoin =
+      | { id: string; name: string | null; site_code: string | null }
+      | { id: string; name: string | null; site_code: string | null }[]
+      | null;
+    type CampSiteRow = {
+      id: string;
+      display_rate_paise: number | null;
+      rate_type: string | null;
+      start_date: string | null;
+      end_date: string | null;
+      site: SiteJoin;
+    };
 
+    const pickSite = (s: SiteJoin) =>
+      Array.isArray(s) ? s[0] ?? null : s;
+
+    // Build per-site display rental lines. Each site's billable range is
+    // the INTERSECTION of (periodFrom..periodTo) and (site.start..site.end)
+    // so a site that was only live for part of the chosen window gets
+    // billed proportionally — the default most accounts teams want.
+    const siteLines = ((campSites ?? []) as CampSiteRow[])
+      .map((cs) => {
+        const monthlyPaise = cs.display_rate_paise ?? 0;
+        if (!monthlyPaise || !cs.start_date || !cs.end_date) return null;
+        const siteInfo = pickSite(cs.site);
+        if (!siteInfo) return null;
+
+        const fromStr = periodFrom && periodFrom > cs.start_date
+          ? periodFrom
+          : cs.start_date;
+        const toStr = periodTo && periodTo < cs.end_date
+          ? periodTo
+          : cs.end_date;
+        if (toStr < fromStr) return null; // site not in this window
+
+        const days = daysInclusive(fromStr, toStr);
+        if (days <= 0) return null;
+
+        // Daily rate (so the invoice line reads "N days @ ₹Y/day"). We
+        // divide at the DISPLAY level — keeping two decimals is enough
+        // since the amount is derived from paise upstream.
+        const dailyRateInr = (monthlyPaise / 30) / 100;
+        const siteName = siteInfo.name ?? siteInfo.site_code ?? "Site";
+        const code = siteInfo.site_code ? ` (${siteInfo.site_code})` : "";
+
+        return {
+          service_type: "display_rental" as const,
+          description: `Display Rental — ${siteName}${code} — ${fromStr} to ${toStr}`,
+          hsn_sac_code: "998361",
+          quantity: days,
+          rate_inr: Math.round(dailyRateInr * 100) / 100,
+          period_from: fromStr,
+          period_to: toStr,
+          site_id: siteInfo.id,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x != null);
+
+    // Flat services — printing, mounting, design etc. These are
+    // one-time charges that fire at campaign start, so a period-scoped
+    // invoice (e.g. an extension invoice) should EXCLUDE them: billing
+    // the printing charge again when the campaign is extended would
+    // double-charge the client. A non-period invoice (plain
+    // campaign-linked invoice) still gets them.
+    const includeServices = !periodFrom && !periodTo;
+    const serviceLines = includeServices
+      ? (services ?? []).map((s) => ({
+          service_type: s.service_type as "display_rental" | "flex_printing" | "mounting" | "design" | "transport" | "other",
+          description: s.description ?? s.service_type,
+          hsn_sac_code: "998361",
+          quantity: s.quantity ?? 1,
+          rate_inr: (s.rate_paise ?? 0) / 100,
+          period_from: undefined,
+          period_to: undefined,
+          site_id: s.site_id ?? undefined,
+        }))
+      : [];
+
+    const items = [...siteLines, ...serviceLines];
     return { items, campaignValue: 0, pricingType: "itemized" as const };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
     return toActionError(err, "getCampaignLineItems");
   }
+}
+
+// Days between two YYYY-MM-DD strings, inclusive of both ends. Mirrors
+// the pro-rata rule used in lib/campaigns/derive.ts so invoices and the
+// campaign total stay numerically consistent.
+function daysInclusive(fromStr: string, toStr: string): number {
+  const from = new Date(fromStr).getTime();
+  const to = new Date(toStr).getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return Math.max(0, Math.ceil((to - from) / (1000 * 60 * 60 * 24)) + 1);
 }

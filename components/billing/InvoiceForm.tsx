@@ -36,6 +36,12 @@ interface Props {
   bankAccounts?: BankAccountLite[];
   preselectedClientId?: string;
   preselectedCampaignId?: string;
+  // Billing window — when provided (e.g. by the "extend campaign" flow)
+  // the pre-populated line items are sized to this period, and each
+  // line's own period defaults to it. Editing a line's period later
+  // re-prorates the quantity on the fly.
+  preselectedPeriodFrom?: string;
+  preselectedPeriodTo?: string;
 }
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -135,6 +141,15 @@ function addDays(dateStr: string, days: number) {
   return d.toISOString().slice(0, 10);
 }
 
+// Inclusive day count between two YYYY-MM-DD strings — matches the
+// `rate × days / 30` pro-rata rule in lib/campaigns/derive.ts.
+function daysInclusive(fromStr: string, toStr: string): number {
+  const from = new Date(fromStr).getTime();
+  const to = new Date(toStr).getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return Math.max(0, Math.ceil((to - from) / (1000 * 60 * 60 * 24)) + 1);
+}
+
 function F({ label, error, children, required }: {
   label: string; error?: string; children: React.ReactNode; required?: boolean;
 }) {
@@ -170,6 +185,8 @@ export function InvoiceForm({
   bankAccounts = [],
   preselectedClientId,
   preselectedCampaignId,
+  preselectedPeriodFrom,
+  preselectedPeriodTo,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -218,26 +235,35 @@ export function InvoiceForm({
     }
   }, [watchedClientId, watchedInvoiceDate, selectedClient, setValue]);
 
-  // Load campaign line items when campaign changes
-  const loadCampaignItems = useCallback(async (campaignId: string) => {
-    if (!campaignId) return;
-    setLoadingCampaign(true);
-    try {
-      const result = await getCampaignLineItems(campaignId);
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
+  // Load campaign line items when campaign changes. When a billing
+  // window is provided (via the extend-campaign redirect), the server
+  // uses it to pro-rate each per-site rental line to that window.
+  const loadCampaignItems = useCallback(
+    async (campaignId: string) => {
+      if (!campaignId) return;
+      setLoadingCampaign(true);
+      try {
+        const result = await getCampaignLineItems(
+          campaignId,
+          preselectedPeriodFrom,
+          preselectedPeriodTo,
+        );
+        if ("error" in result) {
+          toast.error(result.error);
+          return;
+        }
+        if (result.items.length > 0) {
+          // Replace line items
+          while (fields.length > 0) remove(0);
+          result.items.forEach((item) => append(item));
+          toast.info("Line items loaded from campaign");
+        }
+      } finally {
+        setLoadingCampaign(false);
       }
-      if (result.items.length > 0) {
-        // Replace line items
-        while (fields.length > 0) remove(0);
-        result.items.forEach((item) => append(item));
-        toast.info("Line items loaded from campaign");
-      }
-    } finally {
-      setLoadingCampaign(false);
-    }
-  }, [fields.length, remove, append]);
+    },
+    [fields.length, remove, append, preselectedPeriodFrom, preselectedPeriodTo],
+  );
 
   useEffect(() => {
     if (watchedCampaignId) {
@@ -245,6 +271,27 @@ export function InvoiceForm({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedCampaignId]);
+
+  // Pro-rata recalc: when a line's period dates change, re-set
+  // `quantity` to the inclusive day count between them. We only
+  // overwrite quantity for display_rental lines because flex/mounting/
+  // design/etc. are flat charges where "qty" means something different
+  // (sheets printed, panels mounted, hours, etc.). This matches the
+  // user's expectation that "the duration drives the billable amount".
+  function recomputeQtyFromDates(idx: number) {
+    const row = watchedItems?.[idx];
+    if (!row) return;
+    if (row.service_type && row.service_type !== "display_rental") return;
+    const from = row.period_from;
+    const to = row.period_to;
+    if (!from || !to || to < from) return;
+    const days = daysInclusive(from, to);
+    if (days <= 0) return;
+    setValue(`line_items.${idx}.quantity`, days, {
+      shouldDirty: true,
+      shouldValidate: false,
+    });
+  }
 
   // Calculated totals
   const subtotalPaise = (watchedItems ?? []).reduce((sum, item) => {
@@ -409,8 +456,18 @@ export function InvoiceForm({
                     </td>
                     <td className="px-2 py-2">
                       <div className="flex gap-1">
-                        <Input {...register(`line_items.${idx}.period_from`)} type="date" className="w-32 text-xs tabular-nums" />
-                        <Input {...register(`line_items.${idx}.period_to`)} type="date" className="w-32 text-xs tabular-nums" />
+                        <Input
+                          {...register(`line_items.${idx}.period_from`)}
+                          onBlur={() => recomputeQtyFromDates(idx)}
+                          type="date"
+                          className="w-32 text-xs tabular-nums"
+                        />
+                        <Input
+                          {...register(`line_items.${idx}.period_to`)}
+                          onBlur={() => recomputeQtyFromDates(idx)}
+                          type="date"
+                          className="w-32 text-xs tabular-nums"
+                        />
                       </div>
                     </td>
                     <td className="px-2 py-2">

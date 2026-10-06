@@ -513,18 +513,35 @@ export async function cancelCampaign(campaignId: string): Promise<{ error?: stri
 }
 
 // ─── Extend campaign dates ──────────────────────────────────────────────────
+//
+// Extending bumps the campaign end_date AND rescales every linked site
+// so the billable amount keeps growing in step with the duration:
+//
+//   per_month sites — end_date pushed to newEndDate; recompute applies
+//                     the standard `rate × days / 30` formula.
+//   fixed-price sites — converted to per_month on the spot. The stored
+//                     flat rate is reinterpreted as "the amount billed
+//                     for the ORIGINAL period" and converted to an
+//                     equivalent monthly rate so the extension period
+//                     bills at the same per-day rate the client was
+//                     already paying. Flipping to per_month is a one-
+//                     way migration; subsequent extensions re-scale
+//                     via the usual math.
+//
+// Returns `redirectTo` with a pre-filled invoice URL for the extension
+// window so the user can review and send immediately.
 
 export async function extendCampaign(
   campaignId: string,
   newEndDate: string
-): Promise<{ error?: string }> {
+): Promise<{ error?: string; redirectTo?: string }> {
   try {
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
     const { data: current } = await ctx.supabase
       .from("campaigns")
-      .select("end_date, status")
+      .select("end_date, start_date, status, client_id, pricing_type")
       .eq("id", campaignId)
       .single();
 
@@ -538,6 +555,11 @@ export async function extendCampaign(
         error:
           "Cancelled campaigns can't be extended. Create a new campaign with the same sites instead.",
       };
+    }
+
+    const oldEndDate = current.end_date as string | null;
+    if (oldEndDate && newEndDate <= oldEndDate) {
+      return { error: "New end date must be after the current end date." };
     }
 
     // If we're extending a completed campaign past today, we have to
@@ -562,13 +584,64 @@ export async function extendCampaign(
 
     if (error) return { error: error.message };
 
-    // Also update all campaign_sites end dates if they matched the old end date
-    if (current.end_date) {
-      await ctx.supabase
-        .from("campaign_sites")
-        .update({ end_date: newEndDate })
-        .eq("campaign_id", campaignId)
-        .eq("end_date", current.end_date);
+    // ── Rescale every linked site to the new end date ─────────────────
+    // Previously we only bumped sites whose end_date matched the old
+    // campaign end. That left sites with custom shorter end dates
+    // out of the extension and under-billed. The user's billing
+    // model is "price keeps growing with duration", so bump every
+    // site that was ending at or before the old campaign end.
+    const { data: csRows } = await ctx.supabase
+      .from("campaign_sites")
+      .select("id, site_id, start_date, end_date, rate_type, display_rate_paise")
+      .eq("campaign_id", campaignId);
+
+    for (const cs of csRows ?? []) {
+      const siteStart = cs.start_date as string | null;
+      const siteEnd = cs.end_date as string | null;
+      const ratePaise = (cs.display_rate_paise as number | null) ?? 0;
+      const rateType = (cs.rate_type as string | null) ?? "per_month";
+
+      // Only extend sites whose booking tracks the campaign window
+      // (ended at or before the old campaign end). A site that was
+      // DELIBERATELY given a shorter range AND an end date earlier
+      // than the campaign end is still bumped — the user's intent
+      // is "the whole campaign is extended". A later shorter end can
+      // be re-set manually per site if needed.
+      if (!siteEnd || !siteStart) continue;
+
+      if (rateType === "fixed") {
+        // Convert fixed → per_month using the booked period as the
+        // reference. Monthly equivalent of a fixed rate for N days:
+        //   monthlyPaise = ratePaise × 30 / N
+        // This preserves the per-day rate the client was already
+        // paying so subsequent extensions bill at the same unit cost.
+        const oldDays = daysBetweenInclusive(siteStart, siteEnd);
+        if (oldDays <= 0 || !ratePaise) {
+          // Nothing meaningful to convert — just bump the end_date.
+          await ctx.supabase
+            .from("campaign_sites")
+            .update({ end_date: newEndDate })
+            .eq("id", cs.id);
+          continue;
+        }
+        const monthlyPaise = Math.round((ratePaise * 30) / oldDays);
+        await ctx.supabase
+          .from("campaign_sites")
+          .update({
+            end_date: newEndDate,
+            rate_type: "per_month",
+            display_rate_paise: monthlyPaise,
+          })
+          .eq("id", cs.id);
+      } else {
+        // per_month (or unset — defaults to per_month in derive.ts).
+        // Just push the end date forward; recompute will scale the
+        // amount using the standard formula.
+        await ctx.supabase
+          .from("campaign_sites")
+          .update({ end_date: newEndDate })
+          .eq("id", cs.id);
+      }
     }
 
     // When reopening, re-book the linked sites so the inventory map
@@ -576,10 +649,6 @@ export async function extendCampaign(
     // currently-live campaign (they'd otherwise overwrite a different
     // booking's status).
     if (reopenAsLive) {
-      const { data: csRows } = await ctx.supabase
-        .from("campaign_sites")
-        .select("site_id")
-        .eq("campaign_id", campaignId);
       const siteIds = (csRows ?? []).map((r) => r.site_id as string);
       for (const siteId of siteIds) {
         await ctx.supabase
@@ -604,17 +673,44 @@ export async function extendCampaign(
       description: reopenAsLive
         ? `Campaign reopened and extended to ${newEndDate}`
         : `Campaign extended to ${newEndDate}`,
-      old_value: current.end_date,
+      old_value: oldEndDate,
       new_value: newEndDate,
     });
 
     revalidatePath("/campaigns");
     revalidatePath(`/campaigns/${campaignId}`);
-    return {};
+
+    // Hand the client a pre-filled invoice URL for the extension
+    // window — the invoice form uses these dates to pro-rate each
+    // site's rental line. The user still has to review GST / terms
+    // and click Save, so this is suggestive, not automatic.
+    const clientId = current.client_id as string | null;
+    const periodFrom = oldEndDate ? addOneDay(oldEndDate) : current.start_date as string | null;
+    const redirectTo =
+      clientId && periodFrom
+        ? `/billing/invoices/new?campaign_id=${encodeURIComponent(campaignId)}&client_id=${encodeURIComponent(clientId)}&period_from=${encodeURIComponent(periodFrom)}&period_to=${encodeURIComponent(newEndDate)}`
+        : undefined;
+
+    return redirectTo ? { redirectTo } : {};
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
     return toActionError(err, "extendCampaign");
   }
+}
+
+// Inclusive day count helper. Lives next to extendCampaign so the
+// pro-rata math and the extension logic can't drift apart.
+function daysBetweenInclusive(fromStr: string, toStr: string): number {
+  const from = new Date(fromStr).getTime();
+  const to = new Date(toStr).getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return Math.max(0, Math.ceil((to - from) / (1000 * 60 * 60 * 24)) + 1);
+}
+
+function addOneDay(dateStr: string): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 // ─── Save campaign as draft (lenient validation) ────────────────────────────

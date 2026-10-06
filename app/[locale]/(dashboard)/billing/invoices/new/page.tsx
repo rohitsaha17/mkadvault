@@ -22,12 +22,20 @@ export default async function NewInvoicePage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ client_id?: string; campaign_id?: string }>;
+  searchParams: Promise<{
+    client_id?: string;
+    campaign_id?: string;
+    // Optional billing window — pre-selects line-item period dates so
+    // the invoice ships with per-site amounts already pro-rated for
+    // the chosen range. Driven by the "extend campaign" flow.
+    period_from?: string;
+    period_to?: string;
+  }>;
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
 
-  const { client_id, campaign_id } = await searchParams;
+  const { client_id, campaign_id, period_from, period_to } = await searchParams;
 
   const supabase = await createClient();
 
@@ -113,6 +121,8 @@ export default async function NewInvoicePage({
         bankAccounts={bankAccounts}
         preselectedClientId={client_id}
         preselectedCampaignId={campaign_id}
+        preselectedPeriodFrom={period_from}
+        preselectedPeriodTo={period_to}
       />
     </div>
   );

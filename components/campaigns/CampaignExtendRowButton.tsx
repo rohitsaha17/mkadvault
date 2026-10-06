@@ -53,7 +53,7 @@ export function CampaignExtendRowButton({
     }
     startTransition(async () => {
       try {
-        const result = await callAction<{ error?: string }>(
+        const result = await callAction<{ error?: string; redirectTo?: string }>(
           "extendCampaign",
           campaignId,
           newEndDate,
@@ -62,8 +62,16 @@ export function CampaignExtendRowButton({
           toast.error(result.error);
           return;
         }
-        toast.success("Campaign extended");
         setOpen(false);
+        if (result.redirectTo) {
+          // Jump straight into the pre-filled invoice for the
+          // extension window. Toast still shows so the user knows
+          // the extend part succeeded.
+          toast.success("Campaign extended — review the extension invoice");
+          router.push(result.redirectTo);
+          return;
+        }
+        toast.success("Campaign extended");
         // Refresh the list view so the new end date + recomputed total
         // appear immediately.
         router.refresh();

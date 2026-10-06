@@ -62,14 +62,19 @@ export function CampaignDetailActions({
     if (!newEndDate) { toast.error("Please select a new end date"); return; }
     startTransition(async () => {
       try {
-        const result = await callAction<{ error?: string }>(
+        const result = await callAction<{ error?: string; redirectTo?: string }>(
           "extendCampaign",
           campaignId,
           newEndDate,
         );
         if (result.error) { toast.error(result.error); return; }
-        toast.success("Campaign extended");
         setShowExtend(false);
+        if (result.redirectTo) {
+          toast.success("Campaign extended — review the extension invoice");
+          router.push(result.redirectTo);
+          return;
+        }
+        toast.success("Campaign extended");
         router.refresh();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Extend failed");
