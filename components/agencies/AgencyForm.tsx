@@ -1,6 +1,7 @@
 "use client";
 import { useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -48,7 +49,7 @@ export function AgencyForm({ existing }: Props) {
     notes: existing.notes ?? "",
   } : agencyDefaults;
 
-  const { register, handleSubmit, formState: { errors } } = useForm<AgencyFormValues>({
+  const { register, handleSubmit, setFocus, formState: { errors } } = useForm<AgencyFormValues>({
     resolver: zodResolver(agencySchema),
     defaultValues: defaults,
   });
@@ -74,7 +75,12 @@ export function AgencyForm({ existing }: Props) {
     cn(errors[field] && "border-destructive focus-visible:ring-destructive/40");
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-3xl">
+    <form
+      onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<AgencyFormValues>) =>
+        showFirstFormError(errs, { setFocus, label: "AgencyForm" }),
+      )}
+      className="space-y-6 max-w-3xl"
+    >
 
       {/* Agency info */}
       <section className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">

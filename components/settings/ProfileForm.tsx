@@ -1,6 +1,7 @@
 "use client";
 import { useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -22,6 +23,7 @@ export function ProfileForm({ profile, email }: Props) {
   const {
     register,
     handleSubmit,
+    setFocus,
     formState: { errors },
   } = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
@@ -44,7 +46,12 @@ export function ProfileForm({ profile, email }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+    <form
+      onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<ProfileFormValues>) =>
+        showFirstFormError(errs, { setFocus, label: "ProfileForm" }),
+      )}
+      className="space-y-4"
+    >
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="fullName">Full Name</Label>

@@ -1,6 +1,7 @@
 "use client";
 import { useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -53,7 +54,7 @@ export function LandownerForm({ existing }: Props) {
     notes: existing.notes ?? "",
   } : landownerDefaults;
 
-  const { register, handleSubmit, formState: { errors } } = useForm<LandownerFormValues>({
+  const { register, handleSubmit, setFocus, formState: { errors } } = useForm<LandownerFormValues>({
     resolver: zodResolver(landownerSchema),
     defaultValues: defaults,
   });
@@ -79,7 +80,12 @@ export function LandownerForm({ existing }: Props) {
     cn(errors[field] && "border-destructive focus-visible:ring-destructive/40");
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-3xl">
+    <form
+      onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<LandownerFormValues>) =>
+        showFirstFormError(errs, { setFocus, label: "LandownerForm" }),
+      )}
+      className="space-y-6 max-w-3xl"
+    >
 
       {/* Personal */}
       <section className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">

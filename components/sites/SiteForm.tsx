@@ -3,7 +3,8 @@
 // Steps: 1 Basic Info → 2 Location → 3 Specs → 4 Commercial → 5 Notes/Review
 // Photo upload is handled on the site detail page after the site is saved.
 import { useState, useTransition } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm, useFieldArray, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -107,6 +108,7 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
     setValue,
     watch,
     control,
+    setFocus,
     formState: { errors },
   } = useForm<SiteFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zodResolver's generic type can't express preprocess input↔output mismatch
@@ -267,7 +269,15 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
       </nav>
 
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <form onSubmit={handleSubmit(onSubmit as any)} noValidate className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">
+      <form
+        onSubmit={handleSubmit(
+          onSubmit as any,
+          (errs: FieldErrors<SiteFormValues>) =>
+            showFirstFormError(errs, { setFocus, label: "SiteForm" }),
+        )}
+        noValidate
+        className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4"
+      >
         {/* ── Step 1: Basic Info ───────────────────────────────────────────── */}
         {step === 0 && (
           <div className="space-y-5">

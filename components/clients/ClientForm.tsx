@@ -1,6 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -82,7 +83,7 @@ export function ClientForm({ existing }: Props) {
     notes: existing.notes ?? "",
   } : clientDefaults;
 
-  const { register, handleSubmit, formState: { errors } } = useForm<ClientFormValues>({
+  const { register, handleSubmit, setFocus, formState: { errors } } = useForm<ClientFormValues>({
     resolver: zodResolver(clientSchema),
     defaultValues: defaults,
   });
@@ -105,7 +106,12 @@ export function ClientForm({ existing }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-3xl">
+    <form
+      onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<ClientFormValues>) =>
+        showFirstFormError(errs, { setFocus, label: "ClientForm" }),
+      )}
+      className="space-y-6 max-w-3xl"
+    >
       <section className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-border">

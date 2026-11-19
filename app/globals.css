@@ -336,3 +336,27 @@ html.nprogress-busy main {
   opacity: 0.78;
   transition: opacity 140ms ease;
 }
+
+
+/* ── Form validation feedback ─────────────────────────────────────────────
+   Applied to a field (input / select / textarea / its wrapper) whenever
+   the user tries to submit a form with that field invalid. Shakes the
+   element briefly so the eye can't miss it, even on dense forms. See
+   lib/utils/form-feedback.ts — `showFirstFormError()`. The animation
+   is purposely short (320 ms) and non-destructive: the layout doesn't
+   shift because we only translate on the x axis within a few pixels. */
+@keyframes form-field-shake {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(-6px); }
+  30%  { transform: translateX(5px); }
+  45%  { transform: translateX(-4px); }
+  60%  { transform: translateX(3px); }
+  75%  { transform: translateX(-2px); }
+  100% { transform: translateX(0); }
+}
+.animate-form-shake {
+  animation: form-field-shake 320ms cubic-bezier(.36,.07,.19,.97) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-form-shake { animation: none; }
+}

@@ -13,6 +13,7 @@
 import { useMemo, useState, useTransition, useEffect } from "react";
 import { useForm, useFieldArray, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Search } from "lucide-react";
@@ -187,7 +188,7 @@ export function CampaignEditForm({
     [pickerSites],
   );
 
-  const { register, handleSubmit, watch, setValue, control, formState: { errors } } = useForm<EditCampaignValues>({
+  const { register, handleSubmit, watch, setValue, control, setFocus, formState: { errors } } = useForm<EditCampaignValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(editCampaignSchema) as any,
     defaultValues: {
@@ -329,13 +330,7 @@ export function CampaignEditForm({
   }, [pricingType, pickerSites, siteIdsOnCampaign, siteSearch]);
 
   function onInvalid(formErrors: FieldErrors<EditCampaignValues>) {
-    const leaf = findFirstError(formErrors);
-    if (leaf) {
-      toast.error(leaf.message || "Please fix the highlighted fields.");
-    } else {
-      toast.error("Please fix the highlighted fields before saving.");
-    }
-    console.warn("[CampaignEditForm] submit blocked by validation:", formErrors);
+    showFirstFormError(formErrors, { setFocus, label: "CampaignEditForm" });
   }
 
   function onSubmit(values: EditCampaignValues) {
@@ -851,20 +846,3 @@ export function CampaignEditForm({
   );
 }
 
-// Same DFS helper as CampaignForm — pulled inline so the two forms stay
-// independently maintainable.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function findFirstError(obj: any, prefix = ""): { path: string; message: string } | null {
-  if (!obj || typeof obj !== "object") return null;
-  if (typeof obj.message === "string" && obj.message.length > 0) {
-    return { path: prefix || "root", message: obj.message };
-  }
-  for (const key of Object.keys(obj)) {
-    if (key === "ref" || key === "type") continue;
-    const child = obj[key];
-    const nextPrefix = prefix ? `${prefix}.${key}` : key;
-    const hit = findFirstError(child, nextPrefix);
-    if (hit) return hit;
-  }
-  return null;
-}

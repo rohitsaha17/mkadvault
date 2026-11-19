@@ -1,6 +1,7 @@
 "use client";
 import { useTransition } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -44,7 +45,7 @@ interface Props {
 
 export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDuePaise, onClose, onSuccess }: Props) {
   const [isPending, startTransition] = useTransition();
-  const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, setFocus, formState: { errors } } = useForm<FormValues>({
     // Cast: z.preprocess() on amount_inr makes the input type `unknown`,
     // which trips zodResolver's generics. Matches SiteForm / CampaignForm.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,7 +91,12 @@ export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDu
           Invoice <strong>{invoiceNumber}</strong> · Balance due: <strong>{inr(balanceDuePaise)}</strong>
         </p>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+        <form
+          onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<FormValues>) =>
+            showFirstFormError(errs, { setFocus, label: "RecordInvoicePaymentDialog" }),
+          )}
+          className="space-y-3"
+        >
           <div className="space-y-1">
             <Label>Amount Received (₹) *</Label>
             <Input

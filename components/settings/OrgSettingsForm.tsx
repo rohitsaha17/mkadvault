@@ -1,7 +1,8 @@
 "use client";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { Loader2, Upload, Trash2, Building2 } from "lucide-react";
@@ -118,6 +119,7 @@ export function OrgSettingsForm({
   const {
     register,
     handleSubmit,
+    setFocus,
     formState: { errors },
   } = useForm<OrgSettingsFormValues>({
     resolver: zodResolver(orgSettingsSchema),
@@ -154,7 +156,12 @@ export function OrgSettingsForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+    <form
+      onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<OrgSettingsFormValues>) =>
+        showFirstFormError(errs, { setFocus, label: "OrgSettingsForm" }),
+      )}
+      className="space-y-4"
+    >
       {/* Wrap the entire form body in a <fieldset disabled>. The browser
           disables nested inputs/selects/textareas automatically when a
           fieldset is disabled — cheaper than toggling `disabled` on each

@@ -1,6 +1,7 @@
 "use client";
 import { useTransition } from "react";
-import { useForm, Controller, useFieldArray } from "react-hook-form";
+import { useForm, Controller, useFieldArray, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -86,7 +87,7 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
     ...(preselectedSiteId ? { site_id: preselectedSiteId } : {}),
   };
 
-  const { register, handleSubmit, watch, control, formState: { errors } } = useForm<ContractFormValues>({
+  const { register, handleSubmit, watch, control, setFocus, formState: { errors } } = useForm<ContractFormValues>({
     // Cast: z.preprocess() on optional number fields makes zod's input
     // type `unknown`, which trips zodResolver's generics.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,7 +127,12 @@ export function ContractForm({ existing, sites, landowners, agencies, preselecte
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-4xl">
+    <form
+      onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<ContractFormValues>) =>
+        showFirstFormError(errs, { setFocus, label: "ContractForm" }),
+      )}
+      className="space-y-6 max-w-4xl"
+    >
 
       {/* Contract type + party */}
       <section className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">

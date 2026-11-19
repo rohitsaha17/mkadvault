@@ -1,6 +1,7 @@
 "use client";
 import { useState, useTransition, useEffect, useCallback } from "react";
-import { useForm, useFieldArray, useWatch } from "react-hook-form";
+import { useForm, useFieldArray, useWatch, type FieldErrors } from "react-hook-form";
+import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
@@ -201,7 +202,7 @@ export function InvoiceForm({
     bankAccounts[0]?.id ??
     "";
 
-  const { register, handleSubmit, watch, control, setValue, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, watch, control, setValue, setFocus, formState: { errors } } = useForm<FormValues>({
     // Cast: z.preprocess() on line_items.quantity / rate_inr makes zod's
     // input type `unknown`, which trips zodResolver's generics.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -543,7 +544,11 @@ export function InvoiceForm({
           type="button"
           variant="outline"
           disabled={isPending}
-          onClick={handleSubmit((v) => onSubmit(v, "draft"))}
+          onClick={handleSubmit(
+            (v) => onSubmit(v, "draft"),
+            (errs: FieldErrors<FormValues>) =>
+              showFirstFormError(errs, { setFocus, label: "InvoiceForm (draft)" }),
+          )}
         >
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           Save as Draft
@@ -551,7 +556,11 @@ export function InvoiceForm({
         <Button
           type="button"
           disabled={isPending}
-          onClick={handleSubmit((v) => onSubmit(v, "sent"))}
+          onClick={handleSubmit(
+            (v) => onSubmit(v, "sent"),
+            (errs: FieldErrors<FormValues>) =>
+              showFirstFormError(errs, { setFocus, label: "InvoiceForm (sent)" }),
+          )}
         >
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           Create & Send
