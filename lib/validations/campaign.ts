@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   optionalNonNegativeNumber,
   optionalPercentage,
-  optionalPositiveNumber,
 } from "./shared";
 
 // Who the campaign is billed to. See migration 024 for semantics:
@@ -80,7 +79,11 @@ export const campaignBasicsSchema = z
     start_date: z.string().optional(),
     end_date: z.string().optional(),
     pricing_type: z.enum(["itemized", "bundled"]),
-    total_value_inr: optionalPositiveNumber,
+    // total_value_inr is the manual package price for BUNDLED campaigns.
+    // Itemized campaigns derive their total from line items server-side
+    // and load with 0 from the DB, so we accept 0 (treated as "empty")
+    // alongside positive values. A truly empty input stays undefined.
+    total_value_inr: optionalNonNegativeNumber,
     notes: z.string().optional(),
   })
   .superRefine(applyBillingRules);
@@ -143,7 +146,11 @@ export const createCampaignSchema = z
     start_date: z.string().optional(),
     end_date: z.string().optional(),
     pricing_type: z.enum(["itemized", "bundled"]),
-    total_value_inr: optionalPositiveNumber,
+    // total_value_inr is the manual package price for BUNDLED campaigns.
+    // Itemized campaigns derive their total from line items server-side
+    // and load with 0 from the DB, so we accept 0 (treated as "empty")
+    // alongside positive values. A truly empty input stays undefined.
+    total_value_inr: optionalNonNegativeNumber,
     notes: z.string().optional(),
     sites: z.array(campaignSiteEntrySchema),
     services: z.array(campaignServiceEntrySchema),
@@ -166,7 +173,11 @@ export const editCampaignSchema = z
     start_date: z.string().optional(),
     end_date: z.string().optional(),
     pricing_type: z.enum(["itemized", "bundled"]),
-    total_value_inr: optionalPositiveNumber,
+    // total_value_inr is the manual package price for BUNDLED campaigns.
+    // Itemized campaigns derive their total from line items server-side
+    // and load with 0 from the DB, so we accept 0 (treated as "empty")
+    // alongside positive values. A truly empty input stays undefined.
+    total_value_inr: optionalNonNegativeNumber,
     notes: z.string().optional(),
     sites: z.array(campaignSiteEntrySchema).optional(),
     services: z.array(campaignServiceEntrySchema).optional(),
@@ -195,7 +206,7 @@ export const draftCampaignSchema = z.object({
   start_date: z.string().optional(),
   end_date: z.string().optional(),
   pricing_type: z.enum(["itemized", "bundled"]).optional(),
-  total_value_inr: optionalPositiveNumber,
+  total_value_inr: optionalNonNegativeNumber,
   notes: z.string().optional(),
   sites: z.array(campaignSiteEntrySchema).optional(),
   services: z.array(campaignServiceEntrySchema).optional(),
