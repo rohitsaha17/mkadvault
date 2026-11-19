@@ -23,6 +23,7 @@ import {
   TableSkeleton,
 } from "@/components/shared/PageSkeleton";
 import { KpiRow } from "@/components/dashboard/sections/KpiRow";
+import { BookingsRow } from "@/components/dashboard/sections/BookingsRow";
 import { ChartsRow } from "@/components/dashboard/sections/ChartsRow";
 import { SecondaryRow } from "@/components/dashboard/sections/SecondaryRow";
 import { SitesRow } from "@/components/dashboard/sections/SitesRow";
@@ -96,6 +97,10 @@ export default async function DashboardPage({ params }: PageProps) {
         <KpiRow orgId={orgId} />
       </Suspense>
 
+      <Suspense fallback={<BookingsRowSkeleton />}>
+        <BookingsRow orgId={orgId} locale={locale} />
+      </Suspense>
+
       <Suspense fallback={<ChartsRowSkeleton />}>
         <ChartsRow orgId={orgId} />
       </Suspense>
@@ -123,6 +128,24 @@ function KpiRowSkeleton() {
       {Array.from({ length: 4 }).map((_, i) => (
         <KPICardSkeleton key={i} />
       ))}
+    </div>
+  );
+}
+function BookingsRowSkeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end justify-between">
+        <div className="space-y-2">
+          <div className="h-3 w-20 bg-muted/70 rounded animate-pulse" />
+          <div className="h-5 w-64 bg-muted rounded animate-pulse" />
+        </div>
+        <div className="h-3 w-32 bg-muted/70 rounded animate-pulse" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <KPICardSkeleton key={i} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -201,8 +224,17 @@ async function RoleSpecificDashboard({
     : "Welcome back";
 
   if (role === "executive" || role === "manager") {
+    const thisMonthStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+    ).toISOString();
+    const in30DaysStr = format(addDays(now, 30), "yyyy-MM-dd");
+
     const [
-      { data: pipeline },
+      { data: livePipeline },
+      { data: newThisMonth },
+      { data: upcoming },
       { data: availableSites },
       { data: todayMountings },
       { data: weekMountings },
@@ -214,6 +246,20 @@ async function RoleSpecificDashboard({
         .eq("organization_id", orgId)
         .is("deleted_at", null)
         .eq("status", "live"),
+      supabase
+        .from("campaigns")
+        .select("total_value_paise")
+        .eq("organization_id", orgId)
+        .gte("created_at", thisMonthStart)
+        .is("deleted_at", null),
+      supabase
+        .from("campaigns")
+        .select("total_value_paise, start_date")
+        .eq("organization_id", orgId)
+        .gt("start_date", todayStr)
+        .lte("start_date", in30DaysStr)
+        .not("status", "in", "(cancelled,completed)")
+        .is("deleted_at", null),
       supabase
         .from("sites")
         .select("id")
@@ -239,52 +285,98 @@ async function RoleSpecificDashboard({
         .is("deleted_at", null),
     ]);
 
-    // Simplified pipeline — the only non-terminal status is "live".
-    // Break it down by "ending soon" so the sales/ops team can act.
+    // Break live pipeline down by "ending soon" so the sales/ops team can act.
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const in7Days = new Date(today);
     in7Days.setDate(in7Days.getDate() + 7);
-    const live = pipeline?.length ?? 0;
-    const endingSoon = (pipeline ?? []).filter((c) => {
+    const live = livePipeline?.length ?? 0;
+    const endingSoon = (livePipeline ?? []).filter((c) => {
       if (!c.end_date) return false;
       const end = new Date(c.end_date);
       return end >= today && end <= in7Days;
     }).length;
-    const pipelineValue = (pipeline ?? []).reduce(
+    const livePipelineValue = (livePipeline ?? []).reduce(
+      (s, c) => s + (c.total_value_paise ?? 0),
+      0,
+    );
+    const newThisMonthValue = (newThisMonth ?? []).reduce(
+      (s, c) => s + (c.total_value_paise ?? 0),
+      0,
+    );
+    const newThisMonthCount = (newThisMonth ?? []).length;
+    const upcomingCount = (upcoming ?? []).length;
+    const upcomingValue = (upcoming ?? []).reduce(
       (s, c) => s + (c.total_value_paise ?? 0),
       0,
     );
 
+    const fmtInr = (p: number) =>
+      new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }).format(p / 100);
+
     return (
-      <RoleWrapper greeting={greeting} role={role === "manager" ? "Manager" : "Executive"}>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <SimpleStatCard label="Live Campaigns" value={String(live)} />
-          <SimpleStatCard label="Ending in 7 days" value={String(endingSoon)} />
-          <SimpleStatCard
-            label="Available Sites"
-            value={String((availableSites ?? []).length)}
-          />
-          <SimpleStatCard
-            label="Mountings Today"
-            value={String((todayMountings ?? []).length)}
-          />
+      <RoleWrapper
+        greeting={greeting}
+        role={role === "manager" ? "Manager" : "Executive"}
+      >
+        {/* Primary booking strip — biggest numbers, four wide cards. */}
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2">
+            Bookings
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <SimpleStatCard
+              label="New This Month"
+              value={fmtInr(newThisMonthValue)}
+              subtitle={`${newThisMonthCount} ${newThisMonthCount === 1 ? "campaign" : "campaigns"}`}
+              highlight
+            />
+            <SimpleStatCard
+              label="Live Booked Value"
+              value={fmtInr(livePipelineValue)}
+              subtitle={`${live} running now`}
+              highlight
+            />
+            <SimpleStatCard
+              label="Upcoming (30d)"
+              value={String(upcomingCount)}
+              subtitle={fmtInr(upcomingValue)}
+            />
+            <SimpleStatCard
+              label="Ending in 7 days"
+              value={String(endingSoon)}
+              subtitle={endingSoon > 0 ? "Needs renewal" : "Nothing closing"}
+            />
+          </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-          <SimpleStatCard
-            label="Pipeline Value"
-            value={new Intl.NumberFormat("en-IN", {
-              style: "currency",
-              currency: "INR",
-              maximumFractionDigits: 0,
-            }).format(pipelineValue / 100)}
-          />
-          <SimpleStatCard label="Available Sites" value={String((availableSites ?? []).length)} />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
-          <SimpleStatCard label="Mountings Today" value={String((todayMountings ?? []).length)} />
-          <SimpleStatCard label="Mountings This Week" value={String((weekMountings ?? []).length)} />
-          <SimpleStatCard label="Sites Under Maintenance" value={String((maintenanceSites ?? []).length)} />
+
+        {/* Operations strip — mountings & site availability. */}
+        <div className="mt-6">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2">
+            Operations
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <SimpleStatCard
+              label="Available Sites"
+              value={String((availableSites ?? []).length)}
+            />
+            <SimpleStatCard
+              label="Mountings Today"
+              value={String((todayMountings ?? []).length)}
+            />
+            <SimpleStatCard
+              label="Mountings This Week"
+              value={String((weekMountings ?? []).length)}
+            />
+            <SimpleStatCard
+              label="Under Maintenance"
+              value={String((maintenanceSites ?? []).length)}
+            />
+          </div>
         </div>
       </RoleWrapper>
     );
@@ -383,12 +475,29 @@ function RoleWrapper({
   );
 }
 
-function SimpleStatCard({ label, value }: { label: string; value: string }) {
+function SimpleStatCard({
+  label,
+  value,
+  subtitle,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  subtitle?: string;
+  highlight?: boolean;
+}) {
   return (
-    <Card>
+    <Card className={highlight ? "ring-1 ring-primary/20 bg-primary/5" : ""}>
       <CardContent className="pt-5">
         <p className="text-xs text-muted-foreground mb-1">{label}</p>
-        <p className="text-2xl font-bold text-foreground">{value}</p>
+        <p className="text-2xl font-bold tabular-nums text-foreground">
+          {value}
+        </p>
+        {subtitle && (
+          <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+            {subtitle}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
