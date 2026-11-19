@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo, useTransition, useEffect, useRef } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useForm, useFieldArray, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -337,6 +337,47 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
     });
   }
 
+  // Map every field-path root to the wizard step it lives on. Used by
+  // onInvalid below to jump the user back to the step where their
+  // invalid input is actually visible.
+  const STEP_BY_FIELD: Record<string, number> = {
+    campaign_name: 0,
+    billing_party_type: 0,
+    client_id: 0,
+    billed_agency_id: 0,
+    agency_commission_percentage: 0,
+    agency_commission_inr: 0,
+    start_date: 0,
+    end_date: 0,
+    pricing_type: 0,
+    total_value_inr: 0,
+    notes: 0,
+    sites: 1,
+    services: 2,
+  };
+
+  // React-hook-form's handleSubmit swallows invalid submissions and only
+  // writes to formState.errors. In a multi-step wizard that means the
+  // "Create Campaign" button looks dead when the broken field lives on
+  // an earlier step the user isn't looking at. This handler surfaces
+  // the first leaf error as a toast AND jumps the wizard back to the
+  // step that owns it, so the inline error is actually on-screen when
+  // the user reads the toast.
+  function onInvalid(formErrors: FieldErrors<CreateCampaignValues>) {
+    const leaf = findFirstError(formErrors);
+    if (leaf) {
+      const rootKey = leaf.path.split(/[.[]/)[0];
+      const target = STEP_BY_FIELD[rootKey];
+      if (typeof target === "number" && target !== step) setStep(target);
+      toast.error(leaf.message || "Please fix the highlighted fields.");
+    } else {
+      toast.error("Please fix the highlighted fields before continuing.");
+    }
+    // Ops-level breadcrumb — if this ever recurs we can tell exactly
+    // which field is tripping zod without rebuilding the client bundle.
+    console.warn("[CampaignForm] submit blocked by validation:", formErrors);
+  }
+
   function onSubmit(values: CreateCampaignValues) {
     // If duration mode is "campaign", override site dates with campaign dates
     if (durationMode === "campaign") {
@@ -387,7 +428,7 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-w-4xl">
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6 max-w-4xl">
       {/* Step indicator */}
       <div className="flex items-center gap-0">
         {STEPS.map((s, i) => (
@@ -1169,4 +1210,25 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
       </div>
     </form>
   );
+}
+
+// Walk a react-hook-form errors tree depth-first and return the first
+// leaf that carries a `message`. The returned `path` uses dot + bracket
+// notation (e.g. `sites.2.site_id`) so callers can slice the root key
+// for routing. Returns null when nothing meaningful is set.
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function findFirstError(obj: any, prefix = ""): { path: string; message: string } | null {
+  if (!obj || typeof obj !== "object") return null;
+  if (typeof obj.message === "string" && obj.message.length > 0) {
+    return { path: prefix || "root", message: obj.message };
+  }
+  for (const key of Object.keys(obj)) {
+    if (key === "ref" || key === "type") continue;
+    const child = obj[key];
+    const nextPrefix = prefix ? `${prefix}.${key}` : key;
+    const hit = findFirstError(child, nextPrefix);
+    if (hit) return hit;
+  }
+  return null;
 }
