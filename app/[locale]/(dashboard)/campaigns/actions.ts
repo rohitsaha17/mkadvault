@@ -30,6 +30,20 @@ async function getOrgAndUser() {
 function n(v: number | undefined | null) { return v != null ? Math.round(v * 100) : null; }
 function str(v?: string) { return v?.trim() || null; }
 
+// Prepend the Zod issue's path onto its message so the client toast
+// says WHICH field failed, not just "Invalid uuid". Used by every
+// `safeParse` caller so the user never sees a context-less error.
+// Zod v4 types `path` as `PropertyKey[]` (includes symbol); we only
+// render string/number segments — symbol keys never show up in our
+// schemas, but we filter defensively.
+function formatZodIssue(issue: { path: PropertyKey[]; message: string }): string {
+  const parts = (issue.path ?? []).filter(
+    (p): p is string | number => typeof p === "string" || typeof p === "number",
+  );
+  if (parts.length === 0) return issue.message;
+  return `${parts.join(".")}: ${issue.message}`;
+}
+
 // Persisted status comes from lib/campaigns/derive.ts → initialCampaignDbStatus.
 // "Yet to start" is a display-only state derived on read so editing
 // dates instantly flips the badge without us writing back to the DB.
@@ -39,7 +53,7 @@ function str(v?: string) { return v?.trim() || null; }
 export async function createCampaign(values: unknown): Promise<ActionResult> {
   try {
     const parsed = createCampaignSchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    if (!parsed.success) return { error: formatZodIssue(parsed.error.issues[0]) };
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
@@ -189,7 +203,7 @@ export async function createCampaign(values: unknown): Promise<ActionResult> {
 export async function updateCampaign(id: string, values: unknown): Promise<ActionResult> {
   try {
     const parsed = editCampaignSchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    if (!parsed.success) return { error: formatZodIssue(parsed.error.issues[0]) };
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
@@ -478,7 +492,7 @@ export async function updateCampaignStatus(
 export async function addCampaignSite(campaignId: string, values: unknown): Promise<{ error?: string }> {
   try {
     const parsed = campaignSiteEntrySchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    if (!parsed.success) return { error: formatZodIssue(parsed.error.issues[0]) };
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
@@ -864,7 +878,7 @@ function addOneDay(dateStr: string): string {
 export async function saveCampaignDraft(values: unknown): Promise<ActionResult> {
   try {
     const parsed = draftCampaignSchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    if (!parsed.success) return { error: formatZodIssue(parsed.error.issues[0]) };
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
@@ -928,7 +942,10 @@ export async function saveCampaignDraft(values: unknown): Promise<ActionResult> 
 
     const campaignId = campaign.id;
 
-    // Insert any sites added so far
+    // Insert any sites added so far. Errors here previously fell on the
+    // floor — the parent campaign row succeeded, so the caller got a
+    // misleading { success } and the "draft" landed site-less. Report
+    // the failure so the client can tell the user what went wrong.
     if (d.sites && d.sites.length > 0) {
       const siteRows = d.sites.map((s) => ({
         organization_id: ctx.orgId,
@@ -940,7 +957,14 @@ export async function saveCampaignDraft(values: unknown): Promise<ActionResult> 
         end_date: str(s.end_date),
         status: "pending" as const,
       }));
-      await ctx.supabase.from("campaign_sites").insert(siteRows);
+      const { error: sitesError } = await ctx.supabase
+        .from("campaign_sites")
+        .insert(siteRows);
+      if (sitesError) {
+        return {
+          error: `Draft saved but sites failed to attach: ${sitesError.message}`,
+        };
+      }
     }
 
     // Insert any services added so far. Same convention as createCampaign:
@@ -959,7 +983,14 @@ export async function saveCampaignDraft(values: unknown): Promise<ActionResult> 
         rate_basis: s.rate_basis ?? "lumpsum",
         other_label: str(s.other_label),
       }));
-      await ctx.supabase.from("campaign_services").insert(serviceRows);
+      const { error: servicesError } = await ctx.supabase
+        .from("campaign_services")
+        .insert(serviceRows);
+      if (servicesError) {
+        return {
+          error: `Draft saved but services failed to attach: ${servicesError.message}`,
+        };
+      }
     }
 
     await ctx.supabase.from("campaign_activity_log").insert({
@@ -986,7 +1017,7 @@ export async function createChangeRequest(
 ): Promise<{ error?: string }> {
   try {
     const parsed = changeRequestSchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    if (!parsed.success) return { error: formatZodIssue(parsed.error.issues[0]) };
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
@@ -1057,7 +1088,7 @@ export async function reviewChangeRequest(
 ): Promise<{ error?: string }> {
   try {
     const parsed = reviewChangeRequestSchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    if (!parsed.success) return { error: formatZodIssue(parsed.error.issues[0]) };
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };

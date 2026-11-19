@@ -402,13 +402,41 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(clean),
         });
+        // Same diagnostic handling as the Save Draft path — a non-2xx
+        // response usually means an auth redirect or a crash, and
+        // falling straight to .json() hides that.
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          console.error("[CampaignForm] Create Campaign HTTP error:", {
+            status: res.status,
+            statusText: res.statusText,
+            body: body.slice(0, 400),
+          });
+          if (res.status === 401 || res.status === 403) {
+            toast.error("Session expired — please sign in again.");
+          } else {
+            toast.error(
+              `Save failed (HTTP ${res.status}). Check the browser console for details.`,
+            );
+          }
+          return;
+        }
         const data = await res.json().catch(() => ({ error: "Invalid server response" }));
-        if (data?.error) { toast.error(data.error); return; }
-        if (!data?.id) { toast.error("Unexpected server response"); return; }
+        if (data?.error) {
+          console.error("[CampaignForm] Create Campaign server error:", data.error);
+          toast.error(data.error);
+          return;
+        }
+        if (!data?.id) {
+          console.error("[CampaignForm] Create Campaign unexpected response:", data);
+          toast.error("Unexpected server response");
+          return;
+        }
         clearAutosave();
         toast.success("Campaign created");
         router.push(`/campaigns/${data.id}`);
       } catch (err) {
+        console.error("[CampaignForm] Create Campaign threw:", err);
         toast.error(err instanceof Error ? err.message : "Save failed");
       }
     });
@@ -1169,13 +1197,46 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify(clean),
                 });
+
+                // Non-2xx typically means an auth redirect (session lost)
+                // or a crash in the route handler. The response is
+                // likely HTML, so .json() would silently fall back to
+                // "Invalid server response" and we'd lose all diagnostic
+                // detail. Short-circuit instead with the status code so
+                // the user knows what happened.
+                if (!res.ok) {
+                  const body = await res.text().catch(() => "");
+                  console.error("[CampaignForm] Save Draft HTTP error:", {
+                    status: res.status,
+                    statusText: res.statusText,
+                    body: body.slice(0, 400),
+                  });
+                  if (res.status === 401 || res.status === 403) {
+                    toast.error("Session expired — please sign in again.");
+                  } else {
+                    toast.error(
+                      `Draft save failed (HTTP ${res.status}). Check the browser console for details.`,
+                    );
+                  }
+                  return;
+                }
+
                 const data = await res.json().catch(() => ({ error: "Invalid server response" }));
-                if (data?.error) { toast.error(data.error); return; }
-                if (!data?.id) { toast.error("Unexpected server response"); return; }
+                if (data?.error) {
+                  console.error("[CampaignForm] Save Draft server error:", data.error);
+                  toast.error(data.error);
+                  return;
+                }
+                if (!data?.id) {
+                  console.error("[CampaignForm] Save Draft unexpected response:", data);
+                  toast.error("Unexpected server response");
+                  return;
+                }
                 clearAutosave();
                 toast.success("Draft saved");
                 router.push(`/campaigns/${data.id}`);
               } catch (err) {
+                console.error("[CampaignForm] Save Draft threw:", err);
                 toast.error(err instanceof Error ? err.message : "Save failed");
               }
             });
