@@ -85,8 +85,13 @@ export const campaignBasicsSchema = z
   })
   .superRefine(applyBillingRules);
 
-// Per-site entry in the campaign
+// Per-site entry in the campaign. `id` is the campaign_sites row id —
+// absent for new rows, present when editing an existing row so the
+// server can diff-sync (update by site_id; delete removed rows; keep
+// side fields like mounting_date / proof_photo_urls / creative_file_urls
+// intact instead of wiping them via DELETE+INSERT).
 export const campaignSiteEntrySchema = z.object({
+  id: z.string().uuid().optional(),
   site_id: z.string().uuid(),
   rate_type: z.enum(["per_month", "fixed"]),
   display_rate_inr: optionalNonNegativeNumber,
@@ -114,7 +119,13 @@ const coerceRate = z.preprocess(
   z.number().min(0, "Must be 0 or more"),
 );
 
+// Per-service entry. `id` is the campaign_services row id — present
+// when editing an existing row so the server can match-and-update
+// instead of blind replace (services don't have a stable natural key
+// the way sites do, so the row id is the only thing that lets edits
+// preserve order and reduce churn).
 export const campaignServiceEntrySchema = z.object({
+  id: z.string().uuid().optional(),
   service_type: z.enum(["display_rental", "flex_printing", "mounting", "design", "transport", "other"]),
   description: z.string().optional(),
   quantity: coerceQuantity,
@@ -143,6 +154,26 @@ export type CampaignBasicsValues = z.infer<typeof campaignBasicsSchema>;
 export type CampaignSiteEntry = z.infer<typeof campaignSiteEntrySchema>;
 export type CampaignServiceEntry = z.infer<typeof campaignServiceEntrySchema>;
 export type CreateCampaignValues = z.infer<typeof createCampaignSchema>;
+
+// Edit payload = basics + optional sites + optional services. Arrays
+// are optional so a caller that only wants to tweak basics can keep
+// using this schema (and updateCampaign skips the sync pass if they're
+// undefined). When present, the server diff-syncs.
+export const editCampaignSchema = z
+  .object({
+    campaign_name: z.string().min(1, "Campaign name is required"),
+    ...billingFields,
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    pricing_type: z.enum(["itemized", "bundled"]),
+    total_value_inr: optionalPositiveNumber,
+    notes: z.string().optional(),
+    sites: z.array(campaignSiteEntrySchema).optional(),
+    services: z.array(campaignServiceEntrySchema).optional(),
+  })
+  .superRefine(applyBillingRules);
+
+export type EditCampaignValues = z.infer<typeof editCampaignSchema>;
 
 export const campaignBasicsDefaults: CampaignBasicsValues = {
   campaign_name: "",

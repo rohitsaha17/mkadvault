@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   createCampaignSchema, campaignBasicsSchema, campaignSiteEntrySchema,
   draftCampaignSchema, changeRequestSchema, reviewChangeRequestSchema,
+  editCampaignSchema,
 } from "@/lib/validations/campaign";
 import type { CampaignStatus } from "@/lib/types/database";
 import {
@@ -168,17 +169,46 @@ export async function createCampaign(values: unknown): Promise<ActionResult> {
   }
 }
 
-// ─── Update campaign basics ───────────────────────────────────────────────────
+// ─── Update campaign (basics + optional sites/services sync) ────────────────
+//
+// The edit flow sends the full form payload — basics, plus (optionally)
+// the full sites[] and services[] arrays as they appear on the edit
+// page. When those arrays are present we diff against the DB and
+// upsert/delete so we don't blindly replace rows:
+//
+//   sites    — matched by site_id. Existing rows get UPDATEd (preserves
+//              status, mounting_date, creative_file_urls, proof_photo_urls).
+//              Sites removed from the form get DELETEd. New site_ids get
+//              INSERTed.
+//   services — matched by row `id`. Existing rows get UPDATEd. Removed
+//              rows get DELETEd. Rows without an id get INSERTed.
+//
+// Callers that still want basics-only (no array sync) just omit sites
+// and services from the payload — the arrays stay untouched.
 
 export async function updateCampaign(id: string, values: unknown): Promise<ActionResult> {
   try {
-    const parsed = campaignBasicsSchema.safeParse(values);
+    const parsed = editCampaignSchema.safeParse(values);
     if (!parsed.success) return { error: parsed.error.issues[0].message };
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
     const d = parsed.data;
+
+    // Make sure the campaign belongs to the caller's org BEFORE we
+    // start touching child tables. RLS covers this on the row-level,
+    // but one explicit check keeps the error message clear and avoids
+    // a "silent nothing changed" when the id is bogus.
+    const { data: existing } = await ctx.supabase
+      .from("campaigns")
+      .select("id, organization_id")
+      .eq("id", id)
+      .single();
+    if (!existing || existing.organization_id !== ctx.orgId) {
+      return { error: "Campaign not found" };
+    }
+
     const { error } = await ctx.supabase
       .from("campaigns")
       .update({
@@ -211,6 +241,122 @@ export async function updateCampaign(id: string, values: unknown): Promise<Actio
       .eq("id", id);
 
     if (error) return { error: error.message };
+
+    // ── Sites diff-sync ─────────────────────────────────────────────
+    if (d.sites) {
+      const incoming = d.sites;
+      const { data: existingSites } = await ctx.supabase
+        .from("campaign_sites")
+        .select("id, site_id")
+        .eq("campaign_id", id);
+
+      const existingBySiteId = new Map<string, string>(
+        (existingSites ?? []).map((r) => [r.site_id as string, r.id as string]),
+      );
+      const incomingSiteIds = new Set(incoming.map((s) => s.site_id));
+
+      // 1. Delete rows that are no longer in the form. Cascade on
+      //    campaign_sites handles child campaign_jobs rows.
+      const removed = (existingSites ?? [])
+        .filter((r) => !incomingSiteIds.has(r.site_id as string))
+        .map((r) => r.id as string);
+      if (removed.length > 0) {
+        const { error: delErr } = await ctx.supabase
+          .from("campaign_sites")
+          .delete()
+          .in("id", removed);
+        if (delErr) return { error: delErr.message };
+      }
+
+      // 2. Update existing rows + insert new ones. We iterate rather
+      //    than bulk-upsert so each existing row's untouched columns
+      //    (status, mounting_date, creative_file_urls, proof_photo_urls,
+      //    mounting_team_notes) stay as-is.
+      for (const s of incoming) {
+        const base = {
+          rate_type: s.rate_type ?? "per_month",
+          display_rate_paise: n(s.display_rate_inr),
+          start_date: str(s.start_date),
+          end_date: str(s.end_date),
+        };
+        const existingRowId = existingBySiteId.get(s.site_id);
+        if (existingRowId) {
+          const { error: upErr } = await ctx.supabase
+            .from("campaign_sites")
+            .update(base)
+            .eq("id", existingRowId);
+          if (upErr) return { error: upErr.message };
+        } else {
+          const { error: insErr } = await ctx.supabase
+            .from("campaign_sites")
+            .insert({
+              ...base,
+              organization_id: ctx.orgId,
+              campaign_id: id,
+              site_id: s.site_id,
+              status: "pending" as const,
+            });
+          if (insErr) return { error: insErr.message };
+        }
+      }
+    }
+
+    // ── Services diff-sync ──────────────────────────────────────────
+    if (d.services) {
+      const incoming = d.services;
+      const { data: existingServices } = await ctx.supabase
+        .from("campaign_services")
+        .select("id")
+        .eq("campaign_id", id);
+
+      const existingIds = new Set<string>(
+        (existingServices ?? []).map((r) => r.id as string),
+      );
+      const incomingIds = new Set<string>(
+        incoming.map((s) => s.id).filter((v): v is string => !!v),
+      );
+
+      // Delete rows whose id was dropped from the form.
+      const removed = [...existingIds].filter((rowId) => !incomingIds.has(rowId));
+      if (removed.length > 0) {
+        const { error: delErr } = await ctx.supabase
+          .from("campaign_services")
+          .delete()
+          .in("id", removed);
+        if (delErr) return { error: delErr.message };
+      }
+
+      for (const s of incoming) {
+        const ratePaise = Math.round(s.rate_inr * 100);
+        const totalPaise = Math.round(s.rate_inr * s.quantity * 100);
+        const base = {
+          service_type: s.service_type,
+          description: str(s.description),
+          quantity: s.quantity,
+          rate_paise: ratePaise,
+          total_paise: totalPaise,
+          site_id: s.site_id ?? null,
+          rate_basis: s.rate_basis ?? "lumpsum",
+          other_label: str(s.other_label),
+        };
+        if (s.id && existingIds.has(s.id)) {
+          const { error: upErr } = await ctx.supabase
+            .from("campaign_services")
+            .update(base)
+            .eq("id", s.id);
+          if (upErr) return { error: upErr.message };
+        } else {
+          const { error: insErr } = await ctx.supabase
+            .from("campaign_services")
+            .insert({
+              ...base,
+              organization_id: ctx.orgId,
+              campaign_id: id,
+            });
+          if (insErr) return { error: insErr.message };
+        }
+      }
+    }
 
     // For itemized campaigns, recompute the total from the actual
     // line-item rows so the displayed value tracks reality.
