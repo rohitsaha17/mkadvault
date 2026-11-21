@@ -140,3 +140,134 @@ export function CashFlowChart({ data }: CashFlowChartProps) {
     </ResponsiveContainer>
   );
 }
+
+// ─── CityBookingsChart ────────────────────────────────────────────────────────
+// Horizontal bar chart: booking value (pro-rata) broken out by city.
+// Used in the Bookings-by-City card on the dashboard. Shows the top N
+// cities so even a sprawling book stays scannable; the "Others" row
+// collapses the long tail into a single bar.
+
+interface CityBookingDataPoint {
+  city: string;
+  value: number; // paise
+  sites: number;
+}
+
+export function CityBookingsChart({ data }: { data: CityBookingDataPoint[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="h-[224px] flex items-center justify-center text-sm text-muted-foreground">
+        No bookings in this range
+      </div>
+    );
+  }
+  // Leave extra left margin so long city names (Hubballi-Dharwad) fit.
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(224, data.length * 36)}>
+      <BarChart
+        data={data}
+        layout="vertical"
+        margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+        <XAxis
+          type="number"
+          tickFormatter={(v: number) => `${(v / 10_000_000).toFixed(1)}L`}
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+        />
+        <YAxis
+          type="category"
+          dataKey="city"
+          tick={{ fontSize: 12 }}
+          tickLine={false}
+          axisLine={false}
+          width={110}
+        />
+        <Tooltip
+          formatter={(v) => [typeof v === "number" ? inr(v) : String(v), "Booked"]}
+          contentStyle={{ fontSize: 12 }}
+        />
+        <Bar
+          dataKey="value"
+          name="Booked value"
+          fill="#6366f1"
+          radius={[0, 4, 4, 0]}
+        />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── CityOccupancyChart ────────────────────────────────────────────────────
+// Companion bar chart to CityBookingsChart: shows, for each city, how
+// many sites exist and how many are currently booked. Same layout so
+// the two cards read as a pair.
+
+interface CityOccupancyDataPoint {
+  city: string;
+  // Pass pre-split values so the stacked bar math is unambiguous.
+  // booked + available = total sites in that city.
+  booked: number;
+  available: number;
+}
+
+export function CityOccupancyChart({
+  data,
+}: {
+  data: CityOccupancyDataPoint[];
+}) {
+  if (data.length === 0) {
+    return (
+      <div className="h-[224px] flex items-center justify-center text-sm text-muted-foreground">
+        No sites yet
+      </div>
+    );
+  }
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(224, data.length * 36)}>
+      <BarChart
+        data={data}
+        layout="vertical"
+        margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+      >
+        <CartesianGrid
+          strokeDasharray="3 3"
+          stroke="#e2e8f0"
+          horizontal={false}
+        />
+        <XAxis
+          type="number"
+          tick={{ fontSize: 11 }}
+          tickLine={false}
+          axisLine={false}
+          allowDecimals={false}
+        />
+        <YAxis
+          type="category"
+          dataKey="city"
+          tick={{ fontSize: 12 }}
+          tickLine={false}
+          axisLine={false}
+          width={110}
+        />
+        <Tooltip contentStyle={{ fontSize: 12 }} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar
+          dataKey="booked"
+          name="Booked"
+          stackId="a"
+          fill="#22c55e"
+        />
+        <Bar
+          dataKey="available"
+          name="Available"
+          stackId="a"
+          fill="#e2e8f0"
+          radius={[0, 4, 4, 0]}
+        />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}

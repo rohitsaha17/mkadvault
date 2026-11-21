@@ -243,7 +243,7 @@ export default async function CampaignsPage({
             defaultValue={rangePreset}
             className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 w-44"
           >
-            {DATE_RANGE_ORDER.map((key) => (
+            {DATE_RANGE_ORDER.filter((k) => k !== "custom").map((key) => (
               <option key={key} value={key}>
                 {DATE_RANGE_LABELS[key]}
               </option>

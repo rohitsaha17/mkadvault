@@ -12,14 +12,34 @@ import { createClient } from "@/lib/supabase/server";
 import { inr } from "@/lib/utils";
 import { getTranslations } from "next-intl/server";
 
-export async function KpiRow({ orgId }: { orgId: string }) {
+export async function KpiRow({
+  orgId,
+  from,
+  to,
+}: {
+  orgId: string;
+  from: string;
+  to: string;
+}) {
   const supabase = await createClient();
   const tDash = await getTranslations("dashboard");
 
-  const now = new Date();
-  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString();
+  // Compute the equally-long window immediately preceding `from`..`to`
+  // for the "vs previous period" comparison line on each KPI card.
+  // So "This month" compares to "Last month", "This FY" to "Last FY",
+  // and a custom 14-day range compares to the 14 days before that.
+  const MS_PER_DAY = 86_400_000;
+  const fromMs = Date.parse(from + "T00:00:00Z");
+  const toMs = Date.parse(to + "T00:00:00Z");
+  const spanDays = Math.max(
+    1,
+    Math.floor((toMs - fromMs) / MS_PER_DAY) + 1,
+  );
+  const prevToDate = new Date(fromMs - MS_PER_DAY);
+  const prevFromDate = new Date(fromMs - spanDays * MS_PER_DAY);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const prevFrom = iso(prevFromDate);
+  const prevTo = iso(prevToDate);
 
   // Six small queries, all in parallel — row paints as fast as the slowest.
   const [
@@ -34,28 +54,30 @@ export async function KpiRow({ orgId }: { orgId: string }) {
       .from("invoices")
       .select("total_paise")
       .eq("organization_id", orgId)
-      .gte("invoice_date", thisMonthStart)
+      .gte("invoice_date", from)
+      .lte("invoice_date", to)
       .is("deleted_at", null),
     supabase
       .from("invoices")
       .select("total_paise")
       .eq("organization_id", orgId)
-      .gte("invoice_date", lastMonthStart)
-      .lte("invoice_date", lastMonthEnd)
+      .gte("invoice_date", prevFrom)
+      .lte("invoice_date", prevTo)
       .is("deleted_at", null),
     supabase
       .from("contract_payments")
       .select("amount_paid_paise")
       .eq("organization_id", orgId)
       .eq("status", "paid")
-      .gte("payment_date", thisMonthStart),
+      .gte("payment_date", from)
+      .lte("payment_date", to),
     supabase
       .from("contract_payments")
       .select("amount_paid_paise")
       .eq("organization_id", orgId)
       .eq("status", "paid")
-      .gte("payment_date", lastMonthStart)
-      .lte("payment_date", lastMonthEnd),
+      .gte("payment_date", prevFrom)
+      .lte("payment_date", prevTo),
     // Sites in the "available pool" — counted in the occupancy
     // denominator. Excludes maintenance / blocked / expired so a
     // structure under repair doesn't drag the % down.
@@ -97,28 +119,28 @@ export async function KpiRow({ orgId }: { orgId: string }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <KpiCard
-        title={tDash("revenue_this_month")}
+        title="Revenue"
         value={inr(thisMonthRevenue)}
         changePercent={revenueChange}
         iconBg="bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300"
         icon={<DollarSign className="h-5 w-5" />}
-        vsLabel={tDash("vsLastMonth")}
+        vsLabel="vs previous period"
       />
       <KpiCard
-        title={tDash("costs_this_month")}
+        title="Costs"
         value={inr(thisMonthCostTotal)}
         changePercent={-costChange}
         iconBg="bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300"
         icon={<BarChart2 className="h-5 w-5" />}
-        vsLabel={tDash("vsLastMonth")}
+        vsLabel="vs previous period"
       />
       <KpiCard
-        title={tDash("net_profit")}
+        title="Net Profit"
         value={inr(netProfit)}
         changePercent={profitMargin}
         iconBg="bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300"
         icon={<TrendingUp className="h-5 w-5" />}
-        vsLabel={tDash("vsLastMonth")}
+        vsLabel="margin"
       />
       <Card className="relative overflow-hidden">
         <div

@@ -28,14 +28,20 @@ import { ChartsRow } from "@/components/dashboard/sections/ChartsRow";
 import { SecondaryRow } from "@/components/dashboard/sections/SecondaryRow";
 import { SitesRow } from "@/components/dashboard/sections/SitesRow";
 import { AlertsRow } from "@/components/dashboard/sections/AlertsRow";
+import { CityBookingsRow } from "@/components/dashboard/sections/CityBookingsRow";
+import { LocationBookingsRow } from "@/components/dashboard/sections/LocationBookingsRow";
+import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
+import { resolveDashboardRange } from "@/lib/utils/date-ranges";
 import type { UserRole } from "@/lib/types/database";
 
 interface PageProps {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }
 
-export default async function DashboardPage({ params }: PageProps) {
+export default async function DashboardPage({ params, searchParams }: PageProps) {
   const { locale } = await params;
+  const { range, from, to } = await searchParams;
   setRequestLocale(locale);
 
   const tDash = await getTranslations("dashboard");
@@ -56,6 +62,15 @@ export default async function DashboardPage({ params }: PageProps) {
   const orgId: string = profile.org_id;
   const role: UserRole = profile.role as UserRole;
   const isAdmin = role === "super_admin" || role === "admin";
+
+  // Resolve the dashboard date range once and plumb it through every
+  // range-aware section. Falls back to current FY if the URL has no
+  // preset or the custom from/to pair is invalid.
+  const { preset, from: rangeFrom, to: rangeTo } = resolveDashboardRange({
+    preset: range,
+    from,
+    to,
+  });
 
   // Fire-and-forget cleanup of past-due campaigns. We don't await — the
   // UI shouldn't block on this background housekeeping.
@@ -79,30 +94,50 @@ export default async function DashboardPage({ params }: PageProps) {
       {/* Header renders immediately — no awaits above this point cross the
           Suspense boundaries below, so the user sees "Welcome back, X" at
           ~0 ms even before any KPI query resolves. */}
-      <div className="flex flex-col gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          {tDash("overview")}
-        </p>
-        <h1 className="text-2xl md:text-[28px] font-semibold tracking-tight text-foreground leading-tight">
-          {profile?.full_name
-            ? `${tDash("welcome_back")}, ${profile.full_name.split(" ")[0]}`
-            : tDash("welcome_back")}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {tDash("dashboard_subtitle")}
-        </p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            {tDash("overview")}
+          </p>
+          <h1 className="text-2xl md:text-[28px] font-semibold tracking-tight text-foreground leading-tight">
+            {profile?.full_name
+              ? `${tDash("welcome_back")}, ${profile.full_name.split(" ")[0]}`
+              : tDash("welcome_back")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {tDash("dashboard_subtitle")}
+          </p>
+        </div>
+        <DashboardFilters
+          currentPreset={preset}
+          from={rangeFrom}
+          to={rangeTo}
+        />
       </div>
 
       <Suspense fallback={<KpiRowSkeleton />}>
-        <KpiRow orgId={orgId} />
+        <KpiRow orgId={orgId} from={rangeFrom} to={rangeTo} />
       </Suspense>
 
       <Suspense fallback={<BookingsRowSkeleton />}>
-        <BookingsRow orgId={orgId} locale={locale} />
+        <BookingsRow
+          orgId={orgId}
+          locale={locale}
+          from={rangeFrom}
+          to={rangeTo}
+        />
       </Suspense>
 
       <Suspense fallback={<ChartsRowSkeleton />}>
-        <ChartsRow orgId={orgId} />
+        <ChartsRow orgId={orgId} from={rangeFrom} to={rangeTo} />
+      </Suspense>
+
+      <Suspense fallback={<CityRowSkeleton />}>
+        <CityBookingsRow orgId={orgId} from={rangeFrom} to={rangeTo} />
+      </Suspense>
+
+      <Suspense fallback={<LocationRowSkeleton />}>
+        <LocationBookingsRow orgId={orgId} from={rangeFrom} to={rangeTo} />
       </Suspense>
 
       <Suspense fallback={<SecondaryRowSkeleton />}>
@@ -156,6 +191,17 @@ function ChartsRowSkeleton() {
       <ChartSkeleton />
     </div>
   );
+}
+function CityRowSkeleton() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <ChartSkeleton />
+      <ChartSkeleton />
+    </div>
+  );
+}
+function LocationRowSkeleton() {
+  return <TableSkeleton rows={8} cols={5} />;
 }
 function SecondaryRowSkeleton() {
   return (
