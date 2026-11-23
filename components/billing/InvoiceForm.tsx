@@ -75,6 +75,9 @@ const formSchema = z.object({
   due_date: z.string().min(1, "Required"),
   place_of_supply_state: z.string().optional(),
   bank_account_id: z.string().optional(),
+  // Tally / external accounting reference. Finance teams raise the bill
+  // in Tally and copy the number back here so the two systems reconcile.
+  external_invoice_number: z.string().optional(),
   notes: z.string().optional(),
   terms_and_conditions: z.string().optional(),
   status: z.enum(["draft", "sent"]),
@@ -530,6 +533,17 @@ export function InvoiceForm({
       {/* ── Notes & Terms ── */}
       <section className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">
         <h2 className="text-sm font-semibold text-foreground border-b border-border pb-2">Notes & Terms</h2>
+        <F label="Tally / External Bill Number">
+          <Input
+            {...register("external_invoice_number")}
+            placeholder="e.g. 2026/104"
+            maxLength={64}
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Optional. The bill number from your Tally / external books, so the
+            two systems reconcile when your accountant pulls receivables.
+          </p>
+        </F>
         <F label="Notes">
           <Textarea {...register("notes")} placeholder="Payment instructions, thank you note, etc." rows={2} />
         </F>

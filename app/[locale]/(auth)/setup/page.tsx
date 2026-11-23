@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { SetupForm } from "./SetupForm";
 
 export const metadata = {
-  title: "Initial Setup — OOH Platform",
+  title: "Initial Setup — MK ADD VAULT",
 };
 
 // Never prerender — this page hits the DB to check if setup is already done,

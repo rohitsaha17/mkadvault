@@ -2,6 +2,7 @@
 // Site Server Actions — create, update, soft-delete sites.
 // All mutations go through Supabase with RLS enforced.
 import { redirect } from "next/navigation";
+import { localizedRedirect } from "@/lib/utils/localized-redirect";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -100,8 +101,12 @@ export async function createSite(values: unknown): Promise<ActionResult> {
     const base_rate_paise =
       d.base_rate_inr !== undefined ? Math.round(d.base_rate_inr * 100) : null;
 
-    // landowner_id only applies to owned sites (enforced at DB via CHECK constraint)
+    // Counterparty FKs are mutually exclusive per ownership model, mirroring
+    // the DB CHECK constraints (landowner_id for owned, partner_agency_id
+    // for rented). Scrubbing here means the Supabase client never sends the
+    // wrong one and we don't trip the constraint.
     const landowner_id = d.ownership_model === "owned" ? d.landowner_id ?? null : null;
+    const partner_agency_id = d.ownership_model === "rented" ? d.partner_agency_id ?? null : null;
 
     // Auto-generate site code if the user left it blank.
     const finalSiteCode = d.site_code?.trim() ? d.site_code.trim() : generateSiteCode(d.city);
@@ -130,6 +135,7 @@ export async function createSite(values: unknown): Promise<ActionResult> {
       visibility_distance_m: d.visibility_distance_m ? Math.round(d.visibility_distance_m) : null,
       ownership_model: d.ownership_model,
       landowner_id,
+      partner_agency_id,
       base_rate_paise,
       municipal_permission_number: d.municipal_permission_number ?? null,
       // Postgres' date column rejects empty string ("") — only null or
@@ -212,12 +218,14 @@ export async function updateSite(
       d.base_rate_inr !== undefined ? Math.round(d.base_rate_inr * 100) : null;
 
     const landowner_id = d.ownership_model === "owned" ? d.landowner_id ?? null : null;
+    const partner_agency_id = d.ownership_model === "rented" ? d.partner_agency_id ?? null : null;
 
     const finalSiteCode = d.site_code?.trim() ? d.site_code.trim() : generateSiteCode(d.city);
 
     const basePayload = {
       updated_by: user.id,
       landowner_id,
+      partner_agency_id,
       name: d.name,
       site_code: finalSiteCode,
       media_type: d.media_type,
@@ -685,7 +693,9 @@ export async function setSitePrimaryPhoto(
 // Call this from the client after a successful createSite to navigate to detail.
 
 export async function redirectToSite(siteId: string): Promise<never> {
-  redirect(`/sites/${siteId}`);
+  // Locale-preserving so Hindi users don't get dropped back to /sites/[id]
+  // in English after creating a site.
+  return localizedRedirect(`/sites/${siteId}`);
 }
 
 // ─── getSitePhotosWithSignedUrls ────────────────────────────────────────────

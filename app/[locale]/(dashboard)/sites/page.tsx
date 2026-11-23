@@ -2,10 +2,13 @@
 // Reads filter/search/page from URL search params, queries Supabase, renders
 // a table with client-side filter controls.
 import { setRequestLocale, getTranslations } from "next-intl/server";
+import { unstable_cache } from "next/cache";
 import Link from "next/link";
 import { Plus, MapPin, Calendar, LayoutList, FileBarChart, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { syncSiteStatuses } from "@/lib/campaigns/auto-complete";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { syncSiteStatusesThrottled } from "@/lib/campaigns/auto-complete";
+import { getSession } from "@/lib/supabase/session";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -84,13 +87,15 @@ export default async function SitesPage({ params, searchParams }: Props) {
   const sortDir = sp.dir === "desc" ? "desc" : "asc";
 
   const supabase = await createClient();
+  const session = await getSession();
+  const orgId = session?.profile?.org_id ?? null;
 
-  // Reconcile sites.status with current live campaigns BEFORE we query.
-  // Cheap (~2-3 queries) and keeps the list always accurate — a site with
-  // an active campaign spanning today is marked 'booked' here, one whose
-  // last campaign just ended is released to 'available'. Fire-and-forget
-  // would leave this render stale, so we await.
-  await syncSiteStatuses(supabase).catch(() => {
+  // Reconcile sites.status with current live campaigns BEFORE we query —
+  // but only once per minute per org. Every subsequent /sites view in
+  // that window skips the 4 DB round-trips and reads stored status
+  // directly. The Vercel daily cron (bulk, bypasses RLS) still runs the
+  // uncached path.
+  await syncSiteStatusesThrottled(supabase, orgId).catch(() => {
     // Don't block the page if the sync ever hiccups — worst case the
     // user sees yesterday's status for a moment.
   });
@@ -150,13 +155,12 @@ export default async function SitesPage({ params, searchParams }: Props) {
   const siteNameById = Object.fromEntries(sites.map((s) => [s.id, s.name])) as Record<string, string>;
 
   // ── Fetch distinct cities for the filter dropdown ──────────────────────────
-  const { data: cityRows } = await supabase
-    .from("sites")
-    .select("city")
-    .is("deleted_at", null)
-    .order("city");
-
-  const cities = [...new Set((cityRows ?? []).map((r) => r.city).filter(Boolean))];
+  // Cities change rarely (the user adds a new one only when onboarding a
+  // new location). Caching the DISTINCT lookup per-org for 5 minutes
+  // avoids a full-table scan on every /sites visit. Uses the admin
+  // client inside the cache so cache hits don't depend on request-scoped
+  // cookies (unstable_cache can't read from a per-request client).
+  const cities = orgId ? await getCachedCities(orgId) : [];
 
   const totalPages = count ? Math.ceil(count / PAGE_SIZE) : 0;
   const hasFilters = !!(q || city || type || status || ownership);
@@ -374,3 +378,34 @@ function PaginationLink({ href, label }: { href: string; label: string }) {
     </Link>
   );
 }
+
+// Cached DISTINCT city lookup — scoped to the org via the `sites:cities:<orgId>`
+// cache key. Uses the admin client because unstable_cache functions must be
+// deterministic (they can't read request-scoped cookies). The admin client is
+// fine here — we're filtering by org_id ourselves, which replicates what RLS
+// would do, and we're only reading a column that's already visible to every
+// member of the org.
+//
+// Tag: `sites:cities:<orgId>` — server actions that create/update/delete
+// sites can call `updateTag('sites:cities:<orgId>')` to invalidate the entry
+// immediately. Without invalidation, the 5-minute revalidate still catches
+// new cities within a short window.
+const getCachedCities = unstable_cache(
+  async (orgId: string): Promise<string[]> => {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("sites")
+      .select("city")
+      .eq("organization_id", orgId)
+      .is("deleted_at", null)
+      .not("city", "is", null)
+      .order("city");
+    const unique = new Set<string>();
+    for (const row of (data ?? []) as Array<{ city: string | null }>) {
+      if (row.city) unique.add(row.city);
+    }
+    return [...unique];
+  },
+  ["sites-cities"],
+  { revalidate: 300, tags: ["sites-cities"] },
+);

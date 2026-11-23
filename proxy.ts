@@ -9,6 +9,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import { routing } from "./i18n/routing";
 import { createMiddlewareClient } from "./lib/supabase/middleware";
 import { createAdminClient } from "./lib/supabase/admin";
+import {
+  getCachedProxyProfile,
+  setCachedProxyProfile,
+} from "./lib/supabase/proxy-profile-cache";
 
 // next-intl middleware handles locale detection and URL rewriting
 const intlMiddleware = createIntlMiddleware(routing);
@@ -168,45 +172,61 @@ export default async function proxy(request: NextRequest) {
     };
     let profile: ProxyProfile | null = null;
 
-    // Helper that queries profiles and, if the `roles` column is missing
-    // (migration 020 not applied to this DB yet), retries without it so the
-    // proxy doesn't crash the entire request pipeline.
-    const fetchProfile = async (
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: any
-    ): Promise<ProxyProfile | null> => {
-      const res = await client
-        .from("profiles")
-        .select("org_id, role, roles, is_active")
-        .eq("id", user.id)
-        .maybeSingle();
-      if (res.error && /roles/i.test(res.error.message)) {
-        const fb = await client
+    // Fast path — use the proxy's in-memory TTL cache so repeat navs
+    // by the same user skip the DB round-trip entirely. The cache
+    // returns:
+    //   undefined → not cached (or expired) → fall through and fetch
+    //   null      → cached "no profile row" → skip the fetch too
+    //   object    → cached profile tuple
+    const cached = getCachedProxyProfile(user.id);
+    if (cached !== undefined) {
+      profile = cached;
+    } else {
+      // Helper that queries profiles and, if the `roles` column is missing
+      // (migration 020 not applied to this DB yet), retries without it so
+      // the proxy doesn't crash the entire request pipeline.
+      const fetchProfile = async (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        client: any,
+      ): Promise<ProxyProfile | null> => {
+        const res = await client
           .from("profiles")
-          .select("org_id, role, is_active")
+          .select("org_id, role, roles, is_active")
           .eq("id", user.id)
           .maybeSingle();
-        return (fb.data as ProxyProfile | null) ?? null;
-      }
-      return (res.data as ProxyProfile | null) ?? null;
-    };
+        if (res.error && /roles/i.test(res.error.message)) {
+          const fb = await client
+            .from("profiles")
+            .select("org_id, role, is_active")
+            .eq("id", user.id)
+            .maybeSingle();
+          return (fb.data as ProxyProfile | null) ?? null;
+        }
+        return (res.data as ProxyProfile | null) ?? null;
+      };
 
-    const hasServiceRoleKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (hasServiceRoleKey) {
-      try {
-        const admin = createAdminClient();
-        profile = await fetchProfile(admin);
-      } catch (err) {
-        console.error("[proxy] admin profile lookup failed, falling back:", err);
+      const hasServiceRoleKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (hasServiceRoleKey) {
+        try {
+          const admin = createAdminClient();
+          profile = await fetchProfile(admin);
+        } catch (err) {
+          console.error("[proxy] admin profile lookup failed, falling back:", err);
+        }
       }
-    }
 
-    if (!profile) {
-      try {
-        profile = await fetchProfile(supabase);
-      } catch (err) {
-        console.error("[proxy] authenticated profile lookup failed:", err);
+      if (!profile) {
+        try {
+          profile = await fetchProfile(supabase);
+        } catch (err) {
+          console.error("[proxy] authenticated profile lookup failed:", err);
+        }
       }
+
+      // Store whatever we got (including null — a null row means this
+      // user hasn't completed onboarding yet, and we don't want to
+      // re-query that every nav either).
+      setCachedProxyProfile(user.id, profile);
     }
 
     // Null profile = the handle_new_user trigger hasn't fired yet (can happen

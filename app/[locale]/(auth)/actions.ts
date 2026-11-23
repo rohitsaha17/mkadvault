@@ -3,6 +3,7 @@
 // Zod validates on the server side as a second layer (client already validates).
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { localizedRedirect, assertRedirected } from "@/lib/utils/localized-redirect";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient as createSupabaseJs } from "@supabase/supabase-js";
@@ -85,8 +86,10 @@ export async function loginAction(
     // "This page couldn't load" flash before a manual reload).
     revalidatePath("/", "layout");
 
-    // Redirect to dashboard after successful login
-    redirect("/dashboard");
+    // Redirect to dashboard after successful login (locale-preserving so
+    // Hindi users land on /hi/dashboard and English users on /dashboard).
+    await localizedRedirect("/dashboard");
+    assertRedirected();
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
     return toActionError(err, "loginAction");
@@ -213,5 +216,5 @@ export async function forgotPasswordAction(
 export async function logoutAction(): Promise<void> {
   const supabase = await createClient();
   await supabase.auth.signOut();
-  redirect("/login");
+  await localizedRedirect("/login");
 }

@@ -18,7 +18,7 @@ export default async function EditSitePage({ params }: Props) {
   setRequestLocale(locale);
 
   const supabase = await createClient();
-  const [siteResult, landownersResult] = await Promise.all([
+  const [siteResult, landownersResult, agenciesResult] = await Promise.all([
     supabase
       .from("sites")
       .select("*")
@@ -30,11 +30,17 @@ export default async function EditSitePage({ params }: Props) {
       .select("id, full_name")
       .is("deleted_at", null)
       .order("full_name"),
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .is("deleted_at", null)
+      .order("agency_name"),
   ]);
 
   if (siteResult.error || !siteResult.data) notFound();
   const site = siteResult.data as unknown as Site;
   const landowners = landownersResult.data ?? [];
+  const agencies = agenciesResult.data ?? [];
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -50,7 +56,7 @@ export default async function EditSitePage({ params }: Props) {
         title="Edit Site"
         description={`${site.name} · ${site.site_code}`}
       />
-      <SiteForm existingSite={site} landowners={landowners} />
+      <SiteForm existingSite={site} landowners={landowners} agencies={agencies} />
     </div>
   );
 }

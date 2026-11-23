@@ -1,14 +1,10 @@
 // Dynamically rendered app icon — Next serves PNG bytes at /icon by
-// running ImageResponse on this file. Avoids having to ship binary
-// PNG assets in the repo. Manifest declares 192×192 + 512×512; the OS
-// scales whichever it needs.
-//
-// Design: rounded navy square + bold white "MK" centred. Matches the
-// brand colour used elsewhere (PDF letterhead bar, status pills).
+// running ImageResponse on this file. Keeps the mark in sync with
+// <BrandMark> (the on-screen version): same gradient, same "MK"
+// letterform, same amber LED-dot row at the bottom.
 
 import { ImageResponse } from "next/og";
 
-// Tells Next to bake this at build time rather than per-request.
 export const dynamic = "force-static";
 export const contentType = "image/png";
 // 512 is big enough that Android's launcher won't have to upscale on
@@ -17,29 +13,67 @@ export const contentType = "image/png";
 export const size = { width: 512, height: 512 };
 
 export default function Icon() {
+  const dot = 32;
+  const gap = 20;
   return new ImageResponse(
     (
       <div
         style={{
           width: "100%",
           height: "100%",
-          background: "#1E3A8A",
-          color: "#FFFFFF",
-          // 22% radius matches Android's "squircle" mask closely so
-          // the icon looks tidy whether the launcher applies a mask
-          // or shows the raw asset.
-          borderRadius: 116,
+          position: "relative",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 224,
-          fontWeight: 800,
-          letterSpacing: -8,
+          // Matches the on-screen BrandMark gradient so the PWA icon
+          // and the sidebar logo are visually identical.
+          background:
+            "linear-gradient(135deg,#312E81 0%,#4F46E5 45%,#1E293B 100%)",
+          borderRadius: 116,
+          color: "#FFFFFF",
           fontFamily:
             "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         }}
       >
-        MK
+        {/* Soft highlight */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 116,
+            background:
+              "radial-gradient(120% 60% at 20% 0%, rgba(255,255,255,0.22), transparent 60%)",
+          }}
+        />
+        {/* MK letterform */}
+        <div
+          style={{
+            display: "flex",
+            fontSize: 224,
+            fontWeight: 800,
+            letterSpacing: -10,
+            transform: "translateY(-28px)",
+          }}
+        >
+          MK
+        </div>
+        {/* LED-dot row */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 72,
+            left: 0,
+            right: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap,
+          }}
+        >
+          <div style={{ width: dot, height: dot, borderRadius: dot, background: "#FCD34D" }} />
+          <div style={{ width: dot, height: dot, borderRadius: dot, background: "rgba(255,255,255,0.85)" }} />
+          <div style={{ width: dot, height: dot, borderRadius: dot, background: "#FCD34D" }} />
+        </div>
       </div>
     ),
     { ...size },

@@ -6,12 +6,13 @@ import { useTranslations } from "next-intl";
 import {
   LayoutDashboard, MapPin, Home, Building2, FileText,
   Users, Megaphone, Receipt, Wallet, FileSpreadsheet, BarChart3,
-  Bell, Settings, Sparkles, ChevronsUpDown,
+  Bell, Settings, ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { UserMenu } from "./UserMenu";
+import { BrandMark } from "@/components/shared/BrandMark";
 import type { Profile } from "@/lib/types/database";
 
 const NAV_SECTIONS = [
@@ -59,7 +60,6 @@ interface MobileSidebarProps {
 
 export function MobileSidebar({ open, onClose, profile, email }: MobileSidebarProps) {
   const t = useTranslations("nav");
-  const tCommon = useTranslations("common");
   const pathname = usePathname();
 
   const initials = profile?.full_name
@@ -76,15 +76,13 @@ export function MobileSidebar({ open, onClose, profile, email }: MobileSidebarPr
       <SheetContent side="left" className="w-72 p-0 bg-sidebar text-sidebar-foreground border-sidebar-border">
         <SheetHeader className="px-4 py-4 border-b border-sidebar-border">
           <SheetTitle className="text-white text-left flex items-center gap-3">
-            <div className="relative h-9 w-9 shrink-0 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 ring-1 ring-white/20">
-              <Sparkles className="h-4 w-4 text-white" strokeWidth={2.5} />
-            </div>
+            <BrandMark size={36} />
             <div className="min-w-0">
-              <p className="font-semibold text-sm tracking-tight truncate leading-tight">
-                {tCommon("app_name")}
+              <p className="font-semibold text-[15px] tracking-tight truncate leading-tight">
+                MK ADD VAULT
               </p>
-              <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-wider font-medium mt-0.5">
-                OOH Platform
+              <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-[0.14em] font-medium mt-0.5">
+                Outdoor Ad Suite
               </p>
             </div>
           </SheetTitle>

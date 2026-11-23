@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { redirect } from "next/navigation";
+import { localizedRedirect, assertRedirected } from "@/lib/utils/localized-redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -103,11 +104,13 @@ export async function runSetup(formData: FormData): Promise<{ error: string } | 
 
     if (signInErr) {
       // User exists and is set up — just redirect to login to complete sign-in.
-      redirect("/login");
+      await localizedRedirect("/login");
+      assertRedirected();
     }
 
     // All done — go to the dashboard
-    redirect("/dashboard");
+    await localizedRedirect("/dashboard");
+    assertRedirected();
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
     return toActionError(err, "runSetup");

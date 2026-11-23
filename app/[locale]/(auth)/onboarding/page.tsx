@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { OnboardingView } from "./OnboardingView";
 
 export const metadata = {
-  title: "Get Started — OOH Platform",
+  title: "Get Started — MK ADD VAULT",
 };
 
 export default async function OnboardingPage() {

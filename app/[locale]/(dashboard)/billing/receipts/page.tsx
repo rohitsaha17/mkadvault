@@ -15,6 +15,7 @@ import { getSession } from "@/lib/supabase/session";
 import { inr, fmt } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { BillingNav } from "@/components/billing/BillingNav";
+import { RecordClientReceiptDialog } from "@/components/billing/RecordClientReceiptDialog";
 import type { PaymentMode, PaymentReceived } from "@/lib/types/database";
 
 export const metadata = { title: "Receipts" };
@@ -97,6 +98,54 @@ export default async function ReceiptsPage({
   const { data: receiptsData } = await query;
   const receipts = (receiptsData ?? []) as unknown as ReceiptRow[];
 
+  // Pull on-account client receipts so finance can see what's sitting
+  // unallocated. Separate card below the invoice-linked table.
+  const { data: oaReceiptsRaw } = await supabase
+    .from("client_receipts")
+    .select(
+      "id, receipt_number, receipt_date, amount_paise, payment_mode, reference_number, bank_name, external_reference, client:clients(id, company_name)",
+    )
+    .is("deleted_at", null)
+    .order("receipt_date", { ascending: false })
+    .limit(50);
+
+  const oaReceipts = (oaReceiptsRaw ?? []) as unknown as Array<{
+    id: string;
+    receipt_number: string | null;
+    receipt_date: string;
+    amount_paise: number;
+    payment_mode: PaymentMode;
+    reference_number: string | null;
+    bank_name: string | null;
+    external_reference: string | null;
+    client: { id: string; company_name: string } | null;
+  }>;
+
+  // Allocation sum per receipt, so we can show "₹X unallocated" without
+  // another round-trip from the browser.
+  const oaIds = oaReceipts.map((r) => r.id);
+  let allocByReceipt = new Map<string, number>();
+  if (oaIds.length > 0) {
+    const { data: allocRows } = await supabase
+      .from("client_receipt_allocations")
+      .select("client_receipt_id, amount_paise")
+      .in("client_receipt_id", oaIds);
+    allocByReceipt = new Map<string, number>();
+    for (const row of (allocRows ?? []) as Array<{ client_receipt_id: string; amount_paise: number }>) {
+      allocByReceipt.set(
+        row.client_receipt_id,
+        (allocByReceipt.get(row.client_receipt_id) ?? 0) + (row.amount_paise ?? 0),
+      );
+    }
+  }
+
+  // Fetch clients once for the "Record on-account" dialog dropdown.
+  const { data: clientsForDialog } = await supabase
+    .from("clients")
+    .select("id, company_name")
+    .is("deleted_at", null)
+    .order("company_name");
+
   // KPIs based on the *current filter window* so the tile tallies match
   // what the user is actually looking at.
   const totalPaise = receipts.reduce((s, r) => s + (r.amount_paise ?? 0), 0);
@@ -123,6 +172,14 @@ export default async function ReceiptsPage({
         eyebrow="Billing"
         title="Receipts"
         description="Every payment received from clients, grouped chronologically."
+        actions={
+          <RecordClientReceiptDialog
+            clients={(clientsForDialog ?? []).map((c) => ({
+              id: c.id,
+              company_name: c.company_name,
+            }))}
+          />
+        }
       />
 
       <BillingNav />
@@ -301,6 +358,103 @@ export default async function ReceiptsPage({
                       )}
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── On-account receipts (decoupled from invoices) ── */}
+      <section className="mt-6 rounded-2xl border border-border bg-card card-elevated p-5 sm:p-6">
+        <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">
+              On-account receipts
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Client payments recorded without a specific invoice. Allocate to invoices later.
+            </p>
+          </div>
+        </div>
+
+        {oaReceipts.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border py-10 text-center">
+            <Receipt className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
+            <p className="mt-2 text-sm text-muted-foreground">
+              No on-account receipts yet.
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Click &ldquo;Record on-account receipt&rdquo; above to log one.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-border bg-muted/30 text-xs font-medium text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Receipt #</th>
+                    <th className="px-4 py-3 text-left">Date</th>
+                    <th className="px-4 py-3 text-left">Client</th>
+                    <th className="px-4 py-3 text-left">Mode</th>
+                    <th className="px-4 py-3 text-left">Reference</th>
+                    <th className="px-4 py-3 text-right">Amount</th>
+                    <th className="px-4 py-3 text-right">Unallocated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {oaReceipts.map((r) => {
+                    const allocated = allocByReceipt.get(r.id) ?? 0;
+                    const unallocated = Math.max(0, r.amount_paise - allocated);
+                    return (
+                      <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">
+                          {r.receipt_number ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums text-muted-foreground">
+                          {fmt(r.receipt_date)}
+                        </td>
+                        <td className="px-4 py-3 text-foreground">
+                          {r.client ? (
+                            <Link href={`/clients/${r.client.id}`} className="hover:text-primary hover:underline">
+                              {r.client.company_name}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-foreground">
+                          {PM_LABELS[r.payment_mode] ?? r.payment_mode}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {r.reference_number ?? "—"}
+                          {r.bank_name && (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              · {r.bank_name}
+                            </span>
+                          )}
+                          {r.external_reference && (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              · Tally {r.external_reference}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium tabular-nums text-emerald-700 dark:text-emerald-300">
+                          {inr(r.amount_paise)}
+                        </td>
+                        <td
+                          className={`px-4 py-3 text-right font-medium tabular-nums ${
+                            unallocated > 0
+                              ? "text-amber-700 dark:text-amber-300"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {inr(unallocated)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

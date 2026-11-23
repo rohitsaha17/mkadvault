@@ -16,6 +16,7 @@
 
 import * as agencies from "@/app/[locale]/(dashboard)/agencies/actions";
 import * as billing from "@/app/[locale]/(dashboard)/billing/actions";
+import * as clientReceipts from "@/app/[locale]/(dashboard)/billing/client-receipts/actions";
 import * as campaigns from "@/app/[locale]/(dashboard)/campaigns/actions";
 import * as clients from "@/app/[locale]/(dashboard)/clients/actions";
 import * as contracts from "@/app/[locale]/(dashboard)/contracts/actions";
@@ -23,6 +24,7 @@ import * as expenses from "@/app/[locale]/(dashboard)/expenses/actions";
 import * as landowners from "@/app/[locale]/(dashboard)/landowners/actions";
 import * as proposals from "@/app/[locale]/(dashboard)/proposals/actions";
 import * as sites from "@/app/[locale]/(dashboard)/sites/actions";
+import * as sitePayees from "@/app/[locale]/(dashboard)/sites/payees/actions";
 import * as settings from "@/app/[locale]/(dashboard)/settings/actions";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dispatcher is intentionally polymorphic
@@ -40,6 +42,10 @@ export const ACTION_REGISTRY: Record<string, AnyAction> = {
   updateInvoiceStatus: billing.updateInvoiceStatus,
   deleteInvoice: billing.deleteInvoice,
   recordInvoicePayment: billing.recordPayment,
+  // On-account client receipts — decoupled from any specific invoice,
+  // allocated to one or more invoices via allocateClientReceiptToInvoice.
+  createClientReceipt: clientReceipts.createClientReceipt,
+  allocateClientReceiptToInvoice: clientReceipts.allocateClientReceiptToInvoice,
 
   // Campaigns — the three hot paths (create / cancel / delete) already
   // have dedicated Route Handlers, but the less-common mutations still
@@ -92,6 +98,11 @@ export const ACTION_REGISTRY: Record<string, AnyAction> = {
   updateSite: sites.updateSite,
   deleteSite: sites.deleteSite,
   createSitesFromImport: sites.createSitesFromImport,
+  // Site payees — multi-payee layer for sites with more than one rent
+  // counterparty. Falls back to sites.landowner_id when no rows exist.
+  replaceSitePayees: sitePayees.replaceSitePayees,
+  addSitePayee: sitePayees.addSitePayee,
+  removeSitePayee: sitePayees.removeSitePayee,
 
   // Settings
   updateOrganization: settings.updateOrganization,

@@ -5,6 +5,7 @@
 //   1. organizations table has no INSERT RLS policy (by design)
 //   2. profiles RLS only lets users update their own row (not org_id)
 import { redirect } from "next/navigation";
+import { localizedRedirect, assertRedirected } from "@/lib/utils/localized-redirect";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -63,7 +64,8 @@ export async function createOrganization(
       .single();
 
     if (existingProfile?.org_id) {
-      redirect("/dashboard");
+      await localizedRedirect("/dashboard");
+      assertRedirected();
     }
 
     // Create the organisation
@@ -97,7 +99,8 @@ export async function createOrganization(
       return { error: `Failed to link your account: ${profileError.message}` };
     }
 
-    redirect("/dashboard");
+    await localizedRedirect("/dashboard");
+    assertRedirected();
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;
     return toActionError(err, "createOrganization");

@@ -1,4 +1,4 @@
-// Database TypeScript types for the OOH Platform
+// Database TypeScript types for MK ADD VAULT
 // Manually maintained — regenerate with Supabase CLI when schema changes:
 //   npx supabase gen types typescript --project-id <ref> > lib/types/database.ts
 //
@@ -180,8 +180,12 @@ export interface Site {
 
   ownership_model: OwnershipModel;
   // Direct link to a landowner — only set when ownership_model = "owned".
-  // Rented sites are linked to a partner_agency via the contracts table.
+  // For rented sites use partner_agency_id below instead.
   landowner_id: string | null;
+  // Direct link to a partner agency — only set when ownership_model =
+  // "rented" (site sublet from an agency). Mirror of landowner_id for
+  // the opposite ownership mode. (migration 046)
+  partner_agency_id: string | null;
   // Stored as integer paise (1 INR = 100 paise). Display: value / 100.
   // Interpretation depends on pricing_basis — for per_kiosk_monthly
   // this is the rate per kiosk, for per_slot it's the rate per slot,

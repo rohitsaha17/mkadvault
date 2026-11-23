@@ -11,7 +11,7 @@ export async function generateMetadata({
 }) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "auth" });
-  return { title: `${t("register")} — OOH Platform` };
+  return { title: `${t("register")} — MK ADD VAULT` };
 }
 
 export default async function RegisterPage({

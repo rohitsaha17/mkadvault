@@ -9,10 +9,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "MK ADD Communication Service",
-    short_name: "MK ADD",
+    name: "MK ADD VAULT",
+    short_name: "MK ADD VAULT",
     description:
-      "MK ADD Communication Service — outdoor advertising business management platform.",
+      "MK ADD VAULT — outdoor advertising business management platform.",
     // Launch the installed app straight to the dashboard, not the
     // marketing landing page. Locale prefix is optional; Next's
     // proxy.ts middleware handles the redirect to /en or /hi.
@@ -20,7 +20,7 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     background_color: "#0F172A",
-    theme_color: "#1E3A8A",
+    theme_color: "#4F46E5",
     orientation: "any",
     // The icon URLs map to app/icon.tsx + app/apple-icon.tsx (Next
     // generates the bytes via ImageResponse at request time). We

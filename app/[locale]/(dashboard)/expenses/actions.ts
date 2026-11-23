@@ -30,12 +30,19 @@ import { inr } from "@/lib/utils";
 // state is reflected everywhere (overview KPIs, requests list, approvals
 // queue, payments history, receipts vault). Each page is cheap to
 // re-render because they all hit site_expenses.
+//
+// `, "page"` is important: bare `revalidatePath("/finance/requests")`
+// only invalidates the no-query-string version. With filters applied
+// (?q=foo&status=pending&…) the page has a distinct cache entry per
+// query combo, and those stay stale after a mutation — which is why
+// users saw a just-created or just-marked-paid row not appear until a
+// hard reload. "page" nukes every variant of the segment.
 function revalidateFinance() {
-  revalidatePath("/finance");
-  revalidatePath("/finance/requests");
-  revalidatePath("/finance/approvals");
-  revalidatePath("/finance/payments");
-  revalidatePath("/finance/receipts");
+  revalidatePath("/finance", "page");
+  revalidatePath("/finance/requests", "page");
+  revalidatePath("/finance/approvals", "page");
+  revalidatePath("/finance/payments", "page");
+  revalidatePath("/finance/receipts", "page");
 }
 
 // ── Auth helpers ────────────────────────────────────────────────────────────

@@ -145,11 +145,16 @@ export default async function DashboardPage({ params, searchParams }: PageProps)
       </Suspense>
 
       <Suspense fallback={<SitesRowSkeleton />}>
-        <SitesRow orgId={orgId} />
+        <SitesRow orgId={orgId} from={rangeFrom} to={rangeTo} />
       </Suspense>
 
       <Suspense fallback={<AlertsRowSkeleton />}>
-        <AlertsRow orgId={orgId} locale={locale} />
+        <AlertsRow
+          orgId={orgId}
+          locale={locale}
+          from={rangeFrom}
+          to={rangeTo}
+        />
       </Suspense>
     </div>
   );

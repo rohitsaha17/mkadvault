@@ -285,3 +285,45 @@ export async function syncSiteStatuses(
 
   return { booked, freed };
 }
+
+// ─── Throttled wrapper ────────────────────────────────────────────────────────
+// The sites list page used to call syncSiteStatuses() on EVERY render, even
+// though its real purpose is "reconcile at most once a day per org and when a
+// campaign's status changes". That meant 4 round-trips (two SELECTs, up to
+// two UPDATEs) blocking the critical path on every single /sites visit.
+//
+// This wrapper gates the call to once-per-minute per org using a module-local
+// Map. The Vercel cron job (which runs with its own admin client and no
+// orgId plumbing) keeps calling the raw syncSiteStatuses() directly — it
+// runs daily anyway and should never be gated.
+//
+// Fresh workers start with an empty Map, so the first visit after a cold
+// boot still syncs — that's the worst case and still cheap. All subsequent
+// visits within 60 s just return the cached result and skip the DB entirely.
+
+const lastSyncByOrg = new Map<string, { at: number; booked: number; freed: number }>();
+const SYNC_TTL_MS = 60_000;
+
+export async function syncSiteStatusesThrottled(
+  supabase: SupabaseClient,
+  orgId: string | null | undefined,
+): Promise<{ booked: number; freed: number; error?: string; skipped?: boolean }> {
+  // No org = skip — the list page caller already short-circuits in that
+  // case too (no org = redirected to /onboarding by the proxy), but belt
+  // and braces.
+  if (!orgId) return { booked: 0, freed: 0, skipped: true };
+
+  const now = Date.now();
+  const last = lastSyncByOrg.get(orgId);
+  if (last && now - last.at < SYNC_TTL_MS) {
+    return { booked: last.booked, freed: last.freed, skipped: true };
+  }
+
+  const res = await syncSiteStatuses(supabase);
+  // Only cache successful runs — if an error bubbled up we want the next
+  // request to retry rather than serve a stale "0, 0" for a whole minute.
+  if (!res.error) {
+    lastSyncByOrg.set(orgId, { at: now, booked: res.booked, freed: res.freed });
+  }
+  return res;
+}

@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MK ADD Communication Service",
-  description: "Outdoor advertising business management platform",
+  title: "MK ADD VAULT",
+  description: "MK ADD VAULT — outdoor advertising business management platform",
   // PWA glue. The manifest lives at app/manifest.ts. Apple needs
   // separate <meta> tags + apple-icon.tsx because Safari ignores the
   // standard manifest for some flags. statusBarStyle "black-translucent"
@@ -25,10 +25,10 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "MK ADD",
+    title: "MK ADD VAULT",
     statusBarStyle: "black-translucent",
   },
-  applicationName: "MK ADD",
+  applicationName: "MK ADD VAULT",
   formatDetection: { telephone: false },
 };
 
@@ -46,7 +46,7 @@ export const viewport: Viewport = {
   // colour scheme the device is in. Matches the brand navy used in
   // PDF headers + status pills.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#1E3A8A" },
+    { media: "(prefers-color-scheme: light)", color: "#4F46E5" },
     { media: "(prefers-color-scheme: dark)", color: "#0F172A" },
   ],
 };

@@ -13,7 +13,7 @@ export async function generateMetadata({
 }) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "auth" });
-  return { title: `${t("login")} — OOH Platform` };
+  return { title: `${t("login")} — MK ADD VAULT` };
 }
 
 export default async function LoginPage({

@@ -111,10 +111,16 @@ export const siteSchema = z.object({
     .optional(),
 
   // ── Step 4: Commercial ─────────────────────────────────────────────────
+  // "owned" = we own the structure on leased or owned land → use landowner.
+  // "rented" = the whole site is sublet to us by a partner agency → use
+  // partner_agency_id instead of landowner_id.
   ownership_model: z.enum(["owned", "rented"]),
   // Direct landowner link — only meaningful when ownership_model = "owned".
   // Empty string from the select is coerced to undefined by the form.
   landowner_id: z.string().uuid().optional().or(z.literal("")).transform((v) => v || undefined),
+  // Partner agency link — only meaningful when ownership_model = "rented".
+  // Mirror of landowner_id's empty-string → undefined coercion.
+  partner_agency_id: z.string().uuid().optional().or(z.literal("")).transform((v) => v || undefined),
   // Form collects rate in INR; server action converts to paise (× 100).
   base_rate_inr: optionalPositiveNumber,
   municipal_permission_number: z.string().optional(),

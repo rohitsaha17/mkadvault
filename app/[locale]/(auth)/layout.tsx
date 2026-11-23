@@ -3,7 +3,7 @@
 // We force the `dark` class locally so this section looks consistent
 // regardless of the global theme toggle.
 import { setRequestLocale } from "next-intl/server";
-import { Building2 } from "lucide-react";
+import { BrandMark } from "@/components/shared/BrandMark";
 
 export default async function AuthLayout({
   children,
@@ -31,11 +31,9 @@ export default async function AuthLayout({
       <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10">
         {/* Brand header */}
         <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-muted to-muted shadow-lg ring-1 ring-white/10">
-            <Building2 className="h-6 w-6 text-foreground" />
-          </div>
+          <BrandMark size={56} className="mb-4" />
           <h1 className="text-2xl font-semibold tracking-tight text-white">
-            OOH Platform
+            MK ADD VAULT
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Outdoor Advertising Management
@@ -47,7 +45,7 @@ export default async function AuthLayout({
 
         {/* Footer */}
         <p className="mt-8 text-xs text-muted-foreground">
-          &copy; {new Date().getFullYear()} OOH Platform
+          &copy; {new Date().getFullYear()} MK ADD VAULT
         </p>
       </div>
     </div>

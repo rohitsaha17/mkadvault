@@ -3,6 +3,7 @@ import { useState, useMemo, useTransition, useEffect, useRef } from "react";
 import { useForm, useFieldArray, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { showFirstFormError } from "@/lib/utils/form-feedback";
+import { useNavGuard } from "@/hooks/use-nav-guard";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Search, Save } from "lucide-react";
@@ -138,6 +139,12 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isDraftPending, startDraftTransition] = useTransition();
+  // Guard tab-close / back-nav while either save is in flight so the
+  // record isn't silently lost mid-way through a slow create.
+  useNavGuard(
+    isPending || isDraftPending,
+    isDraftPending ? "Saving draft…" : "Creating campaign…",
+  );
   const [step, setStep] = useState(0);
   const [siteSearch, setSiteSearch] = useState("");
   const [durationMode, setDurationMode] = useState<"campaign" | "custom">("campaign");
@@ -371,6 +378,11 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
   }
 
   function onSubmit(values: CreateCampaignValues) {
+    // Guard: only the explicit Create-Campaign button on the final step
+    // may submit. See the form element below — it swallows all submit
+    // events so this is defence-in-depth against a stray Enter press or
+    // React reconciliation reusing the Continue button as a submit.
+    if (step !== STEPS.length - 1) return;
     // If duration mode is "campaign", override site dates with campaign dates
     if (durationMode === "campaign") {
       values.sites = values.sites.map((s) => ({
@@ -448,7 +460,41 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6 max-w-4xl">
+    <>
+      {/* Full-screen overlay while save is in flight — strong visual
+          feedback for slow creates (5–30 s) and backs up useNavGuard. */}
+      {(isPending || isDraftPending) && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="rounded-xl border border-border bg-card px-6 py-5 shadow-lg flex items-center gap-3 max-w-sm">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <div className="text-sm">
+              <p className="font-medium text-foreground">
+                {isDraftPending ? "Saving draft…" : "Creating campaign…"}
+              </p>
+              <p className="text-muted-foreground text-xs mt-0.5">
+                Please stay on this page. This can take 10–30 seconds on slow links.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+    {/* The form never submits through the browser default: we route all
+        saves through explicit button onClicks so pressing Enter on an
+        earlier step can't fire the Create Campaign path. */}
+    <form
+      onSubmit={(e) => e.preventDefault()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
+          e.preventDefault();
+        }
+      }}
+      className="space-y-6 max-w-4xl"
+    >
       {/* Step indicator */}
       <div className="flex items-center gap-0">
         {STEPS.map((s, i) => (
@@ -1124,6 +1170,7 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
         )}
         {step < STEPS.length - 1 ? (
           <Button
+            key="wizard-continue"
             type="button"
             onClick={() => {
               // Validate current step before advancing
@@ -1162,7 +1209,16 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
             Continue
           </Button>
         ) : (
-          <Button type="submit" disabled={isPending}>
+          // Must be type="button": any type="submit" lets the browser
+          // auto-submit via Enter or a stale click event. Route through
+          // handleSubmit explicitly so react-hook-form still validates
+          // and runs the error-focus callback.
+          <Button
+            key="wizard-create"
+            type="button"
+            disabled={isPending}
+            onClick={() => handleSubmit(onSubmit, onInvalid)()}
+          >
             {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Create Campaign
           </Button>
@@ -1262,6 +1318,7 @@ export function CampaignForm({ clients, agencies, sites, preselectedClientId, pr
         )}
       </div>
     </form>
+    </>
   );
 }
 

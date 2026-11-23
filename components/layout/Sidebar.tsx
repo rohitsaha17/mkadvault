@@ -24,7 +24,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
   ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,6 +34,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { UserMenu } from "./UserMenu";
+import { BrandMark } from "@/components/shared/BrandMark";
 import type { Profile } from "@/lib/types/database";
 
 // ─── Nav items grouped by section ─────────────────────────────────────────────
@@ -87,7 +87,6 @@ interface SidebarProps {
 
 export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
   const t = useTranslations("nav");
-  const tCommon = useTranslations("common");
   const pathname = usePathname();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -130,16 +129,14 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
           collapsed ? "justify-center" : "gap-3"
         )}
       >
-        <div className="relative h-9 w-9 shrink-0 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 ring-1 ring-white/20">
-          <Sparkles className="h-4.5 w-4.5 text-white" strokeWidth={2.5} />
-        </div>
+        <BrandMark size={36} />
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-sm tracking-tight text-white truncate leading-tight">
-              {tCommon("app_name")}
+            <p className="font-semibold text-[15px] tracking-tight text-white truncate leading-tight">
+              MK ADD VAULT
             </p>
-            <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-wider font-medium mt-0.5">
-              OOH Platform
+            <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-[0.14em] font-medium mt-0.5">
+              Outdoor Ad Suite
             </p>
           </div>
         )}

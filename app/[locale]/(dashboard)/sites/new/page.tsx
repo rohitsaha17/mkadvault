@@ -14,13 +14,21 @@ export default async function NewSitePage({
   const { locale } = await params;
   setRequestLocale(locale);
 
-  // Fetch landowners for the commercial step's picker. RLS scopes to org.
+  // Fetch landowners (owned sites) + partner agencies (sublet sites) for
+  // the commercial step pickers. RLS scopes both to the current org.
   const supabase = await createClient();
-  const { data: landowners } = await supabase
-    .from("landowners")
-    .select("id, full_name")
-    .is("deleted_at", null)
-    .order("full_name");
+  const [landownersRes, agenciesRes] = await Promise.all([
+    supabase
+      .from("landowners")
+      .select("id, full_name")
+      .is("deleted_at", null)
+      .order("full_name"),
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .is("deleted_at", null)
+      .order("agency_name"),
+  ]);
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -36,7 +44,10 @@ export default async function NewSitePage({
         title="Add New Site"
         description="Fill in the details below. Photos can be added after saving."
       />
-      <SiteForm landowners={landowners ?? []} />
+      <SiteForm
+        landowners={landownersRes.data ?? []}
+        agencies={agenciesRes.data ?? []}
+      />
     </div>
   );
 }

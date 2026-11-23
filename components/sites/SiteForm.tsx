@@ -5,6 +5,7 @@
 import { useState, useTransition } from "react";
 import { useForm, useFieldArray, type FieldErrors } from "react-hook-form";
 import { showFirstFormError } from "@/lib/utils/form-feedback";
+import { useNavGuard } from "@/hooks/use-nav-guard";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -25,7 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
 import { IndianStateSelect } from "@/components/shared/IndianStateSelect";
-import type { Site, Landowner } from "@/lib/types/database";
+import type { Site, Landowner, PartnerAgency } from "@/lib/types/database";
 
 // ─── Step definitions ─────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ const STEP_FIELDS: (keyof SiteFormValues)[][] = [
   ["name", "site_code", "media_type", "structure_type", "status"],
   ["address", "city", "state", "pincode", "landmark", "latitude", "longitude"],
   ["width_ft", "height_ft", "illumination", "facing", "traffic_side", "visibility_distance_m", "custom_dimensions"],
-  ["ownership_model", "landowner_id", "base_rate_inr", "municipal_permission_number", "municipal_permission_expiry"],
+  ["ownership_model", "landowner_id", "partner_agency_id", "base_rate_inr", "municipal_permission_number", "municipal_permission_expiry"],
   ["notes"],
 ];
 
@@ -54,14 +55,30 @@ interface SiteFormProps {
   // List of landowners in the current org — used by the commercial step's
   // landowner picker. Only shown when ownership_model = "owned".
   landowners?: Pick<Landowner, "id" | "full_name">[];
+  // List of partner agencies — shown when ownership_model = "rented"
+  // (site sublet from an agency), hidden otherwise.
+  agencies?: Pick<PartnerAgency, "id" | "agency_name">[];
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function SiteForm({ existingSite, landowners: initialLandowners = [] }: SiteFormProps) {
+export function SiteForm({
+  existingSite,
+  landowners: initialLandowners = [],
+  agencies = [],
+}: SiteFormProps) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [isPending, startTransition] = useTransition();
+  // Block tab-close / back-navigation while the save is in flight.
+  // Saves take 5–30 s on slow links and leaving the page silently
+  // discards the record otherwise.
+  useNavGuard(
+    isPending,
+    existingSite
+      ? "Saving site changes… please stay on this page until it finishes."
+      : "Creating site… please stay on this page until it finishes.",
+  );
   // Local copy so we can append a newly-created landowner without reloading
   // the whole page.
   const [landowners, setLandowners] = useState(initialLandowners);
@@ -90,6 +107,7 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
         visibility_distance_m: existingSite.visibility_distance_m ?? undefined,
         ownership_model: existingSite.ownership_model,
         landowner_id: existingSite.landowner_id ?? undefined,
+        partner_agency_id: existingSite.partner_agency_id ?? undefined,
         // Convert stored paise back to INR for display
         base_rate_inr: existingSite.base_rate_paise
           ? existingSite.base_rate_paise / 100
@@ -143,9 +161,9 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
     setStep((s) => s - 1);
   }
 
-  // Final submit — guarded so accidental submits (Enter key in an input on
-  // earlier steps, or the form re-rendering the submit button between Next
-  // clicks) don't create a site before the user reaches the Review step.
+  // Final submit — only ever called through the explicit Submit-button
+  // onClick path (the form itself swallows all submit events — see
+  // onFormSubmit below). The step guard stays as defense-in-depth.
   function onSubmit(values: SiteFormValues) {
     if (step !== STEPS.length - 1) return;
     // Drop any empty custom dimension rows the user left behind.
@@ -220,6 +238,29 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
+      {/* Full-screen overlay while the save is in flight. Prevents accidental
+          clicks on sidebar links / dialogs, backs up useNavGuard with a
+          strong visual signal, and tells the user why the page feels stuck. */}
+      {isPending && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="rounded-xl border border-border bg-card px-6 py-5 shadow-lg flex items-center gap-3 max-w-sm">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <div className="text-sm">
+              <p className="font-medium text-foreground">
+                {existingSite ? "Saving changes…" : "Creating site…"}
+              </p>
+              <p className="text-muted-foreground text-xs mt-0.5">
+                Please stay on this page. This can take 10–30 seconds on slow links.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Step progress indicator */}
       <nav>
         <ol className="flex items-center gap-0">
@@ -268,13 +309,25 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
         </p>
       </nav>
 
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+      {/*
+        The form's own submit handler just swallows the event. The only way
+        a save actually fires is through the Submit button's explicit onClick
+        at the bottom of the review step. This closes a class of bugs where
+        pressing Enter in an input, or React reusing the Next button's DOM
+        node as a type="submit" after step advance, caused an auto-save
+        before the user reached Review.
+      */}
       <form
-        onSubmit={handleSubmit(
-          onSubmit as any,
-          (errs: FieldErrors<SiteFormValues>) =>
-            showFirstFormError(errs, { setFocus, label: "SiteForm" }),
-        )}
+        onSubmit={(e) => e.preventDefault()}
+        onKeyDown={(e) => {
+          // Enter inside a text input used to submit the form through
+          // implicit-form-submission; block that so only the explicit
+          // Save button on the Review step can submit. Textareas keep
+          // their normal Enter-for-newline behaviour.
+          if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
+            e.preventDefault();
+          }
+        }}
         noValidate
         className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4"
       >
@@ -616,17 +669,24 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
               <NativeSelect
                 {...register("ownership_model")}
                 options={[
-                  { value: "owned", label: "Owned" },
-                  { value: "rented", label: "Rented" },
+                  // Phrased in plain English so users don't have to guess
+                  // which option covers their arrangement.
+                  { value: "owned", label: "Own structure on leased land" },
+                  { value: "rented", label: "Site sublet from an agency" },
                 ]}
                 error={!!errors.ownership_model}
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                {watch("ownership_model") === "owned"
+                  ? "We own the structure (hoarding, unipole, etc.) and the land is leased from a landowner."
+                  : "The whole site (structure + land) is sublet to us by a partner agency."}
+              </p>
             </FormField>
 
-            {/* Landowner picker — only meaningful for owned sites. Rented sites
-                are linked to a partner agency via the contracts module. The
-                "+ Add" button opens a quick-create dialog so the user doesn't
-                have to leave the site form. */}
+            {/* Counterparty picker — landowner for owned sites, partner
+                agency for rented sites. The two paths mirror each other
+                so finance can trace rent flows cleanly regardless of
+                ownership. */}
             {watch("ownership_model") === "owned" && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -656,7 +716,30 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
                   <p className="text-xs text-muted-foreground">
                     {landowners.length === 0
                       ? "No landowners yet — click Add landowner to create one inline."
-                      : "Link this site to the person/entity who owns the land."}
+                      : "Link this site to the person/entity who owns the land. Multiple payees can be set up on the site detail page after saving."}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {watch("ownership_model") === "rented" && (
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-foreground">Partner Agency</Label>
+                <NativeSelect
+                  {...register("partner_agency_id")}
+                  options={[
+                    { value: "", label: "— Unlinked —" },
+                    ...agencies.map((a) => ({ value: a.id, label: a.agency_name })),
+                  ]}
+                  error={!!errors.partner_agency_id}
+                />
+                {errors.partner_agency_id?.message ? (
+                  <p className="text-xs text-destructive">{errors.partner_agency_id.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {agencies.length === 0
+                      ? "No partner agencies yet. Add one from Agencies → New to link here."
+                      : "The agency that sublets this site to us. Rent payable to them is tracked via the agency contract."}
                   </p>
                 )}
               </div>
@@ -722,12 +805,28 @@ export function SiteForm({ existingSite, landowners: initialLandowners = [] }: S
           </Button>
 
           {step < STEPS.length - 1 ? (
-            <Button type="button" onClick={handleNext}>
+            <Button key="wizard-next" type="button" onClick={handleNext}>
               Next
               <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           ) : (
-            <Button type="submit" disabled={isPending}>
+            // Must be type="button": any type="submit" here lets the browser
+            // auto-submit via Enter or stale click bubbling. We route through
+            // handleSubmit explicitly so react-hook-form still runs validation
+            // and the error-focus callback.
+            <Button
+              key="wizard-save"
+              type="button"
+              disabled={isPending}
+              onClick={() =>
+                handleSubmit(
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  onSubmit as any,
+                  (errs: FieldErrors<SiteFormValues>) =>
+                    showFirstFormError(errs, { setFocus, label: "SiteForm" }),
+                )()
+              }
+            >
               {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {existingSite ? "Save Changes" : "Create Site"}
             </Button>
@@ -826,7 +925,7 @@ function ReviewStep({
         <ReviewRow label="Status" value={values.status} />
         <ReviewRow label="Address" value={`${values.address}, ${values.city}, ${values.state}`} />
         {values.pincode && <ReviewRow label="Pincode" value={values.pincode} />}
-        {values.latitude && values.longitude && (
+        {Number.isFinite(values.latitude) && Number.isFinite(values.longitude) && (
           <ReviewRow label="GPS" value={`${values.latitude}, ${values.longitude}`} />
         )}
         {(values.width_ft || values.height_ft) && (
@@ -846,7 +945,14 @@ function ReviewStep({
         )}
         {values.illumination && <ReviewRow label="Illumination" value={values.illumination} />}
         {values.facing && <ReviewRow label="Facing" value={values.facing} />}
-        <ReviewRow label="Ownership" value={values.ownership_model} />
+        <ReviewRow
+          label="Ownership"
+          value={
+            values.ownership_model === "owned"
+              ? "Own structure on leased land"
+              : "Site sublet from an agency"
+          }
+        />
         {values.base_rate_inr && (
           <ReviewRow
             label="Monthly Rate"
