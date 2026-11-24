@@ -2,7 +2,7 @@
 // Locale-specific providers (NextIntlClientProvider, Toaster) live in
 // app/[locale]/layout.tsx so they receive the correct locale.
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,6 +12,18 @@ const geistSans = Geist({
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+// Instrument Serif — a quiet, editorial display face used ONCE per
+// screen, for the dashboard period headline, section eyebrows and the
+// hero figure. Everything else keeps Geist. Italic is included because
+// Instrument's italic reads as a hand-lettered ledger, which is the
+// character we want next to the tabular INR numbers.
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-serif",
+  weight: "400",
+  style: ["normal", "italic"],
   subsets: ["latin"],
 });
 
@@ -55,7 +67,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
+    <html className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full">{children}</body>
     </html>
   );

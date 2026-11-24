@@ -132,11 +132,11 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
         <BrandMark size={36} />
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <p className="font-medium text-[15px] tracking-tight text-white truncate leading-tight">
+            <p className="font-display text-[20px] text-white truncate leading-none">
               MK Add Vault
             </p>
-            <p className="text-[11px] text-sidebar-foreground/55 mt-0.5">
-              Outdoor advertising
+            <p className="font-display italic text-[11px] text-sidebar-foreground/60 mt-1 tracking-wide">
+              Outdoor advertising, est. Guwahati
             </p>
           </div>
         )}

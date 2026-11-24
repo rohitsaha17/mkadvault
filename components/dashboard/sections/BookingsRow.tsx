@@ -203,12 +203,17 @@ export async function BookingsRow({
   return (
     <div className="space-y-3">
       <div className="flex items-end justify-between">
-        <div className="flex items-center gap-3">
-          <span
-            aria-hidden
-            className="h-[2px] w-3 rounded-full bg-primary/70"
-          />
-          <h2 className="text-lg font-medium tracking-tight text-foreground">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2.5">
+            <span
+              aria-hidden
+              className="h-[1px] w-5 bg-primary/70"
+            />
+            <p className="font-display italic text-[13px] text-primary/85">
+              Movement
+            </p>
+          </div>
+          <h2 className="font-display text-[26px] tracking-tight text-foreground leading-tight">
             Sales momentum
           </h2>
         </div>
@@ -267,9 +272,6 @@ function BookingCard({
   href,
   tone = "default",
 }: BookingCardProps) {
-  // The warning tone is the one place on this row where the accent
-  // shows up — a thin amber top rail on cards that have something
-  // still open to act on. Everything else sits in the neutral ramp.
   const accentRail =
     tone === "warning" ? (
       <span
@@ -279,14 +281,14 @@ function BookingCard({
     ) : null;
   return (
     <Link href={href} className="group">
-      <Card className="relative overflow-hidden transition-colors hover:bg-accent/40">
+      <Card className="relative overflow-hidden transition-colors hover:bg-accent/40 h-full">
         {accentRail}
-        <CardContent className="relative pt-6">
-          <p className="text-xs text-muted-foreground">{title}</p>
-          <div className="mt-2 text-[26px] font-medium tabular-nums tracking-tight text-foreground leading-none">
+        <CardContent className="relative p-5 space-y-3">
+          <p className="text-xs text-muted-foreground tracking-wide">{title}</p>
+          <div className="text-[30px] font-normal tabular-nums tracking-tight text-foreground leading-none">
             {value}
           </div>
-          <p className="mt-3 text-xs text-muted-foreground tabular-nums">
+          <p className="font-display italic text-xs text-muted-foreground/90 tabular-nums leading-snug">
             {subtitle}
           </p>
         </CardContent>

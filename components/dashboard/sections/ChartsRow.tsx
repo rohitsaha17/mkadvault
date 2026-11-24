@@ -117,30 +117,36 @@ export async function ChartsRow({
   }));
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <Card>
-        <CardHeader className="pb-2 space-y-0.5">
-          <CardTitle className="text-base font-medium tracking-tight">
+        <CardHeader className="pb-3 space-y-1 pt-6">
+          <p className="font-display italic text-[12px] text-primary/80 tracking-wide">
+            Monthly ledger
+          </p>
+          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
             {tDash("revenue_vs_cost")}
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             Taxable revenue against paid cost, by month
           </p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pb-6">
           <RevenueCostChart data={chartData} />
         </CardContent>
       </Card>
       <Card>
-        <CardHeader className="pb-2 space-y-0.5">
-          <CardTitle className="text-base font-medium tracking-tight">
+        <CardHeader className="pb-3 space-y-1 pt-6">
+          <p className="font-display italic text-[12px] text-primary/80 tracking-wide">
+            Treasury
+          </p>
+          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
             {tDash("cash_flow")}
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             Money in from clients against money out to payees
           </p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pb-6">
           <CashFlowChart data={cashFlowData} />
         </CardContent>
       </Card>

@@ -160,61 +160,118 @@ export async function KpiRow({
   const bookedSiteCount = (bookedSites ?? []).length;
   const occupancyPct = totalSiteCount > 0 ? Math.round((bookedSiteCount / totalSiteCount) * 100) : 0;
 
-  // Previous-period comparison. When there's no prior data (fresh FY,
-  // empty window) we hide the delta row entirely rather than show a
-  // misleading "+0.0%" with an up-arrow — a dashboard that lies about
-  // its own change is worse than one that admits it doesn't know yet.
+  // Previous-period comparison. When there's no prior data we hide
+  // the delta row entirely rather than show a misleading "+0.0%" with
+  // an up-arrow — a dashboard that lies about its own change is worse
+  // than one that admits it doesn't know yet.
   const hasRevenueDelta = lastMonthRevenue > 0;
   const hasCostDelta = lastMonthCostTotal > 0;
+  const invoiceCount = thisMonthInvoices?.length ?? 0;
 
+  // Layout: Revenue is the hero, taking the left 2 columns on wide
+  // screens. The other three figures stack on the right as compact
+  // ledger rows. This is the ONE typographic moment on the row —
+  // serif period eyebrow + a very large sans figure + an inline
+  // delta. Everything else reads as supporting detail.
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      <KpiCard
-        title="Revenue"
-        value={inr(thisMonthRevenue)}
-        hint={`Taxable value · ${thisMonthInvoices?.length ?? 0} invoices`}
-        changePercent={hasRevenueDelta ? revenueChange : null}
-        changeLabel="vs previous period"
-      />
-      <KpiCard
-        title="Cost"
-        value={inr(thisMonthCostTotal)}
-        hint="Rent paid + settled requests"
-        // On cost, a NEGATIVE change is a good thing, so we flip the
-        // sign so "lower cost" reads as an up-tick.
-        changePercent={hasCostDelta ? -costChange : null}
-        changeLabel="vs previous period"
-      />
-      <KpiCard
-        title="Net profit"
-        value={inr(netProfit)}
-        hint="Taxable revenue − cost"
-        // Margin keeps its real sign: a loss shows a down arrow with
-        // the magnitude, not an up arrow with the absolute value.
-        changePercent={thisMonthRevenue > 0 ? profitMargin : null}
-        changeLabel="margin"
-      />
-      <Card className="relative overflow-hidden">
-        <CardContent className="relative pt-6">
-          <p className="text-xs text-muted-foreground">
-            {tDash("site_occupancy")}
-          </p>
-          <div className="mt-2 flex items-baseline gap-2">
-            <div className="text-[28px] font-medium tabular-nums tracking-tight text-foreground leading-none">
-              {occupancyPct}%
+    <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
+      {/* ─── Hero: Revenue ─────────────────────────────────────── */}
+      <Card className="relative overflow-hidden xl:col-span-2 hero-surface border-primary/15">
+        <CardContent className="relative p-6 md:p-7">
+          <div className="flex items-center gap-2.5">
+            <span
+              aria-hidden
+              className="h-[1px] w-5 bg-primary/70"
+            />
+            <p className="font-display italic text-[13px] text-primary/85">
+              Revenue
+            </p>
+          </div>
+          <div className="mt-4 text-[44px] md:text-[52px] font-normal tabular-nums tracking-tight text-foreground leading-[0.95]">
+            {inr(thisMonthRevenue)}
+          </div>
+          <div className="mt-3 flex items-center gap-3 text-xs">
+            <DeltaPill
+              changePercent={hasRevenueDelta ? revenueChange : null}
+              label="vs previous period"
+            />
+          </div>
+          <div className="rule-hair mt-6" />
+          <div className="mt-4 grid grid-cols-2 gap-6">
+            <LedgerCell
+              label="Invoices in window"
+              value={String(invoiceCount)}
+              footnote={invoiceCount === 1 ? "single bill" : "billed, GST excluded"}
+            />
+            <LedgerCell
+              label="Average per invoice"
+              value={inr(
+                invoiceCount > 0
+                  ? Math.round(thisMonthRevenue / invoiceCount)
+                  : 0,
+              )}
+              footnote={
+                invoiceCount === 0 ? "no billing yet" : "across the window"
+              }
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Supporting ledger stats ──────────────────────────── */}
+      <Card className="relative overflow-hidden xl:col-span-3">
+        <CardContent className="relative p-6 md:p-7 space-y-5">
+          <LedgerRow
+            title="Cost"
+            value={inr(thisMonthCostTotal)}
+            hint="Rent paid + settled requests"
+            // Lower cost is a good thing, so flip the sign for the colour.
+            changePercent={hasCostDelta ? -costChange : null}
+            changeLabel="vs previous period"
+          />
+          <div className="rule-hair" />
+          <LedgerRow
+            title="Net profit"
+            value={inr(netProfit)}
+            hint="Taxable revenue minus cost"
+            // Keeps its real sign — a loss shows a down arrow.
+            changePercent={thisMonthRevenue > 0 ? profitMargin : null}
+            changeLabel="margin"
+          />
+          <div className="rule-hair" />
+          <div className="flex items-center justify-between gap-6">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground tracking-wide">
+                {tDash("site_occupancy")}
+              </p>
+              <div className="flex items-baseline gap-2.5">
+                <span className="text-[28px] font-normal tabular-nums tracking-tight text-foreground leading-none">
+                  {occupancyPct}%
+                </span>
+                <span className="font-display italic text-xs text-muted-foreground">
+                  {bookedSiteCount} of {totalSiteCount}
+                </span>
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground tabular-nums">
-              {bookedSiteCount} of {totalSiteCount} sites
+            <div className="w-40">
+              <Progress value={occupancyPct} className="h-1" />
+              <p className="mt-2 text-[11px] text-muted-foreground tracking-wide tabular-nums text-right">
+                {totalSiteCount - bookedSiteCount} available
+              </p>
             </div>
           </div>
-          <Progress value={occupancyPct} className="mt-4 h-1" />
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function KpiCard({
+// ─── Ledger primitives ──────────────────────────────────────────────
+
+// LedgerRow — one line on the right-hand supporting card. Title left,
+// figure right, delta underneath. Reads like a line in a ledger
+// instead of a stacked KPI tile.
+function LedgerRow({
   title,
   value,
   hint,
@@ -224,48 +281,98 @@ function KpiCard({
   title: string;
   value: string;
   hint?: string;
-  // null = no prior-period data; render the row quiet instead of a
-  // fake 0.0% with a green arrow. Numbers may be negative — the sign
-  // decides the arrow and the colour.
   changePercent: number | null;
   changeLabel: string;
 }) {
-  const isPositive = (changePercent ?? 0) >= 0;
   return (
-    <Card className="relative overflow-hidden">
-      <CardContent className="relative pt-6">
-        <p className="text-xs text-muted-foreground">{title}</p>
-        <div className="mt-2 text-[28px] font-medium tabular-nums tracking-tight text-foreground leading-none">
+    <div className="flex items-start justify-between gap-6">
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground tracking-wide">{title}</p>
+        {hint && (
+          <p className="font-display italic text-xs text-muted-foreground/80">
+            {hint}
+          </p>
+        )}
+      </div>
+      <div className="text-right space-y-1">
+        <div className="text-[26px] font-normal tabular-nums tracking-tight text-foreground leading-none">
           {value}
         </div>
-        <div className="mt-3 flex items-center gap-2 text-xs">
-          {changePercent === null ? (
-            <span className="text-muted-foreground/70 tabular-nums">
-              — {changeLabel}
-            </span>
-          ) : (
-            <>
-              <span
-                className={`inline-flex items-center gap-1 tabular-nums ${
-                  isPositive ? "text-foreground" : "text-destructive"
-                }`}
-              >
-                {isPositive ? (
-                  <TrendingUp className="h-3.5 w-3.5" strokeWidth={1.75} />
-                ) : (
-                  <TrendingDown className="h-3.5 w-3.5" strokeWidth={1.75} />
-                )}
-                {!isPositive && "−"}
-                {Math.abs(changePercent).toFixed(1)}%
-              </span>
-              <span className="text-muted-foreground">{changeLabel}</span>
-            </>
-          )}
+        <div className="flex justify-end">
+          <DeltaPill
+            changePercent={changePercent}
+            label={changeLabel}
+            compact
+          />
         </div>
-        {hint && (
-          <p className="mt-2 text-[11px] text-muted-foreground/80">{hint}</p>
-        )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
+  );
+}
+
+// LedgerCell — two small stats inside the hero tile, under the rule.
+// Reads like the two footnotes to a running total.
+function LedgerCell({
+  label,
+  value,
+  footnote,
+}: {
+  label: string;
+  value: string;
+  footnote?: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground tracking-wide">{label}</p>
+      <p className="text-base font-normal tabular-nums text-foreground leading-tight">
+        {value}
+      </p>
+      {footnote && (
+        <p className="font-display italic text-[11px] text-muted-foreground">
+          {footnote}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// DeltaPill — the trend arrow + magnitude. Hidden when there's no
+// prior-period data (shows a quiet em-dash instead of a lying 0%).
+function DeltaPill({
+  changePercent,
+  label,
+  compact = false,
+}: {
+  changePercent: number | null;
+  label: string;
+  compact?: boolean;
+}) {
+  if (changePercent === null) {
+    return (
+      <span className="text-[11px] text-muted-foreground/70 tracking-wide">
+        — {label}
+      </span>
+    );
+  }
+  const isPositive = changePercent >= 0;
+  const Icon = isPositive ? TrendingUp : TrendingDown;
+  return (
+    <span className="inline-flex items-center gap-2 text-[11px] tracking-wide">
+      <span
+        className={`inline-flex items-center gap-1 tabular-nums ${
+          isPositive ? "text-foreground" : "text-destructive"
+        }`}
+      >
+        <Icon className="h-3 w-3" strokeWidth={1.75} />
+        {!isPositive && "−"}
+        {Math.abs(changePercent).toFixed(1)}%
+      </span>
+      {!compact && <span className="text-muted-foreground">{label}</span>}
+      {compact && (
+        <span className="text-muted-foreground font-display italic">
+          {label}
+        </span>
+      )}
+    </span>
   );
 }

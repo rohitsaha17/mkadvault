@@ -153,9 +153,9 @@ export async function LocationBookingsRow({
 
   return (
     <Card>
-      <CardHeader className="pb-2 flex flex-row items-end justify-between">
-        <div className="space-y-0.5">
-          <CardTitle className="text-base font-medium tracking-tight">
+      <CardHeader className="pb-3 pt-6 flex flex-row items-end justify-between">
+        <div className="space-y-1">
+          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
             Top sites by booking value
           </CardTitle>
           <p className="text-xs text-muted-foreground">
