@@ -1,24 +1,23 @@
-// City breakdown — two side-by-side bar charts:
+// Where bookings are landing — one card per range: a night-city tile naming
+// the leading city, and a list of every city with its booked value and how
+// many of its sites are taken.
 //
-//   Left:  Booking value by city (pro-rata, scoped to the range)
-//   Right: Site occupancy by city (booked vs available)
-//
-// Both aggregate from campaign_sites → sites, so a hoarding in Pune
+// Both figures aggregate from campaign_sites → sites, so a hoarding in Pune
 // counts against Pune even when the campaign itself spans ten cities.
 // Pro-rata math uses prorateByRange() on each campaign_site's
 // display_rate_paise with the site-level start_date / end_date, then
 // falls back to the campaign dates when a site row hasn't overridden
 // them (common for campaigns booked as a single block).
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Image from "next/image";
+import { getTranslations } from "next-intl/server";
+import city from "@/assets/dashboard/city-night.webp";
+import { Card } from "@/components/ui/card";
+import { IconTile } from "@/components/dashboard/IconTile";
 import { createClient } from "@/lib/supabase/server";
 import { inr } from "@/lib/utils";
 import { prorateByRange, daysInRange } from "@/lib/utils/date-ranges";
-import {
-  CityBookingsChart,
-  CityOccupancyChart,
-} from "@/components/dashboard/DashboardCharts";
 
-const TOP_N = 10;
+const TOP_N = 7;
 
 export async function CityBookingsRow({
   orgId,
@@ -30,6 +29,7 @@ export async function CityBookingsRow({
   to: string;
 }) {
   const supabase = await createClient();
+  const t = await getTranslations("dashboard");
 
   // Pull campaign_sites that could touch the range + the parent
   // campaign (for status gating, dates, pricing_type, total value) and
@@ -154,94 +154,142 @@ export async function CityBookingsRow({
     }
   }
 
-  const cityValueSorted = [...cityValue.entries()]
-    .map(([city, value]) => ({ city, value }))
-    .sort((a, b) => b.value - a.value);
-
-  // Collapse the tail into "Others" so the chart stays readable.
-  const topCities = cityValueSorted.slice(0, TOP_N);
-  const tail = cityValueSorted.slice(TOP_N);
-  if (tail.length > 0) {
-    const tailTotal = tail.reduce((s, r) => s + r.value, 0);
-    topCities.push({ city: `Others (${tail.length})`, value: tailTotal });
-  }
-
-  // Occupancy per city (headcount of sites by status).
-  const cityOccupancy = new Map<
-    string,
-    { booked: number; available: number }
-  >();
+  // Occupancy per city (headcount of sites by status). Maintenance, blocked
+  // and expired sites stay out of it — see the KpiRow note on the denominator.
+  const cityOccupancy = new Map<string, { booked: number; total: number }>();
   for (const s of (allSites ?? []) as Array<{
     city: string | null;
     status: string | null;
   }>) {
-    const city = s.city?.trim() || "Unknown";
-    const bucket = cityOccupancy.get(city) ?? { booked: 0, available: 0 };
+    if (s.status !== "booked" && s.status !== "available") continue;
+    const name = s.city?.trim() || "Unknown";
+    const bucket = cityOccupancy.get(name) ?? { booked: 0, total: 0 };
+    bucket.total += 1;
     if (s.status === "booked") bucket.booked += 1;
-    else if (s.status === "available") bucket.available += 1;
-    // Sites in maintenance/blocked/expired are excluded from the
-    // occupancy bar — see KpiRow comment on the denominator.
-    cityOccupancy.set(city, bucket);
+    cityOccupancy.set(name, bucket);
   }
-  const occupancyRows = [...cityOccupancy.entries()]
-    .map(([city, v]) => ({ city, ...v, total: v.booked + v.available }))
-    .filter((r) => r.total > 0)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, TOP_N);
 
-  // Chart data must be in the order the chart expects for the Y-axis to
-  // show biggest at the top. We feed smallest→largest so recharts' bottom-
-  // up Y-axis puts the biggest city on top.
-  const valueData = topCities.map(({ city, value }) => ({
-    city,
-    value,
-    sites: cityOccupancy.get(city)?.booked ?? 0,
-  }));
-  valueData.reverse();
-  const occupancyData = occupancyRows.map(({ city, booked, available }) => ({
-    city,
-    booked,
-    available,
-  }));
-  occupancyData.reverse();
+  const cities = [...new Set([...cityValue.keys(), ...cityOccupancy.keys()])]
+    .map((name) => ({
+      name,
+      value: cityValue.get(name) ?? 0,
+      booked: cityOccupancy.get(name)?.booked ?? 0,
+      total: cityOccupancy.get(name)?.total ?? 0,
+    }))
+    .sort((a, b) => b.value - a.value || b.total - a.total);
+
+  // Fold the tail into one row so the list stays readable.
+  const cityRows = cities.slice(0, TOP_N);
+  const rest = cities.slice(TOP_N);
+  if (rest.length > 0) {
+    cityRows.push({
+      name: t("more_cities", { count: rest.length }),
+      value: rest.reduce((s, c) => s + c.value, 0),
+      booked: rest.reduce((s, c) => s + c.booked, 0),
+      total: rest.reduce((s, c) => s + c.total, 0),
+    });
+  }
+
+  const lead = cities[0] && cities[0].value > 0 ? cities[0] : null;
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <p className="text-xs text-muted-foreground">Geography</p>
-        <h2 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
-          Where bookings are landing
-        </h2>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-3 space-y-1 pt-5 px-5">
-            <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-              Booked value by city
-            </CardTitle>
-            <p className="text-xs text-muted-foreground tabular-nums">
-              {inr(totalValue)} across {cityValue.size}{" "}
-              {cityValue.size === 1 ? "city" : "cities"} in this window
+    <Card className="gap-0 overflow-hidden rounded-3xl p-0 py-0 lg:grid lg:grid-cols-12">
+      <div className="dark relative isolate flex min-h-72 flex-col justify-between overflow-hidden bg-black p-5 text-foreground sm:p-6 lg:col-span-5">
+        <Image
+          src={city}
+          alt=""
+          fill
+          sizes="(min-width: 64rem) 470px, 100vw"
+          className="-z-10 object-cover object-bottom"
+        />
+        <span
+          aria-hidden
+          className="absolute inset-0 -z-10 bg-gradient-to-b from-black via-black/35 to-black/20"
+        />
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1.5">
+            <h3 className="text-xl font-semibold">{t("cities_title")}</h3>
+            <p className="text-sm text-white/70">
+              {t("cities_sub", {
+                value: inr(totalValue),
+                count: cityValue.size,
+              })}
             </p>
-          </CardHeader>
-          <CardContent className="pb-5 px-5">
-            <CityBookingsChart data={valueData} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3 space-y-1 pt-5 px-5">
-            <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-              Site occupancy by city
-            </CardTitle>
-            <p className="text-xs text-muted-foreground tabular-nums">
-              {occupancyRows.length} cities · booked against available right now
+          </div>
+          <IconTile name="pin" />
+        </div>
+        {lead && (
+          <div className="glass mt-24 w-fit max-w-full rounded-2xl px-4 py-3">
+            <p className="text-sm text-white/75">{lead.name}</p>
+            <p className="figure mt-1.5 text-2xl text-white">
+              {inr(lead.value)}
             </p>
-          </CardHeader>
-          <CardContent className="pb-5 px-5">
-            <CityOccupancyChart data={occupancyData} />
-          </CardContent>
-        </Card>
+            <p className="mt-1.5 text-xs text-volt">
+              {t("city_share", {
+                percent: Math.round((lead.value / totalValue) * 100),
+              })}
+            </p>
+          </div>
+        )}
       </div>
-    </div>
+
+      <div className="p-5 sm:p-6 lg:col-span-7">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-xs text-muted-foreground">
+          <span>{t("city_list_label")}</span>
+          <span className="flex gap-4">
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-4 rounded-full bg-chart-1" />
+              {t("booked")}
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="hatch h-2 w-4 rounded-full bg-muted" />
+              {t("open")}
+            </span>
+          </span>
+        </div>
+        {cityRows.length === 0 ? (
+          <p className="py-16 text-center text-sm text-muted-foreground">
+            {t("no_sites_yet")}
+          </p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {cityRows.map((c) => (
+              <li key={c.name} className="py-3 last:pb-0">
+                <div className="flex items-baseline justify-between gap-4">
+                  <p className="min-w-0 truncate text-sm font-medium">
+                    {c.name}
+                    {c.total > 0 && (
+                      <span className="ml-2 font-normal text-xs text-muted-foreground">
+                        {t("sites_booked", {
+                          booked: c.booked,
+                          total: c.total,
+                        })}
+                      </span>
+                    )}
+                  </p>
+                  <p
+                    className={
+                      c.value > 0
+                        ? "shrink-0 text-sm font-semibold tabular-nums"
+                        : "shrink-0 text-sm text-muted-foreground"
+                    }
+                  >
+                    {inr(c.value)}
+                  </p>
+                </div>
+                {c.total > 0 && (
+                  <div className="hatch mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-chart-1"
+                      style={{ width: `${(c.booked / c.total) * 100}%` }}
+                    />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
   );
 }

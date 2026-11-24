@@ -1,32 +1,24 @@
-// Two charts: 12-month Revenue vs Cost + 6-month Cash Flow.
-// Rendered under its own Suspense boundary — slow aggregation
-// queries here don't hold up KPI cards or other rows.
-import { format, parseISO } from "date-fns";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { createClient } from "@/lib/supabase/server";
+// Two charts: revenue vs cost, and cash flow. Own Suspense boundary, so slow
+// aggregation here never holds up the KPI cards.
+import { getLocale, getTranslations } from "next-intl/server";
 import {
-  RevenueCostChart,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   CashFlowChart,
+  RevenueCostChart,
 } from "@/components/dashboard/DashboardCharts";
-import { getTranslations } from "next-intl/server";
-
-function monthKey(dateStr: string): string {
-  return format(parseISO(dateStr), "MMM yy");
-}
-
-// Build the list of month-labels covered by [from..to], up to a cap so
-// a 10-year range doesn't turn into 120 cramped columns.
-function monthKeysInRange(from: string, to: string, maxBuckets = 24): string[] {
-  const start = parseISO(from);
-  const end = parseISO(to);
-  const keys: string[] = [];
-  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-  while (cursor <= end && keys.length < maxBuckets) {
-    keys.push(format(cursor, "MMM yy"));
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-  return keys;
-}
+import { createClient } from "@/lib/supabase/server";
+import { inr } from "@/lib/utils";
+import {
+  bucketUnit,
+  buildTimeBuckets,
+  sumIntoBuckets,
+  todayInIndia,
+} from "@/lib/utils/time-buckets";
 
 export async function ChartsRow({
   orgId,
@@ -38,12 +30,12 @@ export async function ChartsRow({
   to: string;
 }) {
   const supabase = await createClient();
-  const tDash = await getTranslations("dashboard");
+  const t = await getTranslations("dashboard");
+  const locale = await getLocale();
 
-  // Four queries in parallel. Revenue uses invoice SUBTOTAL (taxable
-  // value) — GST is a pass-through and shouldn't inflate revenue.
-  // Costs combine contract_payments AND paid site_expenses so the
-  // charts match the KPI cards.
+  // Revenue uses invoice SUBTOTAL (taxable value) — GST is a pass-through.
+  // Costs combine contract_payments AND paid site_expenses so the charts
+  // match the KPI cards.
   const [
     { data: rangeInvoices },
     { data: rangeContractCosts },
@@ -80,70 +72,155 @@ export async function ChartsRow({
       .lte("payment_date", to),
   ]);
 
-  const monthKeys = monthKeysInRange(from, to);
-  const revenueMap = new Map<string, number>();
-  for (const row of (rangeInvoices ?? []) as Array<{ invoice_date: string; subtotal_paise: number | null }>) {
-    const key = monthKey(row.invoice_date);
-    revenueMap.set(key, (revenueMap.get(key) ?? 0) + (row.subtotal_paise ?? 0));
-  }
-  const costsMap = new Map<string, number>();
-  for (const row of (rangeContractCosts ?? []) as Array<{ payment_date: string | null; amount_paid_paise: number | null }>) {
-    if (!row.payment_date) continue;
-    const key = monthKey(row.payment_date);
-    costsMap.set(key, (costsMap.get(key) ?? 0) + (row.amount_paid_paise ?? 0));
-  }
-  for (const row of (rangeExpenseCosts ?? []) as Array<{ paid_at: string | null; amount_paise: number | null }>) {
-    if (!row.paid_at) continue;
-    // paid_at is a full ISO timestamptz; slice to the date before
-    // bucketing so timezones can't move an expense to a different month.
-    const key = monthKey(row.paid_at.slice(0, 10));
-    costsMap.set(key, (costsMap.get(key) ?? 0) + (row.amount_paise ?? 0));
-  }
-  const chartData = monthKeys.map((month) => ({
-    month,
-    revenue: revenueMap.get(month) ?? 0,
-    costs: costsMap.get(month) ?? 0,
-  }));
+  const toRows = (
+    rows: Array<Record<string, unknown>> | null,
+    dateKey: string,
+    valueKey: string,
+  ) =>
+    (rows ?? []).map((r) => ({
+      date: r[dateKey] as string | null,
+      value: (r[valueKey] as number | null) ?? 0,
+    }));
 
-  const inflowMap = new Map<string, number>();
-  for (const row of (rangePayments ?? []) as Array<{ payment_date: string; amount_paise: number }>) {
-    const key = monthKey(row.payment_date);
-    inflowMap.set(key, (inflowMap.get(key) ?? 0) + (row.amount_paise ?? 0));
-  }
-  const cashFlowData = monthKeys.map((month) => ({
-    month,
-    inflow: inflowMap.get(month) ?? 0,
-    outflow: costsMap.get(month) ?? 0,
-  }));
+  const buckets = buildTimeBuckets({
+    from,
+    to,
+    today: todayInIndia(),
+    locale,
+  });
+  const revenueRows = toRows(rangeInvoices, "invoice_date", "subtotal_paise");
+  const costRows = [
+    ...toRows(rangeContractCosts, "payment_date", "amount_paid_paise"),
+    ...toRows(rangeExpenseCosts, "paid_at", "amount_paise"),
+  ];
+  const inflowRows = toRows(rangePayments, "payment_date", "amount_paise");
+  const revenue = sumIntoBuckets(buckets, revenueRows);
+  const cost = sumIntoBuckets(buckets, costRows);
+  const inflow = sumIntoBuckets(buckets, inflowRows);
+
+  // Legend totals come from the rows, not the bars, so they match the KPI
+  // cards even when a very long range only draws its most recent months.
+  const total = (rows: Array<{ value: number }>) =>
+    rows.reduce((s, r) => s + r.value, 0);
+
+  // A future bucket is null unless something is already dated into it (an
+  // advance invoice, for example), which is worth showing.
+  const point = (value: number, future: boolean) =>
+    future && value === 0 ? null : value;
+
+  const grain =
+    buckets[0] && buckets[0].start > from
+      ? t("last_n_months", { count: buckets.length })
+      : {
+          day: t("by_day"),
+          week: t("by_week"),
+          month: t("by_month"),
+        }[bucketUnit(from, to)];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <Card>
-        <CardHeader className="pb-3 space-y-1 pt-5 px-5">
-          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-            {tDash("revenue_vs_cost")}
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Taxable revenue against paid cost, by month
-          </p>
-        </CardHeader>
-        <CardContent className="pb-5 px-5">
-          <RevenueCostChart data={chartData} />
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+      <Card className="rounded-3xl xl:col-span-3">
+        <ChartHeader
+          title={t("revenue_vs_cost")}
+          subtitle={`${t("revenue_vs_cost_sub")} · ${grain}`}
+          legend={[
+            {
+              label: t("revenue"),
+              value: inr(total(revenueRows)),
+              swatch: "bg-chart-1",
+            },
+            {
+              label: t("cost"),
+              value: inr(total(costRows)),
+              swatch: "bg-chart-2",
+            },
+          ]}
+        />
+        <CardContent>
+          <RevenueCostChart
+            data={buckets.map((b, i) => ({
+              label: b.label,
+              revenue: point(revenue[i], b.future),
+              cost: point(cost[i], b.future),
+            }))}
+            labels={{
+              caption: t("revenue_vs_cost"),
+              revenue: t("revenue"),
+              cost: t("cost"),
+              net: t("net"),
+            }}
+          />
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader className="pb-3 space-y-1 pt-5 px-5">
-          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-            {tDash("cash_flow")}
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Money in from clients against money out to payees
-          </p>
-        </CardHeader>
-        <CardContent className="pb-5 px-5">
-          <CashFlowChart data={cashFlowData} />
+
+      <Card className="rounded-3xl xl:col-span-2">
+        <ChartHeader
+          title={t("cash_flow")}
+          subtitle={`${t("cash_flow_sub")} · ${grain}`}
+          legend={[
+            {
+              label: t("inflow"),
+              value: inr(total(inflowRows)),
+              swatch: "bg-chart-1",
+            },
+            {
+              label: t("outflow"),
+              value: inr(total(costRows)),
+              swatch: "bg-chart-2",
+            },
+          ]}
+        />
+        <CardContent>
+          <CashFlowChart
+            data={buckets.map((b, i) => ({
+              label: b.label,
+              inflow: point(inflow[i], b.future),
+              outflow: point(cost[i], b.future),
+            }))}
+            labels={{
+              caption: t("cash_flow"),
+              inflow: t("inflow"),
+              outflow: t("outflow"),
+              net: t("net"),
+            }}
+          />
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function ChartHeader({
+  title,
+  subtitle,
+  legend,
+}: {
+  title: string;
+  subtitle: string;
+  legend: Array<{ label: string; value: string; swatch: string }>;
+}) {
+  return (
+    <CardHeader className="gap-4">
+      <div className="space-y-1">
+        <CardTitle className="text-xl">{title}</CardTitle>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
+      </div>
+      <ul className="flex flex-wrap gap-x-6 gap-y-2">
+        {legend.map((item) => (
+          <li key={item.label}>
+            <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span
+                aria-hidden
+                className={`size-2.5 rounded-[3px] ${item.swatch}`}
+              />
+              {item.label}
+            </span>
+            <span className="figure mt-1.5 block text-xl text-foreground">
+              {item.value}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </CardHeader>
   );
 }

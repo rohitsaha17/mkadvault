@@ -31,13 +31,15 @@ export function DashboardShell({ profile, email, children }: DashboardShellProps
       {/* Right column: top header + scrollable page content */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar profile={profile} email={email} />
-        {/* Subtle gradient backdrop behind content to add depth */}
         <main className="relative flex-1 overflow-y-auto">
+          {/* Soft lime light falling onto the top of the page. The content is
+              `relative` so it paints over this without a stacking context,
+              which would trap pop-ups underneath the top bar. */}
           <div
             aria-hidden
-            className="pointer-events-none sticky top-0 -mb-px h-px w-full bg-gradient-to-b from-background to-transparent"
+            className="app-backdrop pointer-events-none absolute inset-x-0 top-0 h-[520px]"
           />
-          <div className="mx-auto w-full max-w-[1600px] p-4 md:p-6 lg:p-8 page-transition">
+          <div className="relative mx-auto w-full max-w-[1600px] p-4 md:p-6 lg:p-8 page-transition">
             {children}
           </div>
         </main>

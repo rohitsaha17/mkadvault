@@ -259,7 +259,7 @@ function QuickLink({
     <Link href={href}>
       <Button
         variant="outline"
-        className="h-auto w-full justify-between px-4 py-3 text-left hover:bg-muted/50"
+        className="h-auto w-full justify-between rounded-xl px-4 py-3 text-left hover:bg-muted/50"
       >
         <span className="flex flex-col">
           <span className="text-sm font-medium text-foreground">

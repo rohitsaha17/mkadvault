@@ -10,20 +10,24 @@
 // still live in-file because they're much smaller.
 
 import { Suspense } from "react";
-import { setRequestLocale } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
-import { format, addDays, parseISO } from "date-fns";
+import { format, addDays } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
 import { autoCompletePastDueCampaigns } from "@/lib/campaigns/auto-complete";
+import { loadPayablesSummary } from "@/lib/payables";
+import { OPEN_INVOICE_STATUSES, summariseReceivables } from "@/lib/receivables";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 import {
   KPICardSkeleton,
   ChartSkeleton,
   TableSkeleton,
 } from "@/components/shared/PageSkeleton";
 import { KpiRow } from "@/components/dashboard/sections/KpiRow";
-import { BookingsRow } from "@/components/dashboard/sections/BookingsRow";
+import { HeroStats } from "@/components/dashboard/sections/HeroStats";
+import { LiveBoard } from "@/components/dashboard/sections/LiveBoard";
 import { ChartsRow } from "@/components/dashboard/sections/ChartsRow";
 import { SecondaryRow } from "@/components/dashboard/sections/SecondaryRow";
 import { SitesRow } from "@/components/dashboard/sections/SitesRow";
@@ -31,6 +35,8 @@ import { AlertsRow } from "@/components/dashboard/sections/AlertsRow";
 import { CityBookingsRow } from "@/components/dashboard/sections/CityBookingsRow";
 import { LocationBookingsRow } from "@/components/dashboard/sections/LocationBookingsRow";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
+import { HeroBanner } from "@/components/dashboard/HeroBanner";
+import { IconTile, type IconName } from "@/components/dashboard/IconTile";
 import { resolveDashboardRange } from "@/lib/utils/date-ranges";
 import type { UserRole } from "@/lib/types/database";
 
@@ -39,49 +45,64 @@ interface PageProps {
   searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }
 
-// Name the window the page is scoped to, concretely. "FY 2026-27",
-// "Oct 2026", "This quarter" — whichever reads clearest for the preset.
-// Falls back to a date-range for custom and anything we don't recognise.
+type DashboardT = Awaited<ReturnType<typeof getTranslations>>;
+
+// Dates are formatted from YYYY-MM-DD as UTC midnights so the IST offset can
+// never slide 1 April back into the previous financial year.
+function formatDay(
+  date: string,
+  locale: string,
+  options: Intl.DateTimeFormatOptions,
+): string {
+  return new Intl.DateTimeFormat(locale === "hi" ? "hi-IN" : "en-GB", {
+    ...options,
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
+}
+
+// Name the window the page is scoped to, concretely: "FY 2026-27",
+// "November 2026", a date range for anything custom.
 function dashboardHeadline(
   preset: string | undefined,
   from: string,
   to: string,
+  locale: string,
+  t: DashboardT,
 ): string {
-  // parseISO on a YYYY-MM-DD string returns LOCAL midnight — so we
-  // must read it with the local getters, not the UTC ones, or the IST
-  // offset shifts April 1 into March 31 of the previous year and we
-  // end up calling this "FY 2025-26" when the window is actually 26-27.
-  const start = parseISO(from);
-  const end = parseISO(to);
-  // Indian FY: Apr 1 → Mar 31. Named by the two calendar years it spans.
-  const fyLabel = (d: Date) => {
-    const y = d.getFullYear();
-    // Months Jan–Mar belong to FY (y-1)→y.
-    return d.getMonth() < 3 ? `FY ${y - 1}-${String(y).slice(2)}` : `FY ${y}-${String(y + 1).slice(2)}`;
-  };
+  const day = { day: "numeric", month: "short", year: "numeric" } as const;
+  // Indian FY: 1 Apr → 31 Mar, named by the two calendar years it spans.
+  const [year, month] = from.split("-").map(Number);
+  const fyStart = month < 4 ? year - 1 : year;
+  const fy = t("headline_fy", {
+    years: `${fyStart}-${String(fyStart + 1).slice(2)}`,
+  });
+
   switch (preset) {
     case "current_fy":
     case "last_fy":
-      return fyLabel(start);
+      return fy;
     case "ytd":
-      return `Year to date · ${format(end, "d MMM yyyy")}`;
+      return t("headline_ytd", { date: formatDay(to, locale, day) });
     case "this_month":
     case "last_month":
-      return format(start, "MMMM yyyy");
+      return formatDay(from, locale, { month: "long", year: "numeric" });
     case "current_quarter":
     case "last_quarter":
-      return `${fyLabel(start)} · ${format(start, "MMM")}–${format(end, "MMM")}`;
+      return `${fy}, ${formatDay(from, locale, { month: "short" })}–${formatDay(to, locale, { month: "short" })}`;
     case "today":
-      return format(start, "EEEE, d MMM yyyy");
     case "yesterday":
-      return format(start, "EEEE, d MMM yyyy");
+      return formatDay(from, locale, {
+        weekday: "long",
+        day: "numeric",
+        month: "short",
+      });
     case "this_week":
     case "last_week":
-      return `Week of ${format(start, "d MMM yyyy")}`;
+      return t("headline_week", { date: formatDay(from, locale, day) });
     case "all":
-      return "All time";
+      return t("headline_all");
     default:
-      return `${format(start, "d MMM yyyy")} – ${format(end, "d MMM yyyy")}`;
+      return `${formatDay(from, locale, day)} – ${formatDay(to, locale, day)}`;
   }
 }
 
@@ -133,37 +154,45 @@ export default async function DashboardPage({ params, searchParams }: PageProps)
     );
   }
 
-  // Full admin dashboard — streamed in sections.
+  const t = await getTranslations("dashboard");
+  const todayLabel = new Intl.DateTimeFormat(
+    locale === "hi" ? "hi-IN" : "en-IN",
+    {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      timeZone: "Asia/Kolkata",
+    },
+  ).format(new Date());
+
+  // Full admin dashboard — streamed in sections. The hero frame, artwork and
+  // heading render straight away; everything that needs a query streams in.
   return (
-    <div className="space-y-6 pb-4">
-      {/* Header renders immediately — no awaits above this point cross
-          the Suspense boundaries below, so the title paints at ~0 ms
-          even before any KPI query resolves. */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="space-y-1.5">
-          <p className="text-xs text-muted-foreground">Overview</p>
-          <h1 className="text-[32px] md:text-[40px] font-semibold leading-none text-foreground tracking-tight">
-            {dashboardHeadline(preset, rangeFrom, rangeTo)}
-          </h1>
-        </div>
-        <DashboardFilters
-          currentPreset={preset}
-          from={rangeFrom}
-          to={rangeTo}
-        />
-      </div>
+    <div className="space-y-4 pb-4">
+      <HeroBanner
+        eyebrow={todayLabel}
+        title={dashboardHeadline(preset, rangeFrom, rangeTo, locale, t)}
+        filters={
+          <DashboardFilters
+            currentPreset={preset}
+            from={rangeFrom}
+            to={rangeTo}
+          />
+        }
+        board={
+          <Suspense fallback={null}>
+            <LiveBoard orgId={orgId} />
+          </Suspense>
+        }
+        stats={
+          <Suspense fallback={<HeroStatsSkeleton />}>
+            <HeroStats orgId={orgId} from={rangeFrom} to={rangeTo} />
+          </Suspense>
+        }
+      />
 
       <Suspense fallback={<KpiRowSkeleton />}>
         <KpiRow orgId={orgId} from={rangeFrom} to={rangeTo} />
-      </Suspense>
-
-      <Suspense fallback={<BookingsRowSkeleton />}>
-        <BookingsRow
-          orgId={orgId}
-          locale={locale}
-          from={rangeFrom}
-          to={rangeTo}
-        />
       </Suspense>
 
       <Suspense fallback={<ChartsRowSkeleton />}>
@@ -200,57 +229,46 @@ export default async function DashboardPage({ params, searchParams }: PageProps)
 
 // ─── Skeletons (match the real row layouts so nothing jumps) ─────────────────
 
-function KpiRowSkeleton() {
+function HeroStatsSkeleton() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
       {Array.from({ length: 4 }).map((_, i) => (
-        <KPICardSkeleton key={i} />
+        <div
+          key={i}
+          className="glass h-[132px] animate-pulse rounded-2xl sm:h-[98px]"
+        />
       ))}
     </div>
   );
 }
-function BookingsRowSkeleton() {
+function KpiRowSkeleton() {
   return (
-    <div className="space-y-3">
-      <div className="flex items-end justify-between">
-        <div className="space-y-2">
-          <div className="h-3 w-20 bg-muted/70 rounded animate-pulse" />
-          <div className="h-5 w-64 bg-muted rounded animate-pulse" />
-        </div>
-        <div className="h-3 w-32 bg-muted/70 rounded animate-pulse" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <KPICardSkeleton key={i} />
-        ))}
-      </div>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <KPICardSkeleton key={i} className="h-[248px] rounded-3xl" />
+      ))}
     </div>
   );
 }
 function ChartsRowSkeleton() {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <ChartSkeleton />
-      <ChartSkeleton />
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+      <ChartSkeleton className="rounded-3xl xl:col-span-3" />
+      <ChartSkeleton className="rounded-3xl xl:col-span-2" />
     </div>
   );
 }
 function CityRowSkeleton() {
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <ChartSkeleton />
-      <ChartSkeleton />
-    </div>
-  );
+  return <ChartSkeleton className="rounded-3xl" />;
 }
 function LocationRowSkeleton() {
   return <TableSkeleton rows={8} cols={5} />;
 }
 function SecondaryRowSkeleton() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}>
+        <Card key={i} className="h-72 rounded-3xl">
           <CardContent className="pt-5">
             <div className="h-4 w-24 bg-muted rounded animate-pulse mb-3" />
             <div className="space-y-2">
@@ -306,7 +324,6 @@ async function RoleSpecificDashboard({
   const now = new Date();
   const todayStr = format(now, "yyyy-MM-dd");
   const weekEnd = format(addDays(now, 7), "yyyy-MM-dd");
-  const thirtyDaysFromNow = addDays(now, 30).toISOString();
 
   const greeting = profile.full_name
     ? `Welcome back, ${profile.full_name}`
@@ -411,31 +428,34 @@ async function RoleSpecificDashboard({
       <RoleWrapper
         greeting={greeting}
         role={role === "manager" ? "Manager" : "Executive"}
+        boardOrgId={orgId}
       >
         {/* Primary booking strip — biggest numbers, four wide cards. */}
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2">
-            Bookings
-          </p>
+          <h3 className="mb-3 text-xl font-semibold">Bookings</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <SimpleStatCard
-              label="New This Month"
+              icon="coins"
+              label="New this month"
               value={fmtInr(newThisMonthValue)}
               subtitle={`${newThisMonthCount} ${newThisMonthCount === 1 ? "campaign" : "campaigns"}`}
               highlight
             />
             <SimpleStatCard
-              label="Live Booked Value"
+              icon="megaphone"
+              label="Live booked value"
               value={fmtInr(livePipelineValue)}
               subtitle={`${live} running now`}
               highlight
             />
             <SimpleStatCard
-              label="Upcoming (30d)"
+              icon="calendar"
+              label="Upcoming (30 days)"
               value={String(upcomingCount)}
               subtitle={fmtInr(upcomingValue)}
             />
             <SimpleStatCard
+              icon="bell"
               label="Ending in 7 days"
               value={String(endingSoon)}
               subtitle={endingSoon > 0 ? "Needs renewal" : "Nothing closing"}
@@ -445,24 +465,26 @@ async function RoleSpecificDashboard({
 
         {/* Operations strip — mountings & site availability. */}
         <div className="mt-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2">
-            Operations
-          </p>
+          <h3 className="mb-3 text-xl font-semibold">Operations</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <SimpleStatCard
-              label="Available Sites"
+              icon="hoarding"
+              label="Available sites"
               value={String((availableSites ?? []).length)}
             />
             <SimpleStatCard
-              label="Mountings Today"
+              icon="pin"
+              label="Mountings today"
               value={String((todayMountings ?? []).length)}
             />
             <SimpleStatCard
-              label="Mountings This Week"
+              icon="calendar"
+              label="Mountings this week"
               value={String((weekMountings ?? []).length)}
             />
             <SimpleStatCard
-              label="Under Maintenance"
+              icon="hoarding"
+              label="Under maintenance"
               value={String((maintenanceSites ?? []).length)}
             />
           </div>
@@ -472,35 +494,20 @@ async function RoleSpecificDashboard({
   }
 
   if (role === "accounts") {
-    const [{ data: overdueInvoices }, { data: payablesDue }] = await Promise.all([
+    const [{ data: openInvoices, error: receivablesError }, payables] = await Promise.all([
       supabase
         .from("invoices")
-        .select("balance_due_paise, due_date")
+        .select("balance_due_paise, due_date, status")
         .eq("organization_id", orgId)
-        .in("status", ["sent", "partially_paid", "overdue"])
+        .in("status", OPEN_INVOICE_STATUSES)
         .is("deleted_at", null),
-      supabase
-        .from("contract_payments")
-        .select("amount_due_paise")
-        .eq("organization_id", orgId)
-        .in("status", ["upcoming", "due", "overdue"])
-        .lte("due_date", thirtyDaysFromNow),
+      loadPayablesSummary(supabase, todayInIndia()),
     ]);
 
-    const totalReceivable = (overdueInvoices ?? []).reduce(
-      (s, i) => s + (i.balance_due_paise ?? 0),
-      0,
-    );
-    const overdueCount = (overdueInvoices ?? []).filter((i) => {
-      const daysOverdue = Math.floor(
-        (now.getTime() - parseISO(i.due_date).getTime()) / (1000 * 60 * 60 * 24),
-      );
-      return daysOverdue > 0;
-    }).length;
-    const totalPayable = (payablesDue ?? []).reduce(
-      (s, p) => s + (p.amount_due_paise ?? 0),
-      0,
-    );
+    // null = couldn't be read. Shown as "—", never as ₹0.
+    const receivables = receivablesError
+      ? null
+      : summariseReceivables(openInvoices ?? [], todayInIndia());
 
     const fmt = (p: number) =>
       new Intl.NumberFormat("en-IN", {
@@ -511,10 +518,32 @@ async function RoleSpecificDashboard({
 
     return (
       <RoleWrapper greeting={greeting} role="Accounts">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <SimpleStatCard label="Total Receivable" value={fmt(totalReceivable)} />
-          <SimpleStatCard label="Overdue Invoices" value={String(overdueCount)} />
-          <SimpleStatCard label="Payables Due (30d)" value={fmt(totalPayable)} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SimpleStatCard icon="coins" label="Total receivable" value={receivables ? fmt(receivables.outstanding) : "—"} />
+          <SimpleStatCard
+            icon="bell"
+            label="Overdue invoices"
+            value={receivables ? String(receivables.overdueCount) : "—"}
+            subtitle={receivables ? fmt(receivables.overdue) : "Couldn't load invoices"}
+          />
+          <SimpleStatCard
+            icon="receipt"
+            label="Payables due (30 days)"
+            value={payables ? fmt(payables.dueSoon) : "—"}
+            subtitle={payables ? undefined : "Couldn't load payables"}
+          />
+          <SimpleStatCard
+            icon="calendar"
+            label="Overdue payables"
+            value={payables ? fmt(payables.overdue) : "—"}
+            subtitle={
+              !payables
+                ? "Couldn't load payables"
+                : payables.oldestOverdue
+                  ? `${payables.overdueCount} unpaid, oldest due ${formatDay(payables.oldestOverdue, "en", { day: "numeric", month: "short", year: "numeric" })}`
+                  : "Nothing overdue"
+            }
+          />
         </div>
       </RoleWrapper>
     );
@@ -535,10 +564,10 @@ async function RoleSpecificDashboard({
   ]);
 
   return (
-    <RoleWrapper greeting={greeting} role="Viewer">
+    <RoleWrapper greeting={greeting} role="Viewer" boardOrgId={orgId}>
       <div className="grid grid-cols-2 gap-4">
-        <SimpleStatCard label="Total Sites" value={String((sitesAll ?? []).length)} />
-        <SimpleStatCard label="Live Campaigns" value={String((campaignsLive ?? []).length)} />
+        <SimpleStatCard icon="hoarding" label="Total sites" value={String((sitesAll ?? []).length)} />
+        <SimpleStatCard icon="megaphone" label="Live campaigns" value={String((campaignsLive ?? []).length)} />
       </div>
     </RoleWrapper>
   );
@@ -547,46 +576,62 @@ async function RoleSpecificDashboard({
 function RoleWrapper({
   greeting,
   role,
+  boardOrgId,
   children,
 }: {
   greeting: string;
   role: string;
+  // When set, the hoarding shows the live campaign count. Left out for roles
+  // whose dashboard doesn't otherwise show campaigns.
+  boardOrgId?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="p-4 sm:p-6 space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-foreground">{greeting}</h2>
-        <p className="text-sm text-muted-foreground mt-1">{role} dashboard</p>
-      </div>
+    <div className="space-y-6 pb-4">
+      <HeroBanner
+        eyebrow={`${role} dashboard`}
+        title={greeting}
+        board={
+          boardOrgId ? (
+            <Suspense fallback={null}>
+              <LiveBoard orgId={boardOrgId} />
+            </Suspense>
+          ) : undefined
+        }
+      />
       {children}
     </div>
   );
 }
 
 function SimpleStatCard({
+  icon,
   label,
   value,
   subtitle,
   highlight,
 }: {
+  icon: IconName;
   label: string;
   value: string;
   subtitle?: string;
   highlight?: boolean;
 }) {
   return (
-    <Card className={highlight ? "ring-1 ring-primary/20 bg-primary/5" : ""}>
-      <CardContent className="pt-5">
-        <p className="text-xs text-muted-foreground mb-1">{label}</p>
-        <p className="text-2xl font-bold tabular-nums text-foreground">
-          {value}
-        </p>
-        {subtitle && (
-          <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-            {subtitle}
-          </p>
-        )}
+    <Card
+      className={`h-full rounded-3xl ${highlight ? "ring-1 ring-primary/30" : ""}`}
+    >
+      <CardContent className="flex h-full flex-col justify-between gap-5">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <IconTile name={icon} size={44} />
+        </div>
+        <div>
+          <p className="figure text-2xl text-foreground sm:text-3xl">{value}</p>
+          {subtitle && (
+            <p className="mt-2 text-xs text-muted-foreground">{subtitle}</p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

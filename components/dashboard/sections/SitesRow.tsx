@@ -22,12 +22,18 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { getTranslations } from "next-intl/server";
+import { Link } from "@/i18n/navigation";
+import { SiteCode } from "@/components/dashboard/SiteCode";
+import { SiteGlyph } from "@/components/dashboard/SiteGlyph";
+import { cn, inr } from "@/lib/utils";
 import { prorateByRange, daysInRange } from "@/lib/utils/date-ranges";
 
 interface SiteProfitRow {
   id: string;
   name: string;
   site_code: string;
+  media_type: string | null;
+  status: string | null;
   revenue: number;
   costs: number;
   profit: number;
@@ -87,7 +93,7 @@ export async function SitesRow({
       .is("deleted_at", null),
     supabase
       .from("sites")
-      .select("id, name, site_code")
+      .select("id, name, site_code, media_type, status")
       .eq("organization_id", orgId)
       .is("deleted_at", null),
   ]);
@@ -200,7 +206,13 @@ export async function SitesRow({
   }
 
   const siteProfits: SiteProfitRow[] = (
-    (siteRows ?? []) as Array<{ id: string; name: string; site_code: string }>
+    (siteRows ?? []) as Array<{
+      id: string;
+      name: string;
+      site_code: string;
+      media_type: string | null;
+      status: string | null;
+    }>
   ).map((s) => {
     const revenue = siteRevenue.get(s.id) ?? 0;
     const costs = siteCosts.get(s.id) ?? 0;
@@ -208,6 +220,8 @@ export async function SitesRow({
       id: s.id,
       name: s.name,
       site_code: s.site_code,
+      media_type: s.media_type,
+      status: s.status,
       revenue,
       costs,
       profit: revenue - costs,
@@ -231,108 +245,111 @@ export async function SitesRow({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card>
-        <CardHeader className="pb-3 pt-5 px-5 space-y-1">
-          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-            {tDash("top_sites")}
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Pro-rated to the window
-          </p>
-        </CardHeader>
-        <CardContent className="pb-5 px-5">
-          <SiteTable sites={top5Sites} labels={labels} />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-3 pt-5 px-5 space-y-1">
-          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-            {tDash("bottom_sites")}
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Lowest profit in the window
-          </p>
-        </CardHeader>
-        <CardContent className="pb-5 px-5">
-          <SiteTable sites={bottom5Sites} isBottom labels={labels} />
-        </CardContent>
-      </Card>
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <SitePanel
+        title={tDash("top_sites")}
+        subtitle={tDash("top_booked_sub")}
+        sites={top5Sites}
+        labels={labels}
+      />
+      <SitePanel
+        title={tDash("bottom_sites")}
+        subtitle={tDash("bottom_sites_sub")}
+        sites={bottom5Sites}
+        labels={labels}
+      />
     </div>
   );
 }
 
-// Signature detail: the site-code chip. A tiny mono tag that reads
-// like a hoarding ID screwed to a steel frame — mono text, hairline
-// border, warm neutral background, zero fluff.
-function SiteCodeChip({ code }: { code: string }) {
-  if (!code) return null;
-  return (
-    <span className="inline-flex items-center gap-1 rounded-sm border border-border/60 bg-muted/50 px-1.5 py-[1px] font-mono text-[10px] tracking-tight text-muted-foreground">
-      <span
-        aria-hidden
-        className="h-1 w-1 rounded-full bg-primary/80"
-      />
-      {code}
-    </span>
-  );
-}
-
-function SiteTable({
+function SitePanel({
+  title,
+  subtitle,
   sites,
-  isBottom = false,
   labels,
 }: {
+  title: string;
+  subtitle: string;
   sites: SiteProfitRow[];
-  isBottom?: boolean;
-  labels: { site: string; revenue: string; costs: string; profit: string; noData: string };
+  labels: {
+    site: string;
+    revenue: string;
+    costs: string;
+    profit: string;
+    noData: string;
+  };
 }) {
-  const fmt = (p: number) =>
-    new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(p / 100);
-
-  if (sites.length === 0) {
-    return <p className="text-sm text-muted-foreground py-6 text-center">{labels.noData}</p>;
-  }
-
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-xs text-muted-foreground border-b border-border">
-          <th className="text-left pb-2 font-normal">{labels.site}</th>
-          <th className="text-right pb-2 font-normal">{labels.revenue}</th>
-          <th className="text-right pb-2 font-normal">{labels.costs}</th>
-          <th className="text-right pb-2 font-normal">{labels.profit}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {sites.map((s) => (
-          <tr key={s.id} className="border-b border-border/60 last:border-0">
-            <td className="py-3 pr-3 align-top">
-              <div className="flex items-start gap-2">
-                <SiteCodeChip code={s.site_code} />
-                <p className="text-foreground leading-tight truncate max-w-[180px]">
-                  {s.name}
-                </p>
-              </div>
-            </td>
-            <td className="py-3 text-right tabular-nums text-muted-foreground align-top">
-              {fmt(s.revenue)}
-            </td>
-            <td className="py-3 text-right tabular-nums text-muted-foreground align-top">
-              {fmt(s.costs)}
-            </td>
-            <td
-              className={`py-3 text-right font-medium tabular-nums align-top ${
-                isBottom || s.profit < 0
-                  ? "text-destructive"
-                  : "text-foreground"
-              }`}
-            >
-              {fmt(s.profit)}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Card className="rounded-3xl">
+      <CardHeader>
+        <CardTitle className="text-xl">{title}</CardTitle>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
+      </CardHeader>
+      <CardContent>
+        {sites.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            {labels.noData}
+          </p>
+        ) : (
+          <table className="w-full table-fixed text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs text-muted-foreground">
+                <th className="pb-2 text-left font-normal">{labels.site}</th>
+                <th className="hidden w-[92px] pb-2 text-right font-normal sm:table-cell">
+                  {labels.revenue}
+                </th>
+                <th className="hidden w-[92px] pb-2 text-right font-normal sm:table-cell">
+                  {labels.costs}
+                </th>
+                <th className="w-[104px] pb-2 text-right font-normal">
+                  {labels.profit}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sites.map((s) => (
+                <tr
+                  key={s.id}
+                  className="border-b border-border/70 last:border-0"
+                >
+                  <td className="py-2.5 pr-3">
+                    <Link
+                      href={`/sites/${s.id}`}
+                      className="group flex min-w-0 items-center gap-3"
+                    >
+                      <SiteGlyph
+                        type={s.media_type}
+                        lit={s.status === "booked"}
+                        className="size-9"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium group-hover:underline">
+                          {s.name}
+                        </span>
+                        <SiteCode code={s.site_code} className="mt-1" />
+                      </span>
+                    </Link>
+                  </td>
+                  <td className="hidden py-2.5 text-right text-muted-foreground sm:table-cell">
+                    {inr(s.revenue)}
+                  </td>
+                  <td className="hidden py-2.5 text-right text-muted-foreground sm:table-cell">
+                    {inr(s.costs)}
+                  </td>
+                  <td
+                    className={cn(
+                      "py-2.5 text-right font-semibold",
+                      s.profit < 0 ? "text-destructive" : "text-foreground",
+                    )}
+                  >
+                    {inr(s.profit).replace("-", "−")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
   );
 }

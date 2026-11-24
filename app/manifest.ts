@@ -19,8 +19,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/",
     scope: "/",
     display: "standalone",
-    background_color: "#0F172A",
-    theme_color: "#4F46E5",
+    background_color: "#090C09",
+    theme_color: "#090C09",
     orientation: "any",
     // The icon URLs map to app/icon.tsx + app/apple-icon.tsx (Next
     // generates the bytes via ImageResponse at request time). We

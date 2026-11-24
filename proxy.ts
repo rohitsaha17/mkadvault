@@ -310,12 +310,13 @@ export default async function proxy(request: NextRequest) {
 export const config = {
   // Run on page requests only. We explicitly exclude:
   //   - All of /_next/* (Next.js build assets, HMR, data routes)
-  //   - favicon.ico
+  //   - favicon.ico, and the generated /icon, /apple-icon and web manifest
+  //     (no file extension, so the locale rewrite used to turn them into 404s)
   //   - Static files (images, fonts, js, css, maps, manifests)
   // Without this, the proxy fires once per JS chunk / font / image on every
   // navigation and each call does a Supabase round-trip — ~10-50 extra calls
   // per page for no benefit.
   matcher: [
-    "/((?!_next|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map|woff2?|ttf|eot|txt|xml|json|mp4|webm|wav|mp3)$).*)",
+    "/((?!_next|favicon.ico|icon$|apple-icon$|manifest.webmanifest$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map|woff2?|ttf|eot|txt|xml|json|mp4|webm|wav|mp3)$).*)",
   ],
 };

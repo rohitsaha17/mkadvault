@@ -7,7 +7,6 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Calendar, ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
   DATE_RANGE_LABELS,
   DATE_RANGE_ORDER,
@@ -71,60 +70,66 @@ export function DashboardFilters({ currentPreset, from, to }: Props) {
   }
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-      <div className="relative inline-flex items-center">
-        <Calendar className="absolute left-3.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-        <select
-          value={preset}
-          onChange={onPresetChange}
-          disabled={isPending}
-          className="h-10 rounded-full border border-border bg-card pl-10 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none min-w-[200px] disabled:opacity-60"
-          aria-label="Date range preset"
-        >
-          {DATE_RANGE_ORDER.map((key) => (
-            <option key={key} value={key}>
-              {DATE_RANGE_LABELS[key]}
-            </option>
-          ))}
-        </select>
-        <ChevronDown className="absolute right-3.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+    <div className="flex flex-col items-start gap-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="relative inline-flex items-center">
+          <Calendar
+            className="pointer-events-none absolute left-4 z-10 size-4 text-volt"
+            aria-hidden
+          />
+          <select
+            value={preset}
+            onChange={onPresetChange}
+            disabled={isPending}
+            className="glass h-11 min-w-[200px] cursor-pointer appearance-none rounded-full pl-11 pr-11 text-sm font-medium text-white outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-volt/60 disabled:opacity-60 [&>option]:bg-popover [&>option]:text-popover-foreground"
+            aria-label="Date range preset"
+          >
+            {DATE_RANGE_ORDER.map((key) => (
+              <option key={key} value={key}>
+                {DATE_RANGE_LABELS[key]}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            className="pointer-events-none absolute right-4 z-10 size-4 text-white/60"
+            aria-hidden
+          />
+        </div>
+        <span className="whitespace-nowrap text-xs text-white/65">
+          {describeDateRange(from, to)}
+        </span>
       </div>
 
       {preset === "custom" && (
         <form
           onSubmit={onCustomApply}
-          className="flex items-center gap-2"
+          className="flex flex-wrap items-center gap-2"
           aria-label="Custom date range"
         >
           <input
             type="date"
             value={customFrom}
             onChange={(e) => setCustomFrom(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="glass h-10 rounded-full px-4 text-sm text-white outline-none [color-scheme:dark] focus-visible:ring-2 focus-visible:ring-volt/60"
             aria-label="From date"
           />
-          <span className="text-muted-foreground text-sm">to</span>
+          <span className="text-sm text-white/65">to</span>
           <input
             type="date"
             value={customTo}
             onChange={(e) => setCustomTo(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="glass h-10 rounded-full px-4 text-sm text-white outline-none [color-scheme:dark] focus-visible:ring-2 focus-visible:ring-volt/60"
             aria-label="To date"
           />
-          <Button
+          <button
             type="submit"
-            variant="outline"
-            size="sm"
+            className="btn-pill h-10 disabled:opacity-50"
             disabled={isPending || !customFrom || !customTo || customFrom > customTo}
           >
             Apply
-          </Button>
+          </button>
         </form>
       )}
-
-      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-        {describeDateRange(from, to)}
-      </span>
     </div>
   );
 }

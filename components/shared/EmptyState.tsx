@@ -29,7 +29,7 @@ export function EmptyState({
   const content = (
     <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
       {icon && (
-        <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/10 to-violet-500/10 text-indigo-600 dark:from-indigo-500/15 dark:to-violet-500/15 dark:text-indigo-300 ring-1 ring-inset ring-indigo-500/20">
+        <div className="mb-5 flex size-16 items-center justify-center rounded-2xl bg-[#0b0f0a] bg-[radial-gradient(circle_at_50%_115%,rgb(181_247_69/0.34),transparent_62%)] text-volt ring-1 ring-inset ring-white/10">
           {icon}
         </div>
       )}

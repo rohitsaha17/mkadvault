@@ -6,6 +6,7 @@
 // - Active state uses a left indicator rail + accent background instead of full fill
 // - Collapses to a 16px icon rail on desktop, hidden on mobile (handled by MobileSidebar)
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { Link, usePathname } from "@/i18n/navigation";
 import { useTranslations } from "next-intl";
 import {
@@ -35,6 +36,7 @@ import {
 } from "@/components/ui/tooltip";
 import { UserMenu } from "./UserMenu";
 import { BrandMark } from "@/components/shared/BrandMark";
+import trails from "@/assets/dashboard/light-trails.webp";
 import type { Profile } from "@/lib/types/database";
 
 // ─── Nav items grouped by section ─────────────────────────────────────────────
@@ -118,10 +120,25 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
     <aside
       className={cn(
         "hidden md:flex flex-col h-full relative shrink-0 transition-[width] duration-300 ease-out",
-        "bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
+        "isolate bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
         collapsed ? "w-[72px]" : "w-64"
       )}
     >
+      {/* Traffic light trails at the foot of the sidebar. Decorative: sits
+          behind everything and fades out well before the nav. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-72 overflow-hidden"
+      >
+        <Image
+          src={trails}
+          alt=""
+          fill
+          sizes="256px"
+          className="object-cover object-[62%_100%] opacity-40 mix-blend-screen [mask-image:linear-gradient(to_top,black,transparent_85%)]"
+        />
+      </div>
+
       {/* ── Brand header ───────────────────────────────────────────────── */}
       <div
         className={cn(
@@ -132,7 +149,7 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
         <BrandMark size={36} />
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-[15px] text-white truncate leading-tight">
+            <p className="font-heading font-semibold text-[17px] tracking-tight text-white truncate leading-tight">
               MK Add Vault
             </p>
             <p className="text-[11px] text-sidebar-foreground/55 mt-0.5">
@@ -148,11 +165,6 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
           <div key={section.label} className="space-y-1">
             {!collapsed && (
               <div className="flex items-center gap-2 px-3 pb-2">
-                {/* Tiny tick — the "highway marker" signature detail. */}
-                <span
-                  aria-hidden
-                  className="h-[2px] w-2 rounded-full bg-sidebar-foreground/30"
-                />
                 <p className="text-[11px] text-sidebar-foreground/55">
                   {t(section.label as "workspace" | "inventory" | "revenue" | "insights")}
                 </p>
@@ -163,10 +175,10 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
               const active = isActive(href);
               const label = t(key as keyof typeof t);
               const btnClass = cn(
-                "group relative w-full flex items-center h-9 rounded-lg text-sm transition-all",
+                "group relative w-full flex items-center h-9 rounded-xl text-sm transition-all",
                 collapsed ? "justify-center" : "gap-3 px-3",
                 active
-                  ? "bg-sidebar-accent text-white font-medium"
+                  ? "bg-gradient-to-r from-volt/20 to-volt/5 text-white font-medium ring-1 ring-inset ring-volt/20"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-white"
               );
               // Use <Link> (not router.push on click) so Next.js prefetches the
@@ -179,14 +191,10 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
                   className={btnClass}
                   prefetch
                 >
-                  {/* Active left rail indicator — solid amber, no gradient. */}
-                  {active && (
-                    <span className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-r-full bg-primary" />
-                  )}
                   <Icon
                     className={cn(
                       "h-[18px] w-[18px] shrink-0 transition-colors",
-                      active ? "text-white" : "text-sidebar-foreground/60 group-hover:text-white"
+                      active ? "text-volt" : "text-sidebar-foreground/60 group-hover:text-white"
                     )}
                     strokeWidth={active ? 2.25 : 2}
                   />
@@ -243,7 +251,7 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
             align="start"
             triggerClassName="w-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           >
-            <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/40 hover:bg-sidebar-accent/70 p-2 pr-3 transition-colors cursor-pointer">
+            <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/70 hover:bg-sidebar-accent p-2 pr-3 backdrop-blur-sm transition-colors cursor-pointer">
               <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border">
                 <AvatarImage src={profile?.avatar_url ?? undefined} />
                 <AvatarFallback className="bg-sidebar-accent text-white text-xs font-medium">

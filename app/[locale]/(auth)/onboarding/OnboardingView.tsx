@@ -123,7 +123,7 @@ export function OnboardingView({ userName }: Props) {
             onClick={() => setView("join")}
             className="group relative flex items-start gap-4 rounded-xl border border-border p-5 text-left transition-all hover:border-primary/50 hover:bg-primary/5 hover:shadow-md"
           >
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 group-hover:bg-violet-500/15">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary/15">
               <Mail className="h-6 w-6" />
             </div>
             <div>
@@ -164,8 +164,8 @@ export function OnboardingView({ userName }: Props) {
         </button>
 
         <div className="text-center py-8">
-          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-violet-500/10">
-            <Mail className="h-8 w-8 text-violet-600 dark:text-violet-400" />
+          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+            <Mail className="h-8 w-8 text-primary" />
           </div>
           <h2 className="text-lg font-semibold text-foreground">
             Waiting for an Invite

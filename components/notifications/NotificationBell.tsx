@@ -165,7 +165,7 @@ export function NotificationBell({ initialUnreadCount = 0, locale }: Props) {
       <Button
         variant="ghost"
         size="icon"
-        className="relative h-8 w-8"
+        className="relative size-9 sm:size-10 border-border bg-card text-muted-foreground hover:text-foreground"
         onClick={handleOpen}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
       >

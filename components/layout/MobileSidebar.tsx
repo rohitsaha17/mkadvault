@@ -78,11 +78,11 @@ export function MobileSidebar({ open, onClose, profile, email }: MobileSidebarPr
           <SheetTitle className="text-white text-left flex items-center gap-3">
             <BrandMark size={36} />
             <div className="min-w-0">
-              <p className="font-semibold text-[15px] tracking-tight truncate leading-tight">
-                MK ADD VAULT
+              <p className="font-heading font-semibold text-[17px] tracking-tight truncate leading-tight">
+                MK Add Vault
               </p>
-              <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-[0.14em] font-medium mt-0.5">
-                Outdoor Ad Suite
+              <p className="text-[11px] font-normal text-sidebar-foreground/55 mt-0.5">
+                Outdoor advertising
               </p>
             </div>
           </SheetTitle>
@@ -91,7 +91,7 @@ export function MobileSidebar({ open, onClose, profile, email }: MobileSidebarPr
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
           {NAV_SECTIONS.map((section) => (
             <div key={section.label} className="space-y-1">
-              <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/40">
+              <p className="px-3 pb-2 text-[11px] text-sidebar-foreground/55">
                 {t(section.label as "workspace" | "inventory" | "revenue" | "insights")}
               </p>
               {section.items.map(({ key, href, icon: Icon }) => {
@@ -103,19 +103,16 @@ export function MobileSidebar({ open, onClose, profile, email }: MobileSidebarPr
                     onClick={onClose}
                     prefetch
                     className={cn(
-                      "group relative w-full flex items-center gap-3 h-10 px-3 rounded-lg text-sm transition-all",
+                      "group relative w-full flex items-center gap-3 h-10 px-3 rounded-xl text-sm transition-all",
                       active
-                        ? "bg-sidebar-accent text-white font-medium"
+                        ? "bg-gradient-to-r from-volt/20 to-volt/5 text-white font-medium ring-1 ring-inset ring-volt/20"
                         : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-white"
                     )}
                   >
-                    {active && (
-                      <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-gradient-to-b from-indigo-400 to-violet-500" />
-                    )}
                     <Icon
                       className={cn(
                         "h-[18px] w-[18px] shrink-0",
-                        active ? "text-white" : "text-sidebar-foreground/60 group-hover:text-white"
+                        active ? "text-volt" : "text-sidebar-foreground/60 group-hover:text-white"
                       )}
                     />
                     <span className="truncate">{t(key as keyof typeof t)}</span>
@@ -137,7 +134,7 @@ export function MobileSidebar({ open, onClose, profile, email }: MobileSidebarPr
             <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/40 hover:bg-sidebar-accent/70 p-2 pr-3 transition-colors cursor-pointer">
               <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border">
                 <AvatarImage src={profile?.avatar_url ?? undefined} />
-                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+                <AvatarFallback className="bg-sidebar-accent text-white text-xs font-medium">
                   {initials}
                 </AvatarFallback>
               </Avatar>

@@ -5,16 +5,17 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Design tokens — "operations console" direction
+   Design tokens — "lit hoarding" direction
    ----------------------------------------------------------------------------
-   Reference comps (Salesforce invoices dashboard, AeuxGlobal, Kinora):
-   dark surfaces with one loud electric accent, big rounded cards,
-   sans everywhere, bold pill CTAs.
-     - Neutral palette: cool ink, zero hue cast on surfaces.
-     - Accent: electric lime. Used on primary CTAs, selection, status
-       pills, chart highlights and sparklines. Loud is the point.
-     - Radii:   12px base (lg). Cards go up to 24px (3xl).
-     - Shadows: soft ambient only.
+   Green-black surfaces, one electric-lime accent, big soft cards, pill
+   buttons. The accent means "lit": booked space, live campaigns, money in.
+     - bg-primary      always lime, always with ink text on top.
+     - text-primary    lime in dark mode, deep green in light mode. Lime text
+       border-primary  on white is only 1.4:1, so it must never be used there.
+       ring-primary
+     - volt / ink      raw lime and raw ink. Only for surfaces that stay dark
+                       (or stay lime) in BOTH themes: hero, sidebar, icon tiles.
+   Contrast of every pair was measured: text >= 4.5:1, chart marks >= 3:1.
    ───────────────────────────────────────────────────────────────────────── */
 
 @theme inline {
@@ -22,7 +23,13 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-sans);
+  --font-heading: var(--font-urbanist), var(--font-geist-sans);
+  --color-volt: #b5f745;
+  --color-ink: #0e1407;
+  --text-color-primary: var(--primary-text);
+  --text-decoration-color-primary: var(--primary-text);
+  --border-color-primary: var(--primary-line);
+  --ring-color-primary: var(--primary-line);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -63,96 +70,96 @@
 
 /* ─── LIGHT THEME ──────────────────────────────────────────────────────────── */
 :root {
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.14 0 0);
+  --background: oklch(0.969 0.006 140);
+  --foreground: oklch(0.19 0.014 145);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.14 0 0);
+  --card-foreground: oklch(0.19 0.014 145);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.14 0 0);
+  --popover-foreground: oklch(0.19 0.014 145);
 
-  /* Electric lime — the one accent. Text on primary is deep ink. */
-  --primary: oklch(0.88 0.2 128);
-  --primary-foreground: oklch(0.14 0 0);
+  --primary: oklch(0.9 0.21 128);
+  --primary-foreground: oklch(0.19 0.035 130);
+  --primary-text: oklch(0.48 0.142 138);
+  --primary-line: oklch(0.6 0.19 138);
 
-  --secondary: oklch(0.96 0 0);
-  --secondary-foreground: oklch(0.18 0 0);
+  --secondary: oklch(0.95 0.008 140);
+  --secondary-foreground: oklch(0.22 0.014 145);
 
-  --muted: oklch(0.96 0 0);
-  --muted-foreground: oklch(0.5 0 0);
+  --muted: oklch(0.953 0.008 140);
+  --muted-foreground: oklch(0.49 0.013 150);
 
-  --accent: oklch(0.96 0 0);
-  --accent-foreground: oklch(0.18 0 0);
+  --accent: oklch(0.945 0.016 132);
+  --accent-foreground: oklch(0.22 0.02 140);
 
-  --destructive: oklch(0.58 0.2 25);
+  --destructive: oklch(0.56 0.2 25);
 
-  --border: oklch(0.9 0 0);
-  --input: oklch(0.9 0 0);
-  --ring: oklch(0.88 0.2 128);
+  --border: oklch(0.908 0.008 140);
+  --input: oklch(0.89 0.009 140);
+  --ring: oklch(0.6 0.19 138);
 
-  /* Chart palette — lime lead + neutral steps. */
-  --chart-1: oklch(0.88 0.2 128);    /* lime lead */
-  --chart-2: oklch(0.7 0.005 0);     /* step 1 */
-  --chart-3: oklch(0.55 0.005 0);    /* step 2 */
-  --chart-4: oklch(0.4 0.005 0);     /* step 3 */
-  --chart-5: oklch(0.58 0.2 25);     /* reserved destructive for bad */
+  /* Charts: one accent for the series that matters, one grey for its
+     counterweight, then amber / orange / red for overdue buckets only. */
+  --chart-1: oklch(0.62 0.195 138);
+  --chart-2: oklch(0.62 0.012 150);
+  --chart-3: oklch(0.66 0.14 83);
+  --chart-4: oklch(0.65 0.17 52);
+  --chart-5: oklch(0.56 0.2 25);
 
   --radius: 0.75rem;
 
-  /* Sidebar — deep ink shell, lime tick on the active row. */
-  --sidebar: oklch(0.18 0 0);
-  --sidebar-foreground: oklch(0.82 0 0);
-  --sidebar-primary: oklch(0.88 0.2 128);
-  --sidebar-primary-foreground: oklch(0.14 0 0);
-  --sidebar-accent: oklch(0.24 0 0);
+  /* Sidebar stays green-black in both themes. */
+  --sidebar: oklch(0.172 0.012 150);
+  --sidebar-foreground: oklch(0.84 0.012 145);
+  --sidebar-primary: oklch(0.9 0.21 128);
+  --sidebar-primary-foreground: oklch(0.19 0.035 130);
+  --sidebar-accent: oklch(0.245 0.014 148);
   --sidebar-accent-foreground: oklch(1 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.88 0.2 128);
+  --sidebar-ring: oklch(0.9 0.21 128);
 }
 
 /* ─── DARK THEME ───────────────────────────────────────────────────────────── */
-/* Clean cool ink. Zero hue cast on neutrals so the lime accent stays
-   the only colour on screen. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.98 0 0);
+  --background: oklch(0.138 0.009 150);
+  --foreground: oklch(0.975 0.005 140);
 
-  --card: oklch(0.2 0 0);
-  --card-foreground: oklch(0.98 0 0);
-  --popover: oklch(0.2 0 0);
-  --popover-foreground: oklch(0.98 0 0);
+  --card: oklch(0.196 0.01 150);
+  --card-foreground: oklch(0.975 0.005 140);
+  --popover: oklch(0.215 0.011 150);
+  --popover-foreground: oklch(0.975 0.005 140);
 
-  /* Electric lime — vivid, reads like a safety vest. Primary fore
-     is deep ink so text on the lime stays legible. */
   --primary: oklch(0.9 0.21 128);
-  --primary-foreground: oklch(0.14 0 0);
+  --primary-foreground: oklch(0.19 0.035 130);
+  --primary-text: oklch(0.9 0.21 128);
+  --primary-line: oklch(0.9 0.21 128);
 
-  --secondary: oklch(0.26 0 0);
-  --secondary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.255 0.011 150);
+  --secondary-foreground: oklch(0.975 0.005 140);
 
-  --muted: oklch(0.24 0 0);
-  --muted-foreground: oklch(0.7 0 0);
+  --muted: oklch(0.245 0.011 150);
+  --muted-foreground: oklch(0.715 0.013 148);
 
-  --accent: oklch(0.26 0 0);
-  --accent-foreground: oklch(0.98 0 0);
+  --accent: oklch(0.268 0.014 146);
+  --accent-foreground: oklch(0.975 0.005 140);
 
-  --destructive: oklch(0.66 0.17 25);
+  --destructive: oklch(0.69 0.18 24);
 
-  --border: oklch(1 0 0 / 9%);
+  --border: oklch(1 0 0 / 8.5%);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.9 0.21 128);
 
-  --chart-1: oklch(0.9 0.21 128);    /* lime lead */
-  --chart-2: oklch(0.62 0 0);        /* step 1 */
-  --chart-3: oklch(0.46 0 0);        /* step 2 */
-  --chart-4: oklch(0.34 0 0);        /* step 3 */
-  --chart-5: oklch(0.66 0.17 25);    /* reserved destructive */
+  --chart-1: oklch(0.9 0.21 128);
+  --chart-2: oklch(0.6 0.012 150);
+  --chart-3: oklch(0.83 0.15 92);
+  --chart-4: oklch(0.75 0.16 58);
+  --chart-5: oklch(0.69 0.18 24);
 
-  --sidebar: oklch(0.17 0 0);
-  --sidebar-foreground: oklch(0.86 0 0);
+  --sidebar: oklch(0.162 0.011 150);
+  --sidebar-foreground: oklch(0.86 0.012 145);
   --sidebar-primary: oklch(0.9 0.21 128);
-  --sidebar-primary-foreground: oklch(0.14 0 0);
-  --sidebar-accent: oklch(0.24 0 0);
+  --sidebar-primary-foreground: oklch(0.19 0.035 130);
+  --sidebar-accent: oklch(0.24 0.014 148);
   --sidebar-accent-foreground: oklch(1 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.9 0.21 128);
@@ -178,8 +185,8 @@
 
   /* Tighter, more confident headings */
   h1, h2, h3, h4, h5, h6 {
-    @apply tracking-tight;
-    font-feature-settings: "cv11", "ss01";
+    @apply font-heading tracking-tight;
+    font-feature-settings: normal;
   }
 
   /* Tabular numerals wherever numbers matter (tables, KPIs) */
@@ -212,94 +219,168 @@
 
 /* ─── Reusable utility classes ─────────────────────────────────────────────── */
 @layer utilities {
-  /* Subtle elevated card — preferred over raw shadow-sm */
+  /* Cards. Light: white on a soft green-grey page. Dark: a faint sheen from
+     the top edge so a card reads as a lit panel, not a flat grey box. */
   .card-elevated {
     box-shadow:
-      0 1px 2px 0 oklch(0 0 0 / 0.04),
-      0 1px 3px 0 oklch(0 0 0 / 0.06);
+      0 1px 2px 0 oklch(0.2 0.02 145 / 0.04),
+      0 10px 28px -18px oklch(0.2 0.02 145 / 0.16);
   }
-
   .dark .card-elevated {
+    background-image: linear-gradient(180deg, oklch(1 0 0 / 0.045), oklch(1 0 0 / 0.008) 62%);
     box-shadow:
-      0 1px 2px 0 oklch(0 0 0 / 0.4),
-      0 0 0 1px oklch(1 0 0 / 0.04);
+      inset 0 1px 0 oklch(1 0 0 / 0.055),
+      0 14px 34px -24px oklch(0 0 0 / 0.9);
   }
 
-  /* Hair rule between related elements — thinner than the default
-     border, used for inside-card dividers. */
-  .rule-hair {
-    height: 1px;
-    background: color-mix(in oklch, var(--color-border) 90%, transparent);
+  /* Big standalone numbers: display face, proportional digits. (Tables keep
+     tabular digits so columns line up.) */
+  .figure {
+    @apply font-heading;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: proportional-nums;
+    font-feature-settings: normal;
   }
 
-  /* The signature primary CTA — big pill, lime fill, black text.
-     Mirrors the "Pay out now" / "Add Project" buttons in the comps.
-     Pair with Button variant="default" or apply standalone. */
-  .btn-pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.625rem 1.125rem;
-    border-radius: 9999px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    background: var(--color-primary);
-    color: var(--color-primary-foreground);
-    transition: background-color 150ms ease, transform 100ms ease;
+  /* Soft lime light falling onto the top of every page. */
+  .app-backdrop {
+    background:
+      radial-gradient(820px 380px at 92% -6%, color-mix(in oklch, var(--color-volt) 22%, transparent), transparent 70%),
+      radial-gradient(620px 320px at -4% 2%, color-mix(in oklch, var(--color-volt) 12%, transparent), transparent 70%);
   }
-  .btn-pill:hover {
-    background: color-mix(in oklch, var(--color-primary) 92%, white);
-  }
-  .btn-pill:active {
-    transform: translateY(0.5px);
+  .dark .app-backdrop {
+    background:
+      radial-gradient(820px 380px at 92% -6%, color-mix(in oklch, var(--color-volt) 9%, transparent), transparent 70%),
+      radial-gradient(620px 320px at -4% 2%, color-mix(in oklch, var(--color-volt) 5%, transparent), transparent 70%);
   }
 
-  /* Quiet "ghost" pill, for secondary actions in a dense card. */
+  /* The hero is dark in both themes, like a street at night. */
+  .hero-surface {
+    background:
+      radial-gradient(70% 110% at 84% 34%, rgb(181 247 69 / 0.17), transparent 62%),
+      radial-gradient(46% 80% at 0% 100%, rgb(181 247 69 / 0.1), transparent 64%),
+      linear-gradient(180deg, #0e140c, #070a06);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 30px 60px -40px rgb(0 0 0 / 0.75);
+  }
+
+  /* Frosted cell, only used on top of the hero artwork. */
+  .glass {
+    background: rgb(12 17 10 / 0.6);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    backdrop-filter: blur(16px) saturate(150%);
+  }
+
+  /* The lead KPI card: a lit panel, ink on lime in both themes. */
+  .lime-surface {
+    background: linear-gradient(140deg, #d6ff7e 0%, #b5f745 46%, #86dc2c 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.5),
+      0 18px 40px -24px rgb(134 220 44 / 0.7);
+  }
+
+  /* Hatch always means "open / not sold yet". Never decoration. */
+  .hatch {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      color-mix(in oklch, var(--foreground) 22%, transparent) 0 1.5px,
+      transparent 1.5px 6px
+    );
+  }
+
+  /* Big pill, lime fill, ink text: the primary call to action. */
+  .btn-pill,
   .btn-pill-ghost {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding: 0.5rem 0.875rem;
     border-radius: 9999px;
+    white-space: nowrap;
+    transition: background-color 150ms ease, transform 100ms ease;
+  }
+  .btn-pill {
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    background: var(--color-volt);
+    color: var(--color-ink);
+  }
+  .btn-pill:hover {
+    background: color-mix(in oklch, var(--color-volt) 86%, white);
+  }
+  .btn-pill-ghost {
+    padding: 0.5rem 0.875rem;
     font-size: 0.8125rem;
     font-weight: 500;
-    background: color-mix(in oklch, var(--color-foreground) 6%, transparent);
-    color: var(--color-foreground);
-    transition: background-color 150ms ease;
+    background: color-mix(in oklch, var(--foreground) 6%, transparent);
+    color: var(--foreground);
   }
   .btn-pill-ghost:hover {
-    background: color-mix(in oklch, var(--color-foreground) 10%, transparent);
+    background: color-mix(in oklch, var(--foreground) 11%, transparent);
   }
 
-  /* Status pill — bright accent fill with tiny black dot, matches the
-     "Unpaid 5" style in the Salesforce comp. */
-  .pill-accent {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    padding: 0.25rem 0.625rem;
-    border-radius: 9999px;
-    font-size: 0.6875rem;
-    font-weight: 500;
-    background: var(--color-primary);
-    color: var(--color-primary-foreground);
+  /* ── The hoarding ─────────────────────────────────────────────────────────
+     The artwork is laid out at its native 1536 x 1024 and scaled as one piece,
+     so the live text stays locked to the panel at every screen size. `screen`
+     drops the artwork's black background onto the hero. */
+  .hoarding-stage {
+    --s: 0.236;
+    position: absolute;
+    top: 0;
+    right: -14px;
+    width: 1536px;
+    height: 1024px;
+    transform: scale(var(--s));
+    transform-origin: top right;
+    mix-blend-mode: screen;
+    pointer-events: none;
+    /* On small screens the post would end in mid-air, so it fades into mist. */
+    mask-image: linear-gradient(to bottom, black 66%, transparent 96%);
+  }
+  @media (min-width: 40rem) {
+    .hoarding-stage { --s: 0.27; }
+  }
+  @media (min-width: 64rem) {
+    .hoarding-stage { --s: 0.315; }
+  }
+  /* Wide enough for the stat strip to be one row: plant the post in it. */
+  @media (min-width: 80rem) {
+    .hoarding-stage { --s: 0.408; top: auto; bottom: 0; transform-origin: bottom right; mask-image: none; }
+  }
+  @media (min-width: 96rem) {
+    .hoarding-stage { --s: 0.43; }
+  }
+  /* Maps an 880 x 400 box onto the lit panel's four corners in the artwork:
+     (563,368) (1418,93) (1422,556) (551,700). Re-solve if the artwork changes. */
+  .hoarding-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 880px;
+    height: 400px;
+    transform-origin: 0 0;
+    transform: matrix3d(0.50713319, -0.34296161, 0, -0.00032754, -0.05348083, 0.80016954, 0, -0.00004261, 0, 0, 1, 0, 563, 368, 0, 1);
   }
 
-  /* Soft grid backdrop used on empty states / marketing-style sections */
-  .bg-grid {
-    background-image:
-      linear-gradient(to right, color-mix(in oklch, var(--border) 60%, transparent) 1px, transparent 1px),
-      linear-gradient(to bottom, color-mix(in oklch, var(--border) 60%, transparent) 1px, transparent 1px);
-    background-size: 32px 32px;
+  /* Text on the panel fades in like a light coming on. */
+  .board-on {
+    animation: board-on 700ms ease-out both;
   }
+}
 
-  /* Radial spotlight for hero / auth backdrops */
-  .bg-spotlight {
-    background-image:
-      radial-gradient(ellipse 80% 60% at 50% -10%, color-mix(in oklch, var(--primary) 25%, transparent), transparent 70%);
-  }
+@keyframes board-on {
+  0%   { opacity: 0; }
+  35%  { opacity: 0.55; }
+  45%  { opacity: 0.2; }
+  100% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-on { animation: none; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -347,8 +428,11 @@
   100% { opacity: 1; transform: translateY(0); }
 }
 
+/* "backwards", not "both": keeping the final translateY(0) would make every
+   page a containing block, and fixed pop-ups inside it would centre on the
+   whole page instead of the screen. */
 .page-transition > * {
-  animation: page-enter 0.22s ease-out both;
+  animation: page-enter 0.22s ease-out backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

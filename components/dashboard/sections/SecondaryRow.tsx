@@ -1,196 +1,287 @@
-// Row 3: three compact cards — Receivables aging, Payables status,
-// Campaign pipeline. Own Suspense boundary; renders independently
-// of the KPI/chart rows above.
-import { parseISO, addDays } from "date-fns";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { createClient } from "@/lib/supabase/server";
-import { inr } from "@/lib/utils";
+// Money still moving: receivables by age, what's payable next, and the live
+// campaigns that end soonest. Own Suspense boundary.
+//
+// The third card used to be "Campaign pipeline", which held one number — the
+// live count — that the hero hoarding now shows. "Ending next" uses the space
+// for something to act on.
+import Image from "next/image";
+import { differenceInCalendarDays, parseISO } from "date-fns";
 import { getTranslations } from "next-intl/server";
-import type { CampaignStatus } from "@/lib/types/database";
-
-// After migration 035 the pipeline is just one bucket: live. Keep the
-// type alias for readability even with a single value — makes it
-// obvious where to extend if the team re-introduces sub-statuses.
-type PipelineStatus = "live";
+import { ArrowUpRight, CircleAlert, CircleCheck } from "lucide-react";
+import trails from "@/assets/dashboard/light-trails.webp";
+import { Link } from "@/i18n/navigation";
+import { Card, CardContent } from "@/components/ui/card";
+import { IconTile, type IconName } from "@/components/dashboard/IconTile";
+import { loadPayablesSummary } from "@/lib/payables";
+import { OPEN_INVOICE_STATUSES, summariseReceivables } from "@/lib/receivables";
+import { createClient } from "@/lib/supabase/server";
+import { cn, fmt, inr } from "@/lib/utils";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 
 export async function SecondaryRow({ orgId }: { orgId: string }) {
   const supabase = await createClient();
-  const tDash = await getTranslations("dashboard");
+  const t = await getTranslations("dashboard");
 
-  const now = new Date();
-  const thirtyDaysFromNow = addDays(now, 30).toISOString();
+  const today = todayInIndia();
 
   const [
-    { data: agingInvoices },
-    { data: payablesDueSoon },
-    { data: payablesOverdue },
-    { data: pipelineCampaigns },
+    { data: openInvoices, error: receivablesError },
+    payables,
+    { data: endingCampaigns },
   ] = await Promise.all([
     supabase
       .from("invoices")
-      .select("due_date, balance_due_paise")
+      .select("due_date, balance_due_paise, status")
       .eq("organization_id", orgId)
-      .in("status", ["sent", "partially_paid", "overdue"])
+      .in("status", OPEN_INVOICE_STATUSES)
       .is("deleted_at", null),
-    supabase
-      .from("contract_payments")
-      .select("amount_due_paise")
-      .eq("organization_id", orgId)
-      .eq("status", "upcoming")
-      .lte("due_date", thirtyDaysFromNow),
-    supabase
-      .from("contract_payments")
-      .select("amount_due_paise")
-      .eq("organization_id", orgId)
-      .eq("status", "overdue"),
+    loadPayablesSummary(supabase, today),
     supabase
       .from("campaigns")
-      .select("status, total_value_paise")
+      .select(
+        "id, campaign_name, end_date, client:clients(company_name), agency:partner_agencies!billed_agency_id(agency_name)",
+      )
       .eq("organization_id", orgId)
+      .eq("status", "live")
       .is("deleted_at", null)
-      .eq("status", "live"),
+      .lte("start_date", today)
+      .gte("end_date", today)
+      .order("end_date")
+      .limit(4),
   ]);
 
-  // Aging buckets
-  let agingCurrent = 0, aging31_60 = 0, aging61_90 = 0, aging90plus = 0;
-  for (const row of (agingInvoices ?? []) as Array<{ due_date: string; balance_due_paise: number }>) {
-    const daysOverdue = Math.floor(
-      (now.getTime() - parseISO(row.due_date).getTime()) / (1000 * 60 * 60 * 24)
-    );
-    const amount = row.balance_due_paise ?? 0;
-    if (daysOverdue <= 30) agingCurrent += amount;
-    else if (daysOverdue <= 60) aging31_60 += amount;
-    else if (daysOverdue <= 90) aging61_90 += amount;
-    else aging90plus += amount;
-  }
-  const agingTotal = agingCurrent + aging31_60 + aging61_90 + aging90plus;
+  const receivables = summariseReceivables(openInvoices ?? [], today);
+  const agingTotal = receivables.outstanding;
+  const aging = [
+    { label: t("not_due"), amount: receivables.ageing.notDue, fill: "bg-chart-1" },
+    { label: t("days_1_30"), amount: receivables.ageing.d1to30, fill: "bg-chart-3/60" },
+    { label: t("days_31_60"), amount: receivables.ageing.d31to60, fill: "bg-chart-3" },
+    { label: t("days_61_90"), amount: receivables.ageing.d61to90, fill: "bg-chart-4" },
+    { label: t("days_90_plus"), amount: receivables.ageing.d90plus, fill: "bg-chart-5" },
+  ];
 
-  const payablesDueSoonTotal = (payablesDueSoon ?? []).reduce(
-    (s, r) => s + (r.amount_due_paise ?? 0),
-    0,
-  );
-  const payablesOverdueTotal = (payablesOverdue ?? []).reduce(
-    (s, r) => s + (r.amount_due_paise ?? 0),
-    0,
-  );
-
-  const pipeline: Record<PipelineStatus, { count: number; value: number }> = {
-    live: { count: 0, value: 0 },
-  };
-  for (const row of (pipelineCampaigns ?? []) as Array<{ status: CampaignStatus; total_value_paise: number | null }>) {
-    if (row.status === "live") {
-      pipeline.live.count += 1;
-      pipeline.live.value += row.total_value_paise ?? 0;
-    }
-  }
-
-  const PIPELINE_LABELS: Record<PipelineStatus, string> = {
-    live: "Live",
-  };
-  // Live status gets a quiet pill with a lit amber dot — the one spot
-  // of accent on this card.
-  const PIPELINE_COLORS: Record<PipelineStatus, string> = {
-    live: "text-foreground bg-muted/60",
-  };
+  const ending = (endingCampaigns ?? []) as unknown as Array<{
+    id: string;
+    campaign_name: string;
+    end_date: string;
+    client: { company_name: string } | null;
+    // Set when an agency is billed instead of the client.
+    agency: { agency_name: string } | null;
+  }>;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <Card>
-        <CardHeader className="pb-3 pt-5 px-5">
-          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-            {tDash("outstanding_ar")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {/* Aging uses stepped neutrals, with the one accent reserved
-              for the 90+ bucket so the eye lands on what actually
-              needs chasing. */}
-          <AgingRow label="0–30 days" amount={agingCurrent} color="text-foreground" />
-          <AgingRow label="31–60 days" amount={aging31_60} color="text-muted-foreground" />
-          <AgingRow label="61–90 days" amount={aging61_90} color="text-muted-foreground" />
-          <AgingRow label="90+ days" amount={aging90plus} color="text-destructive" />
-          <div className="border-t border-border pt-2 mt-1">
-            <AgingRow label="Total" amount={agingTotal} color="font-medium text-foreground" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3 pt-5 px-5">
-          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-            {tDash("outstanding_payables")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="rounded-xl bg-muted/40 p-4">
-            <p className="text-xs text-muted-foreground">Due in next 30 days</p>
-            <p className="mt-1 text-lg font-medium tabular-nums text-foreground">
-              {inr(payablesDueSoonTotal)}
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {/* Receivables aging */}
+      <Card className="rounded-3xl">
+        <CardContent className="flex h-full flex-col gap-5">
+          <PanelTop icon="coins" title={t("outstanding_ar")} />
+          <div>
+            <p className="text-xs text-muted-foreground">
+              {t("total_outstanding")}
             </p>
-          </div>
-          <div
-            className={`rounded-xl p-4 ${
-              payablesOverdueTotal > 0
-                ? "bg-destructive/10 ring-1 ring-inset ring-destructive/20"
-                : "bg-muted/40"
-            }`}
-          >
-            <p className="text-xs text-muted-foreground">Overdue</p>
-            <p
-              className={`mt-1 text-lg font-medium tabular-nums ${
-                payablesOverdueTotal > 0 ? "text-destructive" : "text-foreground"
-              }`}
-            >
-              {inr(payablesOverdueTotal)}
+            <p className="figure mt-1.5 text-3xl">
+              {receivablesError ? "—" : inr(agingTotal)}
             </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3 pt-5 px-5">
-          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
-            {tDash("campaign_pipeline")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {(["live"] as PipelineStatus[]).map((s) => (
-            <div key={s} className="flex items-center justify-between gap-2">
-              <span
-                className={`text-xs px-2 py-0.5 rounded-md inline-flex items-center gap-1.5 ${PIPELINE_COLORS[s]}`}
+            {receivables.overdueCount > 0 && (
+              <Link
+                href="/billing/invoices?tab=overdue"
+                className="mt-2 inline-block text-xs font-medium text-destructive hover:underline"
               >
-                <span
-                  aria-hidden
-                  className="h-1.5 w-1.5 rounded-full bg-primary"
-                />
-                {PIPELINE_LABELS[s]}
-              </span>
-              <span className="text-sm text-foreground tabular-nums">
-                {pipeline[s].count}
-                <span className="mx-1.5 text-muted-foreground/50">·</span>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {inr(pipeline[s].value)}
-                </span>
-              </span>
+                {t("receivables_overdue", {
+                  value: inr(receivables.overdue),
+                  count: receivables.overdueCount,
+                })}
+              </Link>
+            )}
+          </div>
+          {agingTotal > 0 && (
+            <div className="flex h-2 gap-0.5 overflow-hidden rounded-full">
+              {aging
+                .filter((b) => b.amount > 0)
+                .map((b) => (
+                  <span
+                    key={b.label}
+                    className={cn("h-full min-w-1", b.fill)}
+                    style={{ width: `${(b.amount / agingTotal) * 100}%` }}
+                  />
+                ))}
             </div>
-          ))}
+          )}
+          <ul className="space-y-2.5">
+            {aging.map((b) => (
+              <li
+                key={b.label}
+                className="flex items-center justify-between text-sm"
+              >
+                <span className="flex items-center gap-2.5 text-muted-foreground">
+                  <span className={cn("size-2.5 rounded-full", b.fill)} />
+                  {b.label}
+                </span>
+                <span className="font-medium tabular-nums">
+                  {receivablesError ? "—" : inr(b.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      {/* Payables — dark in both themes, over the traffic light trails */}
+      <div className="dark relative isolate flex min-h-72 flex-col justify-between gap-5 overflow-hidden rounded-3xl bg-[#090d08] p-5 text-foreground ring-1 ring-inset ring-white/8">
+        <Image
+          src={trails}
+          alt=""
+          fill
+          sizes="(min-width: 80rem) 370px, (min-width: 48rem) 50vw, 100vw"
+          className="-z-10 object-cover object-[78%_100%] opacity-90 mix-blend-screen"
+        />
+        <div className="space-y-5">
+          <PanelTop icon="receipt" title={t("outstanding_payables")} />
+          <div>
+            <p className="text-xs text-white/70">{t("payables_due")}</p>
+            <p className="figure mt-1.5 text-3xl">
+              {payables ? inr(payables.dueSoon) : "—"}
+            </p>
+            {payables && payables.dueSoonCount > 0 && (
+              <p className="mt-2 text-xs text-white/70">
+                {t("payments_count", { count: payables.dueSoonCount })}
+              </p>
+            )}
+          </div>
+        </div>
+        {payables === null ? (
+          <p className="glass rounded-2xl p-4 text-sm text-white/80">
+            {t("payables_error")}
+          </p>
+        ) : payables.overdueCount > 0 ? (
+          <Link
+            href="/billing/payables?tab=overdue"
+            className="group flex items-center justify-between gap-3 rounded-2xl border border-destructive/55 bg-[#240b09]/90 p-4 backdrop-blur-md transition-colors hover:border-destructive"
+          >
+            <span>
+              <span className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                <CircleAlert className="size-4" aria-hidden />
+                {t("overdue")}
+              </span>
+              <span className="figure mt-2 block text-2xl text-white">
+                {inr(payables.overdue)}
+              </span>
+              <span className="mt-2 block text-xs text-white/75">
+                {t("overdue_detail", {
+                  count: payables.overdueCount,
+                  date: fmt(payables.oldestOverdue),
+                })}
+              </span>
+            </span>
+            <ArrowUpRight
+              className="size-5 shrink-0 text-white/60 transition-colors group-hover:text-white"
+              aria-hidden
+            />
+          </Link>
+        ) : (
+          <div className="glass flex items-center justify-between gap-3 rounded-2xl p-4">
+            <div>
+              <p className="text-xs text-white/70">{t("overdue")}</p>
+              <p className="figure mt-1.5 text-xl">{inr(0)}</p>
+            </div>
+            <span className="flex items-center gap-1.5 text-xs font-medium text-volt">
+              <CircleCheck className="size-4" aria-hidden />
+              {t("nothing_overdue")}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Ending next */}
+      <Card className="rounded-3xl md:col-span-2 xl:col-span-1">
+        <CardContent className="flex h-full flex-col gap-4">
+          <PanelTop icon="calendar" title={t("ending_next")} />
+          {ending.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              {t("no_endings")}
+            </p>
+          ) : (
+            <ul className="-mx-2 space-y-1">
+              {ending.map((c) => {
+                const days = differenceInCalendarDays(
+                  parseISO(c.end_date),
+                  parseISO(today),
+                );
+                const party =
+                  c.client?.company_name ?? c.agency?.agency_name ?? null;
+                return (
+                  <li key={c.id}>
+                    <Link
+                      href={`/campaigns/${c.id}`}
+                      className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-muted/60"
+                    >
+                      <span
+                        aria-hidden
+                        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-foreground/8 text-xs font-semibold"
+                      >
+                        {initials(party ?? c.campaign_name)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {c.campaign_name}
+                        </span>
+                        {party && (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {party}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-right">
+                        <span
+                          className={cn(
+                            "inline-block rounded-full px-2 py-0.5 text-xs font-medium",
+                            days <= 7
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {days === 0
+                            ? t("ends_today")
+                            : t("ends_in_days", { count: days })}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {fmt(c.end_date)}
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <Link
+            href="/campaigns?status=live"
+            className="btn-pill-ghost mt-auto w-fit"
+          >
+            {t("view_campaigns")}
+            <ArrowUpRight className="size-3.5" aria-hidden />
+          </Link>
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function AgingRow({ label, amount, color }: { label: string; amount: number; color: string }) {
+function PanelTop({ icon, title }: { icon: IconName; title: string }) {
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`tabular-nums ${color}`}>
-        {new Intl.NumberFormat("en-IN", {
-          style: "currency",
-          currency: "INR",
-          maximumFractionDigits: 0,
-        }).format(amount / 100)}
-      </span>
+    <div className="flex items-center justify-between gap-3">
+      <h3 className="text-xl font-semibold">{title}</h3>
+      <IconTile name={icon} size={46} />
     </div>
   );
+}
+
+/** Up to two initials, skipping words that don't start with a letter. */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((w) => /^\p{L}/u.test(w))
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
 }

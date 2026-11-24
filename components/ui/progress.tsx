@@ -21,7 +21,7 @@ function Progress({ className, value = 0, max = 100, ...props }: ProgressProps) 
       {...props}
     >
       <div
-        className="h-full bg-primary transition-all"
+        className="h-full rounded-full bg-chart-1 transition-all"
         style={{ width: `${percentage}%` }}
       />
     </div>

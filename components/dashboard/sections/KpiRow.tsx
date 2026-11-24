@@ -1,19 +1,23 @@
-// KPI row — top-of-dashboard strip. Four uniform cards matching the
-// reference comp vocabulary (Nexora, Donezo, AeuxGlobal): label + big
-// number + delta line + a corner sparkline showing the series the
-// figure summarises. One card — Revenue — wears the lime accent as
-// the lead moment.
+// KPI row — revenue, cost, net profit and site occupancy for the range.
 //
-// Revenue uses invoice TAXABLE VALUE (subtotal). Cost combines
-// contract_payments (paid, by payment_date) and site_expenses
-// (status=paid, by paid_at) — the finance team pays rent through
-// contracts AND files one-off payment requests, and the dashboard
-// has to see both.
-import { TrendingUp, TrendingDown } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+// Revenue is the invoice TAXABLE VALUE (subtotal), not the GST-inclusive
+// grand total — GST is a pass-through and shouldn't inflate the top line.
+// Cost combines two streams: contract_payments (status=paid, by payment_date)
+// and site_expenses (status=paid, by paid_at), because the finance team pays
+// rent through contracts AND files one-off payment requests.
+import { getLocale, getTranslations } from "next-intl/server";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { IconTile, type IconName } from "@/components/dashboard/IconTile";
+import { MiniBars, type MiniBar } from "@/components/dashboard/MiniBars";
+import { RingMeter } from "@/components/dashboard/RingMeter";
 import { createClient } from "@/lib/supabase/server";
-import { inr } from "@/lib/utils";
-import { Sparkline } from "@/components/dashboard/Sparkline";
+import { cn, inr } from "@/lib/utils";
+import {
+  buildTimeBuckets,
+  sumIntoBuckets,
+  todayInIndia,
+} from "@/lib/utils/time-buckets";
 
 export async function KpiRow({
   orgId,
@@ -25,31 +29,29 @@ export async function KpiRow({
   to: string;
 }) {
   const supabase = await createClient();
+  const t = await getTranslations("dashboard");
+  const locale = await getLocale();
 
-  // Previous period of equal length for the "vs previous" delta.
+  // The equally long window immediately before `from`..`to`, so "This month"
+  // compares to "Last month" and a custom 14-day range to the 14 days before.
   const MS_PER_DAY = 86_400_000;
   const fromMs = Date.parse(from + "T00:00:00Z");
   const toMs = Date.parse(to + "T00:00:00Z");
   const spanDays = Math.max(1, Math.floor((toMs - fromMs) / MS_PER_DAY) + 1);
-  const prevToDate = new Date(fromMs - MS_PER_DAY);
-  const prevFromDate = new Date(fromMs - spanDays * MS_PER_DAY);
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const prevFrom = iso(prevFromDate);
-  const prevTo = iso(prevToDate);
-  const paidFromTs = `${from}T00:00:00Z`;
-  const paidToTs = `${to}T23:59:59Z`;
-  const prevPaidFromTs = `${prevFrom}T00:00:00Z`;
-  const prevPaidToTs = `${prevTo}T23:59:59Z`;
+  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const prevFrom = iso(fromMs - spanDays * MS_PER_DAY);
+  const prevTo = iso(fromMs - MS_PER_DAY);
+  // site_expenses.paid_at is timestamptz, so widen both ends to the full day.
+  const dayStart = (date: string) => `${date}T00:00:00Z`;
+  const dayEnd = (date: string) => `${date}T23:59:59Z`;
 
-  // One query bank. The sparkline series need the invoice_date /
-  // payment_date column alongside the figure so we can bucket into
-  // ~12 points for the spark.
+  // Eight small queries in parallel — the row paints as fast as the slowest.
   const [
-    { data: thisInvoices },
+    { data: invoices },
     { data: prevInvoices },
-    { data: thisContractCosts },
+    { data: contractCosts },
     { data: prevContractCosts },
-    { data: thisExpenseCosts },
+    { data: expenseCosts },
     { data: prevExpenseCosts },
     { data: allSites },
     { data: bookedSites },
@@ -82,22 +84,26 @@ export async function KpiRow({
       .eq("status", "paid")
       .gte("payment_date", prevFrom)
       .lte("payment_date", prevTo),
+    // tds_paise stays out of the cost: it is withheld from the payee, not an
+    // extra outflow.
     supabase
       .from("site_expenses")
       .select("amount_paise, paid_at")
       .eq("organization_id", orgId)
       .eq("status", "paid")
-      .gte("paid_at", paidFromTs)
-      .lte("paid_at", paidToTs)
+      .gte("paid_at", dayStart(from))
+      .lte("paid_at", dayEnd(to))
       .is("deleted_at", null),
     supabase
       .from("site_expenses")
       .select("amount_paise")
       .eq("organization_id", orgId)
       .eq("status", "paid")
-      .gte("paid_at", prevPaidFromTs)
-      .lte("paid_at", prevPaidToTs)
+      .gte("paid_at", dayStart(prevFrom))
+      .lte("paid_at", dayEnd(prevTo))
       .is("deleted_at", null),
+    // The occupancy denominator leaves out maintenance / blocked / expired so
+    // a structure under repair doesn't drag the percentage down.
     supabase
       .from("sites")
       .select("id")
@@ -117,254 +123,310 @@ export async function KpiRow({
     key: K,
   ): number => (rows ?? []).reduce((s, r) => s + (r[key] ?? 0), 0);
 
-  const thisMonthRevenue = sumPaise(thisInvoices, "subtotal_paise");
-  const lastMonthRevenue = sumPaise(prevInvoices, "subtotal_paise");
-  const thisMonthCostTotal =
-    sumPaise(thisContractCosts, "amount_paid_paise") +
-    sumPaise(thisExpenseCosts, "amount_paise");
-  const lastMonthCostTotal =
+  const revenue = sumPaise(invoices, "subtotal_paise");
+  const prevRevenue = sumPaise(prevInvoices, "subtotal_paise");
+  const cost =
+    sumPaise(contractCosts, "amount_paid_paise") +
+    sumPaise(expenseCosts, "amount_paise");
+  const prevCost =
     sumPaise(prevContractCosts, "amount_paid_paise") +
     sumPaise(prevExpenseCosts, "amount_paise");
+  const netProfit = revenue - cost;
+  const margin = revenue > 0 ? (netProfit / revenue) * 100 : null;
+  // null = nothing to compare with, which reads very differently from 0%.
+  const change = (now: number, before: number) =>
+    before > 0 ? ((now - before) / before) * 100 : null;
 
-  const netProfit = thisMonthRevenue - thisMonthCostTotal;
-  const revenueChange =
-    lastMonthRevenue > 0
-      ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
-      : null;
-  const costChange =
-    lastMonthCostTotal > 0
-      ? ((thisMonthCostTotal - lastMonthCostTotal) / lastMonthCostTotal) * 100
-      : null;
-  const profitMargin =
-    thisMonthRevenue > 0 ? (netProfit / thisMonthRevenue) * 100 : null;
+  const totalSites = (allSites ?? []).length;
+  const bookedCount = (bookedSites ?? []).length;
+  const occupancy =
+    totalSites > 0 ? Math.round((bookedCount / totalSites) * 100) : 0;
 
-  const totalSiteCount = (allSites ?? []).length;
-  const bookedSiteCount = (bookedSites ?? []).length;
-  const occupancyPct =
-    totalSiteCount > 0 ? Math.round((bookedSiteCount / totalSiteCount) * 100) : 0;
-
-  // Build sparkline series — monthly buckets so a 12-month FY draws a
-  // 12-point line. Buckets use YYYY-MM keys so lexical sort === time.
-  const revenueSpark = bucketMonthly(
-    (thisInvoices ?? []) as Array<{ invoice_date: string; subtotal_paise: number | null }>,
-    (r) => r.invoice_date,
-    (r) => r.subtotal_paise ?? 0,
+  // ── Mini charts ───────────────────────────────────────────────────────────
+  const buckets = buildTimeBuckets({
+    from,
+    to,
+    today: todayInIndia(),
+    locale,
+  });
+  const revenueSeries = sumIntoBuckets(
+    buckets,
+    (invoices ?? []).map((r) => ({
+      date: r.invoice_date as string | null,
+      value: (r.subtotal_paise as number | null) ?? 0,
+    })),
   );
-  const contractCostSpark = bucketMonthly(
-    (thisContractCosts ?? []) as Array<{ payment_date: string | null; amount_paid_paise: number | null }>,
-    (r) => r.payment_date ?? "",
-    (r) => r.amount_paid_paise ?? 0,
-  );
-  const expenseCostSpark = bucketMonthly(
-    (thisExpenseCosts ?? []) as Array<{ paid_at: string | null; amount_paise: number | null }>,
-    (r) => (r.paid_at ?? "").slice(0, 10),
-    (r) => r.amount_paise ?? 0,
-  );
-  // Merge the two cost streams into one spark by month.
-  const costSpark = mergeMonthly(contractCostSpark, expenseCostSpark);
-  // Net profit spark = revenue - cost per month, for whatever months
-  // appear in either.
-  const profitSpark = diffMonthly(revenueSpark, costSpark);
+  const costSeries = sumIntoBuckets(buckets, [
+    ...(contractCosts ?? []).map((r) => ({
+      date: r.payment_date as string | null,
+      value: (r.amount_paid_paise as number | null) ?? 0,
+    })),
+    ...(expenseCosts ?? []).map((r) => ({
+      date: r.paid_at as string | null,
+      value: (r.amount_paise as number | null) ?? 0,
+    })),
+  ]);
+  const toBars = (series: number[]): MiniBar[] =>
+    buckets.map((b, i) => ({
+      label: b.label,
+      value: series[i],
+      display: money(series[i]),
+      current: b.current,
+      future: b.future,
+    }));
+  const summary = (name: string, total: number) =>
+    t("trend_summary", { name, total: money(total) });
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <KpiCard
-        label="Revenue"
-        value={inr(thisMonthRevenue)}
-        subtitle={`${thisInvoices?.length ?? 0} invoices · taxable`}
-        changePercent={revenueChange}
-        spark={revenueSpark.map((b) => b.v)}
-        accent
+        icon="coins"
+        label={t("revenue")}
+        value={money(revenue)}
+        sub={t("revenue_sub", { count: invoices?.length ?? 0 })}
+        lime
+        delta={
+          <Delta
+            change={change(revenue, prevRevenue)}
+            goodWhen="up"
+            noData={t("no_previous")}
+            suffix={t("vs_previous")}
+            lime
+          />
+        }
+        chart={
+          <MiniBars
+            bars={toBars(revenueSeries)}
+            tone="ink"
+            summary={summary(t("revenue"), revenue)}
+          />
+        }
       />
       <KpiCard
-        label="Cost"
-        value={inr(thisMonthCostTotal)}
-        subtitle="Rent paid + requests"
-        // Lower cost is a good thing, so flip the sign on the arrow.
-        changePercent={costChange === null ? null : -costChange}
-        spark={costSpark.map((b) => b.v)}
+        icon="receipt"
+        label={t("cost")}
+        value={money(cost)}
+        sub={t("cost_sub")}
+        delta={
+          <Delta
+            change={change(cost, prevCost)}
+            goodWhen="down"
+            noData={t("no_previous")}
+            suffix={t("vs_previous")}
+          />
+        }
+        chart={
+          <MiniBars
+            bars={toBars(costSeries)}
+            tone="neutral"
+            summary={summary(t("cost"), cost)}
+          />
+        }
       />
       <KpiCard
-        label="Net profit"
-        value={inr(netProfit)}
-        subtitle="Revenue − cost"
-        changePercent={profitMargin}
-        changeSuffix="margin"
-        spark={profitSpark.map((b) => b.v)}
+        icon="growth"
+        label={t("net_profit")}
+        value={money(netProfit)}
+        sub={t("profit_sub")}
+        delta={
+          margin === null ? null : (
+            <span
+              className={cn(
+                "text-xs font-medium",
+                margin < 0 ? "text-destructive" : "text-primary",
+              )}
+            >
+              {t("margin_value", { value: signed(margin) })}
+            </span>
+          )
+        }
+        chart={
+          <MiniBars
+            bars={toBars(revenueSeries.map((v, i) => v - costSeries[i]))}
+            tone="signed"
+            summary={summary(t("net_profit"), netProfit)}
+          />
+        }
       />
-      <Card className="relative overflow-hidden">
-        <CardContent className="relative p-5 space-y-3">
-          <div className="flex items-start justify-between">
-            <p className="text-xs text-muted-foreground">Site occupancy</p>
-            <span className="text-[10px] text-muted-foreground tabular-nums">
-              {totalSiteCount - bookedSiteCount} open
-            </span>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-[32px] font-semibold tabular-nums tracking-tight text-foreground leading-none">
-              {occupancyPct}%
-            </span>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {bookedSiteCount} of {totalSiteCount}
-            </span>
-          </div>
-          <OccupancyBar pct={occupancyPct} />
-        </CardContent>
+      <Card className="justify-between gap-4 rounded-3xl p-5 py-5">
+        <CardTop icon="hoarding" label={t("site_occupancy")} />
+        <div className="flex items-center gap-5">
+          <RingMeter
+            percent={occupancy}
+            label={t("sites_booked", {
+              booked: bookedCount,
+              total: totalSites,
+            })}
+          />
+          <dl className="space-y-3 text-sm">
+            <div>
+              <dt className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="size-2.5 rounded-full bg-chart-1" />
+                {t("booked")}
+              </dt>
+              <dd className="figure mt-1 text-xl">{bookedCount}</dd>
+            </div>
+            <div>
+              <dt className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="size-2.5 rounded-full bg-chart-1/20 ring-1 ring-inset ring-chart-1/40" />
+                {t("open")}
+              </dt>
+              <dd className="figure mt-1 text-xl">
+                {totalSites - bookedCount}
+              </dd>
+            </div>
+          </dl>
+        </div>
       </Card>
     </div>
   );
 }
 
-// ─── Primitives ─────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-function KpiCard({
-  label,
-  value,
-  subtitle,
-  changePercent,
-  changeSuffix = "vs previous",
-  spark,
-  accent = false,
-}: {
-  label: string;
-  value: string;
-  subtitle: string;
-  // null = no prior data; show a quiet em-dash instead of a lying 0%.
-  changePercent: number | null;
-  changeSuffix?: string;
-  spark: number[];
-  accent?: boolean;
-}) {
-  const isPositive = (changePercent ?? 0) >= 0;
-  return (
-    <Card
-      className={`relative overflow-hidden ${
-        accent ? "bg-primary text-primary-foreground border-primary" : ""
-      }`}
-    >
-      <CardContent className="relative p-5 space-y-3">
-        <div className="flex items-start justify-between">
-          <p
-            className={`text-xs ${
-              accent ? "text-primary-foreground/70" : "text-muted-foreground"
-            }`}
-          >
-            {label}
-          </p>
-          <Sparkline data={spark.length > 0 ? spark : [0, 0]} accent={accent} />
-        </div>
-        <div
-          className={`text-[32px] font-semibold tabular-nums tracking-tight leading-none ${
-            accent ? "text-primary-foreground" : "text-foreground"
-          }`}
-        >
-          {value}
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          {changePercent === null ? (
-            <span
-              className={`text-xs tabular-nums ${
-                accent ? "text-primary-foreground/70" : "text-muted-foreground/70"
-              }`}
-            >
-              — {changeSuffix}
-            </span>
-          ) : (
-            <span
-              className={`inline-flex items-center gap-1 text-xs tabular-nums ${
-                accent
-                  ? isPositive
-                    ? "text-primary-foreground"
-                    : "text-primary-foreground"
-                  : isPositive
-                    ? "text-foreground"
-                    : "text-destructive"
-              }`}
-            >
-              {isPositive ? (
-                <TrendingUp className="h-3.5 w-3.5" strokeWidth={2} />
-              ) : (
-                <TrendingDown className="h-3.5 w-3.5" strokeWidth={2} />
-              )}
-              {!isPositive && "−"}
-              {Math.abs(changePercent).toFixed(1)}%
-              <span
-                className={
-                  accent ? "text-primary-foreground/70" : "text-muted-foreground"
-                }
-              >
-                {changeSuffix}
-              </span>
-            </span>
-          )}
-          <span
-            className={`text-[11px] ${
-              accent ? "text-primary-foreground/70" : "text-muted-foreground"
-            }`}
-          >
-            {subtitle}
-          </span>
-        </div>
-      </CardContent>
-    </Card>
-  );
+/** Rupees with a true minus sign, so a loss lines up with positive figures. */
+function money(paise: number): string {
+  return inr(paise).replace("-", "−");
 }
 
-function OccupancyBar({ pct }: { pct: number }) {
-  // A segmented bar matching the "Progress" visual from the comps —
-  // ten slots so the eye reads "6 of 10 lit" instead of a pure track.
-  const lit = Math.round(pct / 10);
+function signed(percent: number): string {
+  return `${percent < 0 ? "−" : ""}${Math.abs(percent).toFixed(1)}`;
+}
+
+function CardTop({
+  icon,
+  label,
+  lime = false,
+}: {
+  icon: IconName;
+  label: string;
+  lime?: boolean;
+}) {
   return (
-    <div className="flex gap-1">
-      {Array.from({ length: 10 }).map((_, i) => (
-        <span
-          key={i}
-          className={`h-1.5 flex-1 rounded-full ${
-            i < lit ? "bg-primary" : "bg-muted"
-          }`}
-        />
-      ))}
+    <div className="flex items-start justify-between gap-3">
+      <p
+        className={cn(
+          "pt-1 text-sm font-medium",
+          lime ? "text-ink/80" : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </p>
+      <IconTile name={icon} />
     </div>
   );
 }
 
-// ─── Monthly bucketing helpers (used only by this component) ────────
+function KpiCard({
+  icon,
+  label,
+  value,
+  sub,
+  delta,
+  chart,
+  lime = false,
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+  sub: string;
+  delta: React.ReactNode;
+  chart: React.ReactNode;
+  lime?: boolean;
+}) {
+  const content = (
+    <>
+      <CardTop icon={icon} label={label} lime={lime} />
+      <div>
+        <p
+          className={cn(
+            "figure text-[32px]",
+            lime ? "text-ink" : "text-foreground",
+          )}
+        >
+          {value}
+        </p>
+        <div className="mt-2.5 flex min-h-4 flex-wrap items-center gap-x-2 gap-y-1">
+          {delta}
+        </div>
+        <p
+          className={cn(
+            "mt-1 text-xs",
+            lime ? "text-ink/70" : "text-muted-foreground",
+          )}
+        >
+          {sub}
+        </p>
+      </div>
+      {chart}
+    </>
+  );
 
-type Bucket = { k: string; v: number };
-
-function bucketMonthly<T>(
-  rows: T[],
-  dateOf: (r: T) => string,
-  valueOf: (r: T) => number,
-): Bucket[] {
-  const map = new Map<string, number>();
-  for (const r of rows) {
-    const d = dateOf(r);
-    if (!d) continue;
-    const key = d.slice(0, 7); // YYYY-MM
-    map.set(key, (map.get(key) ?? 0) + valueOf(r));
+  if (lime) {
+    return (
+      <div className="lime-surface flex flex-col justify-between gap-4 rounded-3xl p-5 text-ink">
+        {content}
+      </div>
+    );
   }
-  return Array.from(map.entries())
-    .map(([k, v]) => ({ k, v }))
-    .sort((a, b) => (a.k < b.k ? -1 : 1));
+  return (
+    <Card className="justify-between gap-4 rounded-3xl p-5 py-5">{content}</Card>
+  );
 }
 
-function mergeMonthly(a: Bucket[], b: Bucket[]): Bucket[] {
-  const map = new Map<string, number>();
-  for (const x of a) map.set(x.k, (map.get(x.k) ?? 0) + x.v);
-  for (const x of b) map.set(x.k, (map.get(x.k) ?? 0) + x.v);
-  return Array.from(map.entries())
-    .map(([k, v]) => ({ k, v }))
-    .sort((a, b) => (a.k < b.k ? -1 : 1));
-}
-
-function diffMonthly(a: Bucket[], b: Bucket[]): Bucket[] {
-  const keys = new Set<string>();
-  for (const x of a) keys.add(x.k);
-  for (const x of b) keys.add(x.k);
-  const aMap = new Map(a.map((x) => [x.k, x.v]));
-  const bMap = new Map(b.map((x) => [x.k, x.v]));
-  return Array.from(keys)
-    .sort()
-    .map((k) => ({ k, v: (aMap.get(k) ?? 0) - (bMap.get(k) ?? 0) }));
+// The arrow always shows the true direction; only the colour says whether
+// that direction is good. A rising cost points up and turns red.
+function Delta({
+  change,
+  goodWhen,
+  noData,
+  suffix,
+  lime = false,
+}: {
+  change: number | null;
+  goodWhen: "up" | "down";
+  noData: string;
+  suffix: string;
+  lime?: boolean;
+}) {
+  if (change === null) {
+    return (
+      <span
+        className={cn(
+          "text-xs",
+          lime ? "text-ink/70" : "text-muted-foreground",
+        )}
+      >
+        {noData}
+      </span>
+    );
+  }
+  const up = change >= 0;
+  const good = up === (goodWhen === "up");
+  const Arrow = up ? ArrowUpRight : ArrowDownRight;
+  return (
+    <>
+      <span
+        className={cn(
+          "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold",
+          lime
+            ? "bg-ink/12 text-ink"
+            : good
+              ? "bg-primary/15 text-primary"
+              : "bg-destructive/12 text-destructive",
+        )}
+      >
+        <Arrow className="size-3.5" strokeWidth={2.25} aria-hidden />
+        {signed(change)}%
+      </span>
+      <span
+        className={cn(
+          "text-xs",
+          lime ? "text-ink/70" : "text-muted-foreground",
+        )}
+      >
+        {suffix}
+      </span>
+    </>
+  );
 }

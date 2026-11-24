@@ -26,6 +26,7 @@ const ROUTE_TITLES: Record<string, string> = {
   clients: "clients",
   campaigns: "campaigns",
   billing: "billing",
+  finance: "finance",
   proposals: "proposals",
   reports: "reports",
   notifications: "notifications",
@@ -93,7 +94,7 @@ export function TopBar({ profile, email }: TopBarProps) {
 
         {/* ── Breadcrumb-style title ───────────────────────────────────── */}
         <div className="flex items-center gap-2 min-w-0 mr-auto">
-          <h1 className="text-[15px] font-semibold text-foreground truncate">
+          <h1 className="text-[17px] font-semibold text-foreground truncate">
             {primaryLabel}
           </h1>
           {subLabel && (
@@ -108,19 +109,19 @@ export function TopBar({ profile, email }: TopBarProps) {
 
         {/* ── Search ───────────────────────────────────────────────────── */}
         <div className="hidden sm:flex items-center relative">
-          <Search className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Search className="absolute left-4 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             type="search"
             placeholder={tCommon("search")}
-            className="pl-9 h-9 w-48 lg:w-72 text-sm bg-muted/40 border-transparent focus-visible:bg-background focus-visible:border-border"
+            className="pl-10 h-10 w-48 lg:w-80 rounded-full text-sm bg-card dark:bg-card border-border focus-visible:border-ring"
           />
-          <kbd className="hidden lg:flex absolute right-2.5 top-1/2 -translate-y-1/2 h-5 items-center gap-0.5 rounded border border-border bg-background px-1.5 text-[10px] font-medium text-muted-foreground pointer-events-none">
+          <kbd className="hidden lg:flex absolute right-2.5 top-1/2 -translate-y-1/2 h-6 items-center gap-0.5 rounded-full bg-muted px-2 text-[10px] font-medium text-muted-foreground pointer-events-none">
             <span className="text-[11px]">⌘</span>K
           </kbd>
         </div>
 
         {/* ── Right action cluster ─────────────────────────────────────── */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* PWA install — renders a button on Chrome/Edge once the
               browser fires beforeinstallprompt, and an iOS hint chip
               on Safari since Apple's policy doesn't expose that event.
@@ -134,7 +135,7 @@ export function TopBar({ profile, email }: TopBarProps) {
             size="icon"
             onClick={toggleTheme}
             aria-label="Toggle theme"
-            className="h-9 w-9 text-muted-foreground hover:text-foreground"
+            className="size-9 sm:size-10 border-border bg-card text-muted-foreground hover:text-foreground"
           >
             <Sun className="h-4 w-4 rotate-0 scale-100 transition-transform dark:-rotate-90 dark:scale-0" />
             <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-transform dark:rotate-0 dark:scale-100" />
@@ -146,15 +147,13 @@ export function TopBar({ profile, email }: TopBarProps) {
             size="icon"
             onClick={switchLocale}
             aria-label="Switch language"
-            className="h-9 w-9 text-muted-foreground hover:text-foreground relative"
+            className="size-9 sm:size-10 border-border bg-card text-muted-foreground hover:text-foreground relative"
           >
             <Languages className="h-4 w-4" />
-            <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold bg-primary text-primary-foreground rounded-sm px-1 leading-tight">
+            <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-primary px-1.5 text-[9px] font-bold leading-[14px] text-primary-foreground">
               {locale.toUpperCase()}
             </span>
           </Button>
-
-          <div className="w-px h-6 bg-border mx-1" />
 
           {/* User dropdown */}
           <UserMenu
@@ -162,7 +161,7 @@ export function TopBar({ profile, email }: TopBarProps) {
             email={email}
             triggerClassName="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Avatar className="h-9 w-9 ring-2 ring-border hover:ring-primary/40 transition-colors">
+            <Avatar className="size-9 sm:size-10 ring-2 ring-border hover:ring-primary/40 transition-colors">
               <AvatarImage src={profile?.avatar_url ?? undefined} />
               <AvatarFallback className="bg-sidebar text-sidebar-foreground text-xs font-medium">
                 {initials}

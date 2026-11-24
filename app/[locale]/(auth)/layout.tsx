@@ -2,7 +2,9 @@
 // Used by login, register, forgot-password and the one-time setup page.
 // We force the `dark` class locally so this section looks consistent
 // regardless of the global theme toggle.
+import Image from "next/image";
 import { setRequestLocale } from "next-intl/server";
+import trails from "@/assets/dashboard/light-trails.webp";
 import { BrandMark } from "@/components/shared/BrandMark";
 
 export default async function AuthLayout({
@@ -17,16 +19,17 @@ export default async function AuthLayout({
 
   return (
     <div className="dark relative min-h-screen overflow-hidden bg-background text-foreground">
-      {/* Subtle radial gradient backdrop */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,theme(colors.slate.800/.6),transparent_60%),radial-gradient(ellipse_at_bottom_left,theme(colors.blue.900/.25),transparent_60%),radial-gradient(ellipse_at_bottom_right,theme(colors.indigo.900/.25),transparent_60%)]"
-      />
-      {/* Faint grid overlay */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.04] [background-image:linear-gradient(to_right,white_1px,transparent_1px),linear-gradient(to_bottom,white_1px,transparent_1px)] [background-size:32px_32px]"
-      />
+      {/* Traffic light trails along the bottom, soft lime light from above */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <Image
+          src={trails}
+          alt=""
+          fill
+          sizes="100vw"
+          className="object-cover object-bottom opacity-60 mix-blend-screen [mask-image:linear-gradient(to_top,black,transparent_80%)]"
+        />
+        <div className="absolute inset-0 bg-[radial-gradient(60%_45%_at_50%_0%,rgb(181_247_69/0.12),transparent_70%)]" />
+      </div>
 
       <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-10">
         {/* Brand header */}

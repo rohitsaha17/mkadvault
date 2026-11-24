@@ -1,50 +1,40 @@
-// Bookings row — the "what's selling in this period" slice of the
-// dashboard, placed directly under the KPI strip so sales momentum is
-// visible above the fold. Four cards, each tied to a real sales/ops
-// action and scoped to the chosen date range:
+// Hero stats — the frosted strip along the bottom of the dashboard hero: what
+// is selling in this period. Four cells, each linking to campaigns:
 //
-//   1. Booked value in range    — pro-rata of every campaign's value
-//                                 by the days that fall inside the range,
-//                                 so a 3-month campaign spanning the
-//                                 boundary contributes only its share.
-//   2. Live right now           — snapshot of what's on hoardings today
-//                                 (not range-dependent; always useful)
-//   3. Starting in range        — campaigns whose start_date falls in
-//                                 the range → pre-flight ops window
-//   4. Ending in range          — campaigns whose end_date falls in
-//                                 the range → renewal / dismount window
+//   1. Booked     — pro-rata of every campaign's value by the days that fall
+//                   inside the range, so a 3-month campaign spanning the
+//                   boundary contributes only its share.
+//   2. Live now   — value on hoardings today (not range-dependent).
+//   3. Starting   — campaigns whose start_date falls in the range.
+//   4. Ending     — campaigns whose end_date falls in the range, and how many
+//                   of those are still running.
 //
-// Every number pro-rates via prorateByRange() so a campaign that
-// straddles two periods is counted in each by its actual days-in-period.
-import { ArrowUpRight } from "lucide-react";
-import Link from "next/link";
-import { Card, CardContent } from "@/components/ui/card";
+// Every number pro-rates via prorateByRange() so a campaign that straddles
+// two periods is counted in each by its actual days-in-period.
+import { getTranslations } from "next-intl/server";
+import {
+  CalendarPlus,
+  CalendarX2,
+  IndianRupee,
+  RadioTower,
+  type LucideIcon,
+} from "lucide-react";
+import { Link } from "@/i18n/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { inr } from "@/lib/utils";
 import { prorateByRange, daysInRange } from "@/lib/utils/date-ranges";
 
-interface BookingCardProps {
-  title: string;
-  value: string;
-  subtitle: string;
-  href: string;
-  // Warning is only used to tip the hairline amber on the "Ending in
-  // range" card when there's something still open to act on.
-  tone?: "default" | "warning";
-}
-
-export async function BookingsRow({
+export async function HeroStats({
   orgId,
-  locale,
   from,
   to,
 }: {
   orgId: string;
-  locale: string;
   from: string;
   to: string;
 }) {
   const supabase = await createClient();
+  const t = await getTranslations("dashboard");
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -182,15 +172,16 @@ export async function BookingsRow({
   const endingInRange = rows.filter(
     (c) => c.end_date && c.end_date >= from && c.end_date <= to,
   );
-  const endingValue = endingInRange.reduce(
+  // Of those ending, the ones still running are the ones someone can act
+  // on. Their value is summed separately: the total of everything ending
+  // also counts campaigns that have already come down.
+  const endingOpen = endingInRange.filter(
+    (c) => c.end_date && c.end_date >= todayStr,
+  );
+  const endingOpenValue = endingOpen.reduce(
     (s, c) => s + (c.total_value_paise ?? 0),
     0,
   );
-  // Of those ending, how many are still future-or-today so the user can
-  // actually act (the past ones are water under the bridge).
-  const endingActionable = endingInRange.filter(
-    (c) => c.end_date && c.end_date >= todayStr,
-  ).length;
 
   // Live right now — always "today", regardless of range, because the
   // operator always wants to know what's up on their hoardings now.
@@ -201,92 +192,78 @@ export async function BookingsRow({
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-end justify-between">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Momentum</p>
-          <h2 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
-            Sales activity
-          </h2>
-        </div>
-        <Link
-          href={`/${locale}/campaigns`}
-          className="btn-pill-ghost"
-        >
-          View all campaigns
-          <ArrowUpRight className="h-3.5 w-3.5" />
-        </Link>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <BookingCard
-          title="Booked in this window"
-          value={inr(bookedValueInRange)}
-          subtitle={
-            bookingsInRangeCount > 0
-              ? `${bookingsInRangeCount} ${bookingsInRangeCount === 1 ? "campaign" : "campaigns"} overlap, pro-rated`
-              : "No bookings touching this window"
-          }
-          href={`/${locale}/campaigns`}
-        />
-        <BookingCard
-          title="Live right now"
-          value={String(liveCount)}
-          subtitle={`${inr(liveValue)} running on hoardings today`}
-          href={`/${locale}/campaigns?status=live`}
-        />
-        <BookingCard
-          title="Starting in this window"
-          value={String(startingInRange.length)}
-          subtitle={`${inr(startingValue)} booked`}
-          href={`/${locale}/campaigns`}
-        />
-        <BookingCard
-          title="Ending in this window"
-          value={String(endingInRange.length)}
-          subtitle={
-            endingActionable > 0
-              ? `${endingActionable} still open · ${inr(endingValue)} up for renewal`
-              : `${inr(endingValue)} total ending`
-          }
-          href={`/${locale}/campaigns`}
-          tone={endingActionable > 0 ? "warning" : "default"}
-        />
-      </div>
+    <div className="grid grid-cols-2 gap-2.5 sm:gap-3 xl:grid-cols-4">
+      <StatCell
+        icon={IndianRupee}
+        label={t("booked_in_window")}
+        value={inr(bookedValueInRange)}
+        sub={t("booked_sub", { count: bookingsInRangeCount })}
+        href="/campaigns"
+      />
+      <StatCell
+        icon={RadioTower}
+        label={t("live_right_now")}
+        value={inr(liveValue)}
+        sub={t("live_sub", { count: liveCount })}
+        href="/campaigns?status=live"
+      />
+      <StatCell
+        icon={CalendarPlus}
+        label={t("starting_in_window")}
+        value={String(startingInRange.length)}
+        sub={t("starting_sub", { value: inr(startingValue) })}
+        href="/campaigns"
+      />
+      <StatCell
+        icon={CalendarX2}
+        label={t("ending_in_window")}
+        value={String(endingInRange.length)}
+        sub={
+          endingOpen.length > 0
+            ? t("ending_sub_open", {
+                count: endingOpen.length,
+                value: inr(endingOpenValue),
+              })
+            : endingInRange.length > 0
+              ? t("ending_sub_done")
+              : t("ending_sub_none")
+        }
+        href="/campaigns"
+      />
     </div>
   );
 }
 
-function BookingCard({
-  title,
+function StatCell({
+  icon: Icon,
+  label,
   value,
-  subtitle,
+  sub,
   href,
-  tone = "default",
-}: BookingCardProps) {
-  // Warning tone adds a small lime dot in the top-right so the one
-  // card with something still open to act on stands apart.
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  sub: string;
+  href: string;
+}) {
   return (
-    <Link href={href} className="group">
-      <Card className="relative overflow-hidden transition-colors hover:bg-accent h-full">
-        <CardContent className="relative p-5 space-y-3">
-          <div className="flex items-start justify-between">
-            <p className="text-xs text-muted-foreground">{title}</p>
-            {tone === "warning" && (
-              <span
-                aria-hidden
-                className="h-2 w-2 rounded-full bg-primary"
-              />
-            )}
-          </div>
-          <div className="text-[30px] font-semibold tabular-nums tracking-tight text-foreground leading-none">
-            {value}
-          </div>
-          <p className="text-xs text-muted-foreground tabular-nums leading-snug">
-            {subtitle}
-          </p>
-        </CardContent>
-      </Card>
+    <Link
+      href={href}
+      className="glass group flex flex-col gap-3 rounded-2xl p-3.5 transition-colors hover:border-volt/45 sm:flex-row sm:p-4"
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-volt/14 text-volt ring-1 ring-inset ring-volt/30">
+        <Icon className="size-4" strokeWidth={2} aria-hidden />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-xs text-white/65">{label}</span>
+        <span className="figure mt-1.5 block text-xl text-white sm:text-[22px]">
+          {value}
+        </span>
+        <span className="mt-1.5 block text-xs leading-snug text-white/60">
+          {sub}
+        </span>
+      </span>
     </Link>
   );
 }

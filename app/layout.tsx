@@ -2,7 +2,7 @@
 // Locale-specific providers (NextIntlClientProvider, Toaster) live in
 // app/[locale]/layout.tsx so they receive the correct locale.
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Urbanist } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,6 +13,13 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+// Display face for headings and big figures. "latin-ext" is listed because
+// that is the subset that carries the rupee sign.
+const urbanist = Urbanist({
+  variable: "--font-urbanist",
+  subsets: ["latin", "latin-ext"],
 });
 
 export const metadata: Metadata = {
@@ -42,12 +49,11 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: "cover",
-  // Two tones so the status bar / address bar tint matches whichever
-  // colour scheme the device is in. Matches the brand navy used in
-  // PDF headers + status pills.
+  // Two tones so the status bar / address bar tint matches the page
+  // background in whichever colour scheme the device is in.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#4F46E5" },
-    { media: "(prefers-color-scheme: dark)", color: "#0F172A" },
+    { media: "(prefers-color-scheme: light)", color: "#F3F6F2" },
+    { media: "(prefers-color-scheme: dark)", color: "#090C09" },
   ],
 };
 
@@ -55,7 +61,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
+    <html className={`${geistSans.variable} ${geistMono.variable} ${urbanist.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full">{children}</body>
     </html>
   );

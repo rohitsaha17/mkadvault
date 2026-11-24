@@ -4,44 +4,21 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-// Semantic colour buckets — tuned to sit inside the warm-ink palette.
-// Each tone uses a muted surface step plus a leading status dot that
-// carries the colour. The dot does the semantic work; the chip itself
-// stays quiet so a dense table of statuses doesn't turn into confetti.
+// Semantic colour buckets. Each is a soft tint with readable text in both
+// themes; "live" is the one solid chip because it means earning right now.
+// Colour never carries the meaning alone — the label is always there.
 const TONE = {
   success:
-    "bg-muted/60 text-foreground border-border/60",
-  live:
-    "bg-primary/10 text-foreground border-primary/30",
-  info:
-    "bg-muted/60 text-foreground border-border/60",
+    "bg-emerald-500/12 text-emerald-800 border-emerald-600/25 dark:text-emerald-300 dark:border-emerald-400/25",
+  live: "bg-primary text-primary-foreground border-transparent font-semibold",
+  info: "bg-sky-500/12 text-sky-800 border-sky-600/25 dark:text-sky-300 dark:border-sky-400/25",
   warning:
-    "bg-muted/60 text-foreground border-border/60",
+    "bg-amber-500/15 text-amber-900 border-amber-600/30 dark:text-amber-300 dark:border-amber-400/25",
   danger:
-    "bg-destructive/10 text-foreground border-destructive/30",
-  progress:
-    "bg-muted/60 text-foreground border-border/60",
-  accent:
-    "bg-primary/10 text-foreground border-primary/30",
-  archived:
-    "bg-muted/40 text-muted-foreground border-border/40",
-  neutral:
-    "bg-muted/50 text-muted-foreground border-border/50",
+    "bg-rose-500/12 text-rose-800 border-rose-600/25 dark:text-rose-300 dark:border-rose-400/25",
+  archived: "bg-muted text-muted-foreground border-border",
+  neutral: "bg-muted text-foreground border-border",
 } as const;
-
-// Status dot colours — these are the one spot of hue, tiny and precise
-// so meaning is preserved without the whole chip shouting.
-const DOT: Record<keyof typeof TONE, string> = {
-  success: "bg-emerald-500",
-  live: "bg-primary",
-  info: "bg-muted-foreground",
-  warning: "bg-amber-500",
-  danger: "bg-destructive",
-  progress: "bg-muted-foreground",
-  accent: "bg-primary",
-  archived: "bg-muted-foreground/60",
-  neutral: "bg-muted-foreground/60",
-};
 
 type Tone = keyof typeof TONE;
 
@@ -85,6 +62,8 @@ interface StatusBadgeProps {
   className?: string;
   /** Show a subtle leading dot — good for dense tables */
   dot?: boolean;
+  /** Sits on a photograph: use a dark frosted chip so it stays readable */
+  onPhoto?: boolean;
 }
 
 function formatStatus(s: string) {
@@ -94,23 +73,29 @@ function formatStatus(s: string) {
     .join(" ");
 }
 
-export function StatusBadge({ status, label, className, dot = true }: StatusBadgeProps) {
+export function StatusBadge({
+  status,
+  label,
+  className,
+  dot = true,
+  onPhoto = false,
+}: StatusBadgeProps) {
   const tone = STATUS_TONE[status] ?? "neutral";
-  const classes = TONE[tone];
-  const dotClass = DOT[tone];
   return (
     <Badge
       variant="outline"
       className={cn(
-        "gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-normal",
-        classes,
+        "gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+        TONE[tone],
+        onPhoto &&
+          "border-white/20 bg-black/55 text-white backdrop-blur-md dark:border-white/20 dark:text-white",
         className
       )}
     >
       {dot && (
         <span
           aria-hidden
-          className={cn("inline-flex h-1.5 w-1.5 rounded-full shrink-0", dotClass)}
+          className="inline-flex size-1.5 shrink-0 rounded-full bg-current"
         />
       )}
       {label ?? formatStatus(status)}
