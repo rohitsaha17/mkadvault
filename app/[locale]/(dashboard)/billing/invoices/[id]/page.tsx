@@ -5,6 +5,8 @@ import { ChevronLeft, FileText, Receipt, Building2, History } from "lucide-react
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
 import { inr, fmt } from "@/lib/utils";
+import { invoiceState } from "@/lib/receivables";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { BillingNav } from "@/components/billing/BillingNav";
 import { InvoiceDetailActions } from "@/components/billing/InvoiceDetailActions";
@@ -178,7 +180,7 @@ export default async function InvoiceDetailPage({
             <h1 className="font-mono text-2xl font-semibold tracking-tight text-foreground">
               {invoice.invoice_number}
             </h1>
-            <StatusBadge status={invoice.status} />
+            <StatusBadge status={invoiceState(invoice, todayInIndia())} />
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {billToHref && billToName ? (

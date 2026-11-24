@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, Phone, Mail, MapPin, FileText, Pencil, Building2, Users, Receipt, CreditCard,
 } from "lucide-react";
+import { invoiceState } from "@/lib/receivables";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { Client, Campaign, Invoice, PaymentReceived } from "@/lib/types/database";
 
@@ -270,7 +272,7 @@ export default async function ClientDetailPage({
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{fmt(inv.invoice_date)}</td>
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{fmt(inv.due_date)}</td>
                           <td className="px-4 py-2.5 tabular-nums text-foreground">{inr(inv.total_paise)}</td>
-                          <td className="px-4 py-2.5"><StatusBadge status={inv.status} /></td>
+                          <td className="px-4 py-2.5"><StatusBadge status={invoiceState(inv, todayInIndia())} /></td>
                         </tr>
                       ))}
                     </tbody>

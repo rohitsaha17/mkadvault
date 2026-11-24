@@ -15,6 +15,8 @@ import { CampaignJobsTab } from "@/components/campaigns/CampaignJobsTab";
 import { CampaignActivityTimeline, type ActivityEntry } from "@/components/campaigns/CampaignActivityTimeline";
 import { CampaignPhotosTab } from "@/components/campaigns/CampaignPhotosTab";
 import { SitePreviewModal } from "@/components/sites/SitePreviewModal";
+import { invoiceState } from "@/lib/receivables";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { deriveCampaignStatus } from "@/lib/campaigns/derive";
 import { fmt, inr } from "@/lib/utils";
@@ -503,7 +505,7 @@ export default async function CampaignDetailPage({
                           <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{fmt(inv.invoice_date)}</td>
                           <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{fmt(inv.due_date)}</td>
                           <td className="px-4 py-3 text-foreground tabular-nums">{inr(inv.total_paise)}</td>
-                          <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
+                          <td className="px-4 py-3"><StatusBadge status={invoiceState(inv, todayInIndia())} /></td>
                         </tr>
                       ))}
                     </tbody>

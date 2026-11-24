@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import {
   ChevronLeft, Phone, Mail, MapPin, FileText, Building2, Pencil, User, MapPinned, Receipt,
 } from "lucide-react";
+import { invoiceState } from "@/lib/receivables";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import type { PartnerAgency, Contract, Site, Invoice } from "@/lib/types/database";
 
@@ -225,7 +227,7 @@ export default async function AgencyDetailPage({
                           {inr(inv.balance_due_paise)}
                         </td>
                         <td className="px-3 py-2">
-                          <StatusBadge status={inv.status} />
+                          <StatusBadge status={invoiceState(inv, todayInIndia())} />
                         </td>
                       </tr>
                     ))}

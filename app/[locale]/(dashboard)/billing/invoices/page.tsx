@@ -2,7 +2,14 @@
 import { setRequestLocale, getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import {
+  ISSUED_INVOICE_STATUSES,
+  OPEN_INVOICE_STATUSES,
+  invoiceState,
+  summariseReceivables,
+} from "@/lib/receivables";
 import { inr, fmt } from "@/lib/utils";
+import { monthEnd, todayInIndia } from "@/lib/utils/time-buckets";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -61,38 +68,36 @@ export default async function InvoicesPage({
 
   const supabase = await createClient();
 
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const today = todayInIndia();
 
-  const [{ data: allInvoices }, { data: thisMonthData }] = await Promise.all([
+  const [
+    { data: openInvoices, error: openError },
+    { data: thisMonthData, error: monthError },
+  ] = await Promise.all([
     supabase
       .from("invoices")
-      .select("total_paise, amount_paid_paise, balance_due_paise, status")
+      .select("balance_due_paise, due_date, status")
+      .in("status", OPEN_INVOICE_STATUSES)
       .is("deleted_at", null),
+    // Revenue is the taxable value of invoices issued, as on the dashboard.
     supabase
       .from("invoices")
-      .select("total_paise")
-      .gte("invoice_date", `${thisMonth}-01`)
-      .lte("invoice_date", `${thisMonth}-31`)
-      .eq("status", "paid")
+      .select("subtotal_paise")
+      .in("status", ISSUED_INVOICE_STATUSES)
+      .gte("invoice_date", `${today.slice(0, 7)}-01`)
+      // Not "-31": in a 30-day month that isn't a date and the query fails.
+      .lte("invoice_date", monthEnd(today))
       .is("deleted_at", null),
   ]);
 
-  const outstanding = (allInvoices ?? []).reduce(
-    (s, i) =>
-      s +
-      (["sent", "partially_paid", "overdue"].includes(i.status)
-        ? i.balance_due_paise ?? 0
-        : 0),
-    0
-  );
-  const overdueTotal = (allInvoices ?? []).reduce(
-    (s, i) => s + (i.status === "overdue" ? i.balance_due_paise ?? 0 : 0),
-    0
-  );
-  const monthRevenue = (thisMonthData ?? []).reduce(
-    (s, i) => s + (i.total_paise ?? 0),
-    0
-  );
+  // null = couldn't be read. Shown as "—", never as ₹0.
+  const summary = openError
+    ? null
+    : summariseReceivables(openInvoices ?? [], today);
+  const monthRevenue = monthError
+    ? null
+    : (thisMonthData ?? []).reduce((s, i) => s + (i.subtotal_paise ?? 0), 0);
+  const monthCount = thisMonthData?.length ?? 0;
 
   // Fetch invoices + direct-client join first. The agency side (migration
   // 047) is hydrated in a second query so the list keeps working even
@@ -104,7 +109,17 @@ export default async function InvoicesPage({
     .is("deleted_at", null)
     .order(sortCol, { ascending: sortDir === "asc" });
 
-  if (tab !== "all") query = query.eq("status", tab as InvoiceStatus);
+  // "Sent" and "Overdue" split on the due date. See lib/receivables.ts.
+  if (tab === "overdue") {
+    query = query
+      .in("status", OPEN_INVOICE_STATUSES)
+      .lt("due_date", today)
+      .gt("balance_due_paise", 0);
+  } else if (tab === "sent") {
+    query = query.eq("status", "sent").gte("due_date", today);
+  } else if (tab !== "all") {
+    query = query.eq("status", tab as InvoiceStatus);
+  }
   query = query.range(offset, offset + PAGE_SIZE - 1);
 
   const { data, count } = await query;
@@ -159,9 +174,23 @@ export default async function InvoicesPage({
 
       {/* KPI row */}
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <KpiTile label="Total Outstanding" value={inr(outstanding)} />
-        <KpiTile label="Overdue Amount" value={inr(overdueTotal)} tone="danger" />
-        <KpiTile label="This Month's Revenue" value={inr(monthRevenue)} tone="success" />
+        <KpiTile
+          label="Total Outstanding"
+          value={inr(summary?.outstanding)}
+          hint={summary ? `${openInvoices?.length ?? 0} invoices` : "Couldn't load"}
+        />
+        <KpiTile
+          label="Overdue Amount"
+          value={inr(summary?.overdue)}
+          hint={summary ? `${summary.overdueCount} past their due date` : "Couldn't load"}
+          tone={summary?.overdue ? "danger" : undefined}
+        />
+        <KpiTile
+          label="This Month's Revenue"
+          value={inr(monthRevenue)}
+          hint={monthRevenue === null ? "Couldn't load" : `Before GST, ${monthCount} ${monthCount === 1 ? "invoice" : "invoices"}`}
+          tone="success"
+        />
       </div>
 
       {/* Status tabs */}
@@ -267,7 +296,7 @@ export default async function InvoicesPage({
                       {fmt(inv.due_date)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={inv.status} />
+                      <StatusBadge status={invoiceState(inv, today)} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -301,10 +330,12 @@ export default async function InvoicesPage({
 function KpiTile({
   label,
   value,
+  hint,
   tone,
 }: {
   label: string;
   value: string;
+  hint?: string;
   tone?: "danger" | "success";
 }) {
   const toneClass =
@@ -319,6 +350,7 @@ function KpiTile({
         {label}
       </p>
       <p className={`mt-2 text-2xl font-semibold tabular-nums ${toneClass}`}>{value}</p>
+      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
     </div>
   );
 }

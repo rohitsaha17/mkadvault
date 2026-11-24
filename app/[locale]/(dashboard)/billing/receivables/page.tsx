@@ -1,25 +1,30 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import {
+  OPEN_INVOICE_STATUSES,
+  ageBucket,
+  daysPastDue,
+  emptyAgeing,
+  invoiceState,
+  summariseReceivables,
+  type AgeBucket,
+} from "@/lib/receivables";
 import { inr, fmt } from "@/lib/utils";
+import { monthEnd, shiftDate, todayInIndia } from "@/lib/utils/time-buckets";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { BillingNav } from "@/components/billing/BillingNav";
 
 export const metadata = { title: "Receivables" };
 
-function daysPast(dueDate: string): number {
-  return Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000);
-}
-
-function agingBucket(dueDate: string | null): "current" | "31-60" | "61-90" | "90+" {
-  if (!dueDate) return "current";
-  const days = daysPast(dueDate);
-  if (days <= 30) return "current";
-  if (days <= 60) return "31-60";
-  if (days <= 90) return "61-90";
-  return "90+";
-}
+const AGE_COLUMNS: Array<{ key: AgeBucket; label: string; tone: string }> = [
+  { key: "notDue", label: "Not due yet", tone: "text-foreground" },
+  { key: "d1to30", label: "1–30 days late", tone: "text-amber-700 dark:text-amber-300" },
+  { key: "d31to60", label: "31–60 days", tone: "text-amber-600 dark:text-amber-400" },
+  { key: "d61to90", label: "61–90 days", tone: "text-orange-600 dark:text-orange-400" },
+  { key: "d90plus", label: "90+ days", tone: "text-rose-600 dark:text-rose-400" },
+];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,10 +49,7 @@ interface PartyAging {
   party_id: string;
   party_name: string;
   party_type: "client" | "agency";
-  current: number;
-  "31-60": number;
-  "61-90": number;
-  "90+": number;
+  ageing: Record<AgeBucket, number>;
   total: number;
   invoices: InvoiceRow[];
 }
@@ -63,16 +65,14 @@ export default async function ReceivablesPage({
   setRequestLocale(locale);
 
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const weekFromNowDate = new Date(); weekFromNowDate.setDate(weekFromNowDate.getDate() + 7);
-  const weekFromNow = weekFromNowDate.toISOString().slice(0, 10);
+  const today = todayInIndia();
+  const weekFromNow = shiftDate(today, 7);
 
   // Fetch outstanding invoices with the direct-client join. The agency
   // side (migration 047) is hydrated in a second query so this page
   // still renders when 047 hasn't been applied — otherwise the
   // embedded agency join would error and the whole page would blank.
-  const { data: outstandingData } = await supabase
+  const { data: outstandingData, error: outstandingError } = await supabase
     .from("invoices")
     .select(`
       id, invoice_number, invoice_date, due_date,
@@ -80,7 +80,7 @@ export default async function ReceivablesPage({
       bill_to_type, client_id, billed_agency_id,
       client:clients(company_name)
     `)
-    .in("status", ["sent", "partially_paid", "overdue"])
+    .in("status", OPEN_INVOICE_STATUSES)
     .is("deleted_at", null)
     .order("due_date", { ascending: true });
 
@@ -102,20 +102,12 @@ export default async function ReceivablesPage({
   }
 
   // Fetch collected this month
-  const { data: collectedData } = await supabase
+  const { data: collectedData, error: collectedError } = await supabase
     .from("payments_received")
     .select("amount_paise")
-    .gte("payment_date", `${thisMonth}-01`)
-    .lte("payment_date", `${thisMonth}-31`);
-
-  // Fetch due this week
-  const { data: dueThisWeek } = await supabase
-    .from("invoices")
-    .select("balance_due_paise")
-    .in("status", ["sent", "partially_paid"])
-    .gte("due_date", today)
-    .lte("due_date", weekFromNow)
-    .is("deleted_at", null);
+    .gte("payment_date", `${today.slice(0, 7)}-01`)
+    // Not "-31": in a 30-day month that isn't a date and the query fails.
+    .lte("payment_date", monthEnd(today));
 
   const invoices: InvoiceRow[] = (outstandingData ?? []).map((inv) => {
     const bill_to_type = (inv as { bill_to_type?: "client" | "agency" }).bill_to_type ?? "client";
@@ -143,10 +135,15 @@ export default async function ReceivablesPage({
   });
 
   // Aggregate stats
-  const totalOutstanding = invoices.reduce((s, i) => s + i.balance_due_paise, 0);
-  const overdueTotal = invoices.filter((i) => i.status === "overdue").reduce((s, i) => s + i.balance_due_paise, 0);
-  const collectedThisMonth = (collectedData ?? []).reduce((s, p) => s + (p.amount_paise ?? 0), 0);
-  const dueThisWeekTotal = (dueThisWeek ?? []).reduce((s, i) => s + (i.balance_due_paise ?? 0), 0);
+  const summary = summariseReceivables(invoices, today);
+  const totalOutstanding = summary.outstanding;
+  // null = couldn't be read. Shown as "—", never as ₹0.
+  const collectedThisMonth = collectedError
+    ? null
+    : (collectedData ?? []).reduce((s, p) => s + (p.amount_paise ?? 0), 0);
+  const dueThisWeekTotal = invoices
+    .filter((i) => i.due_date && i.due_date >= today && i.due_date <= weekFromNow)
+    .reduce((s, i) => s + i.balance_due_paise, 0);
 
   // Build aging map per BILL-TO PARTY (client or agency). Key includes
   // the party type so a client and agency with the same uuid prefix
@@ -159,14 +156,13 @@ export default async function ReceivablesPage({
         party_id: inv.party_id,
         party_name: inv.party_name,
         party_type: inv.party_type,
-        current: 0, "31-60": 0, "61-90": 0, "90+": 0,
+        ageing: emptyAgeing(),
         total: 0,
         invoices: [],
       });
     }
-    const bucket = agingBucket(inv.due_date);
     const row = partyMap.get(key)!;
-    row[bucket] += inv.balance_due_paise;
+    row.ageing[ageBucket(inv.due_date, today)] += inv.balance_due_paise;
     row.total += inv.balance_due_paise;
     row.invoices.push(inv);
   }
@@ -185,15 +181,28 @@ export default async function ReceivablesPage({
 
       {/* Summary Cards */}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiTile label="Total Outstanding" value={inr(totalOutstanding)} hint={`${invoices.length} invoices`} />
         <KpiTile
-          label="Overdue (>30 days)"
-          value={inr(overdueTotal)}
-          tone="danger"
-          hint={`${invoices.filter((i) => i.status === "overdue").length} invoices`}
+          label="Total Outstanding"
+          value={outstandingError ? "—" : inr(totalOutstanding)}
+          hint={outstandingError ? "Couldn't load" : `${invoices.length} invoices`}
         />
-        <KpiTile label="Due This Week" value={inr(dueThisWeekTotal)} tone="warning" />
-        <KpiTile label="Collected This Month" value={inr(collectedThisMonth)} tone="success" />
+        <KpiTile
+          label="Overdue"
+          value={outstandingError ? "—" : inr(summary.overdue)}
+          tone={summary.overdue ? "danger" : undefined}
+          hint={outstandingError ? "Couldn't load" : `${summary.overdueCount} past their due date`}
+        />
+        <KpiTile
+          label="Due This Week"
+          value={outstandingError ? "—" : inr(dueThisWeekTotal)}
+          tone="warning"
+        />
+        <KpiTile
+          label="Collected This Month"
+          value={inr(collectedThisMonth)}
+          hint={collectedThisMonth === null ? "Couldn't load" : undefined}
+          tone="success"
+        />
       </div>
 
       {/* Aging Report by Bill-to Party */}
@@ -207,10 +216,9 @@ export default async function ReceivablesPage({
               <thead className="border-b border-border bg-muted/40">
                 <tr>
                   <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Client / Agency</th>
-                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Current (0–30)</th>
-                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">31–60 days</th>
-                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">61–90 days</th>
-                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-rose-600 dark:text-rose-400">90+ days</th>
+                  {AGE_COLUMNS.map((c) => (
+                    <th key={c.key} className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{c.label}</th>
+                  ))}
                   <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Total</th>
                 </tr>
               </thead>
@@ -233,18 +241,11 @@ export default async function ReceivablesPage({
                         {row.invoices.length} invoice{row.invoices.length !== 1 ? "s" : ""}
                       </p>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                      {row.current > 0 ? inr(row.current) : <span className="text-muted-foreground/60">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-amber-600 dark:text-amber-400">
-                      {row["31-60"] > 0 ? inr(row["31-60"]) : <span className="text-muted-foreground/60">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-orange-600 dark:text-orange-400">
-                      {row["61-90"] > 0 ? inr(row["61-90"]) : <span className="text-muted-foreground/60">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium tabular-nums text-rose-600 dark:text-rose-400">
-                      {row["90+"] > 0 ? inr(row["90+"]) : <span className="text-muted-foreground/60 font-normal">—</span>}
-                    </td>
+                    {AGE_COLUMNS.map((c) => (
+                      <td key={c.key} className={`px-4 py-3 text-right tabular-nums ${c.tone}`}>
+                        {row.ageing[c.key] > 0 ? inr(row.ageing[c.key]) : <span className="text-muted-foreground/60">—</span>}
+                      </td>
+                    ))}
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">
                       {inr(row.total)}
                     </td>
@@ -254,18 +255,11 @@ export default async function ReceivablesPage({
               <tfoot className="border-t border-border bg-muted/40">
                 <tr>
                   <td className="px-4 py-3 text-sm font-semibold text-foreground">Total</td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">
-                    {inr(partyAgingRows.reduce((s, r) => s + r.current, 0))}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-amber-600 dark:text-amber-400">
-                    {inr(partyAgingRows.reduce((s, r) => s + r["31-60"], 0))}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-orange-600 dark:text-orange-400">
-                    {inr(partyAgingRows.reduce((s, r) => s + r["61-90"], 0))}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-                    {inr(partyAgingRows.reduce((s, r) => s + r["90+"], 0))}
-                  </td>
+                  {AGE_COLUMNS.map((c) => (
+                    <td key={c.key} className={`px-4 py-3 text-right font-semibold tabular-nums ${c.tone}`}>
+                      {inr(summary.ageing[c.key])}
+                    </td>
+                  ))}
                   <td className="px-4 py-3 text-right font-bold tabular-nums text-foreground">
                     {inr(totalOutstanding)}
                   </td>
@@ -283,7 +277,9 @@ export default async function ReceivablesPage({
         </div>
         {invoices.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">
-            No outstanding invoices. All caught up!
+            {outstandingError
+              ? "Couldn't load invoices. Refresh to try again."
+              : "No outstanding invoices. All caught up!"}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -312,7 +308,7 @@ export default async function ReceivablesPage({
               </thead>
               <tbody className="divide-y divide-border">
                 {invoices.map((inv) => {
-                  const days = inv.due_date ? daysPast(inv.due_date) : null;
+                  const days = daysPastDue(inv.due_date, today);
                   return (
                     <tr key={inv.id} className="hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3">
@@ -343,7 +339,7 @@ export default async function ReceivablesPage({
                         {fmt(inv.due_date)}
                       </td>
                       <td className="px-4 py-3 tabular-nums">
-                        {days !== null && days > 0 ? (
+                        {days > 0 ? (
                           <span
                             className={`font-medium ${
                               days > 90
@@ -371,7 +367,7 @@ export default async function ReceivablesPage({
                         {inr(inv.balance_due_paise)}
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={inv.status} />
+                        <StatusBadge status={invoiceState(inv, today)} />
                       </td>
                     </tr>
                   );
