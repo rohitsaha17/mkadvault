@@ -153,9 +153,9 @@ export async function LocationBookingsRow({
 
   return (
     <Card>
-      <CardHeader className="pb-3 pt-6 flex flex-row items-end justify-between">
+      <CardHeader className="pb-3 pt-5 px-5 flex flex-row items-end justify-between">
         <div className="space-y-1">
-          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
             Top sites by booking value
           </CardTitle>
           <p className="text-xs text-muted-foreground">
@@ -165,7 +165,7 @@ export async function LocationBookingsRow({
         {rows.length > 0 && (
           <Link
             href="/sites"
-            className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            className="btn-pill-ghost"
           >
             All sites
             <ArrowUpRight className="h-3.5 w-3.5" />

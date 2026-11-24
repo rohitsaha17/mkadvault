@@ -203,23 +203,15 @@ export async function BookingsRow({
   return (
     <div className="space-y-3">
       <div className="flex items-end justify-between">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2.5">
-            <span
-              aria-hidden
-              className="h-[1px] w-5 bg-primary/70"
-            />
-            <p className="font-display italic text-[13px] text-primary/85">
-              Movement
-            </p>
-          </div>
-          <h2 className="font-display text-[26px] tracking-tight text-foreground leading-tight">
-            Sales momentum
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Momentum</p>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
+            Sales activity
           </h2>
         </div>
         <Link
           href={`/${locale}/campaigns`}
-          className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+          className="btn-pill-ghost"
         >
           View all campaigns
           <ArrowUpRight className="h-3.5 w-3.5" />
@@ -272,23 +264,25 @@ function BookingCard({
   href,
   tone = "default",
 }: BookingCardProps) {
-  const accentRail =
-    tone === "warning" ? (
-      <span
-        aria-hidden
-        className="absolute left-0 right-0 top-0 h-[2px] bg-primary/70"
-      />
-    ) : null;
+  // Warning tone adds a small lime dot in the top-right so the one
+  // card with something still open to act on stands apart.
   return (
     <Link href={href} className="group">
-      <Card className="relative overflow-hidden transition-colors hover:bg-accent/40 h-full">
-        {accentRail}
+      <Card className="relative overflow-hidden transition-colors hover:bg-accent h-full">
         <CardContent className="relative p-5 space-y-3">
-          <p className="text-xs text-muted-foreground tracking-wide">{title}</p>
-          <div className="text-[30px] font-normal tabular-nums tracking-tight text-foreground leading-none">
+          <div className="flex items-start justify-between">
+            <p className="text-xs text-muted-foreground">{title}</p>
+            {tone === "warning" && (
+              <span
+                aria-hidden
+                className="h-2 w-2 rounded-full bg-primary"
+              />
+            )}
+          </div>
+          <div className="text-[30px] font-semibold tabular-nums tracking-tight text-foreground leading-none">
             {value}
           </div>
-          <p className="font-display italic text-xs text-muted-foreground/90 tabular-nums leading-snug">
+          <p className="text-xs text-muted-foreground tabular-nums leading-snug">
             {subtitle}
           </p>
         </CardContent>

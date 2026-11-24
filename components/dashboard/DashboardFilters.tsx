@@ -73,12 +73,12 @@ export function DashboardFilters({ currentPreset, from, to }: Props) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-3">
       <div className="relative inline-flex items-center">
-        <Calendar className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <Calendar className="absolute left-3.5 h-4 w-4 text-muted-foreground pointer-events-none" />
         <select
           value={preset}
           onChange={onPresetChange}
           disabled={isPending}
-          className="h-10 rounded-md border border-input bg-background pl-9 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 appearance-none min-w-[200px] disabled:opacity-60"
+          className="h-10 rounded-full border border-border bg-card pl-10 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 appearance-none min-w-[200px] disabled:opacity-60"
           aria-label="Date range preset"
         >
           {DATE_RANGE_ORDER.map((key) => (
@@ -87,7 +87,7 @@ export function DashboardFilters({ currentPreset, from, to }: Props) {
             </option>
           ))}
         </select>
-        <ChevronDown className="absolute right-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <ChevronDown className="absolute right-3.5 h-4 w-4 text-muted-foreground pointer-events-none" />
       </div>
 
       {preset === "custom" && (

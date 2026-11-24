@@ -5,17 +5,16 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Design tokens — "hoarding at dusk" direction
+   Design tokens — "operations console" direction
    ----------------------------------------------------------------------------
-   - Neutral palette: warm ink. One ramp, slight amber cast, so surfaces
-     stay quiet across a long reading session.
-   - Accent: hoarding-vinyl amber. Used once or twice per screen on the
-     one figure or action that matters. No gradient, no glow.
-   - Chart palette: warm neutral steps plus the amber accent. Series
-     only pick up colour when they really have to tell themselves apart.
-   - Radius:   10px base (lg). xl/2xl derived.
-   - Shadows:  soft ambient + thin ring so cards feel elevated without
-               looking heavy on dark mode.
+   Reference comps (Salesforce invoices dashboard, AeuxGlobal, Kinora):
+   dark surfaces with one loud electric accent, big rounded cards,
+   sans everywhere, bold pill CTAs.
+     - Neutral palette: cool ink, zero hue cast on surfaces.
+     - Accent: electric lime. Used on primary CTAs, selection, status
+       pills, chart highlights and sparklines. Loud is the point.
+     - Radii:   12px base (lg). Cards go up to 24px (3xl).
+     - Shadows: soft ambient only.
    ───────────────────────────────────────────────────────────────────────── */
 
 @theme inline {
@@ -24,9 +23,6 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-geist-sans);
-  /* Editorial serif — used only for the one display moment per
-     screen (dashboard period headline, section eyebrows, hero figure). */
-  --font-display: var(--font-serif);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -66,110 +62,100 @@
 }
 
 /* ─── LIGHT THEME ──────────────────────────────────────────────────────────── */
-/* Neutrals sit at hue 60 (warm amber-ink) with very low chroma so the
-   surfaces read as paper, not as orange. The hoarding-vinyl amber lives
-   in --primary / --ring and shows up only where it is called. */
 :root {
-  --background: oklch(0.994 0.003 60);
-  --foreground: oklch(0.2 0.012 60);
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.14 0 0);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.012 60);
+  --card-foreground: oklch(0.14 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.012 60);
+  --popover-foreground: oklch(0.14 0 0);
 
-  /* Hoarding-vinyl amber — the one accent. Darkened below oklch 0.6 so
-     text on primary stays above 4.5:1 contrast. */
-  --primary: oklch(0.56 0.14 55);
-  --primary-foreground: oklch(0.99 0 0);
+  /* Electric lime — the one accent. Text on primary is deep ink. */
+  --primary: oklch(0.88 0.2 128);
+  --primary-foreground: oklch(0.14 0 0);
 
-  --secondary: oklch(0.965 0.006 60);
-  --secondary-foreground: oklch(0.24 0.012 60);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.18 0 0);
 
-  --muted: oklch(0.965 0.006 60);
-  --muted-foreground: oklch(0.52 0.012 60);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.5 0 0);
 
-  --accent: oklch(0.955 0.01 60);
-  --accent-foreground: oklch(0.32 0.1 55);
+  --accent: oklch(0.96 0 0);
+  --accent-foreground: oklch(0.18 0 0);
 
-  --destructive: oklch(0.56 0.18 25);
+  --destructive: oklch(0.58 0.2 25);
 
-  --border: oklch(0.92 0.006 60);
-  --input: oklch(0.92 0.006 60);
-  --ring: oklch(0.56 0.14 55);
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.88 0.2 128);
 
-  /* Chart palette — neutral steps with the amber as the one lead. Used
-     by Recharts via var(--color-chart-N). Series only pick up a hue
-     when they genuinely have to disambiguate. */
-  --chart-1: oklch(0.56 0.14 55);    /* amber lead */
-  --chart-2: oklch(0.72 0.015 60);   /* step 1 */
-  --chart-3: oklch(0.58 0.015 60);   /* step 2 */
-  --chart-4: oklch(0.42 0.015 60);   /* step 3 */
-  --chart-5: oklch(0.52 0.12 160);   /* reserved — a calm teal for "healthy" */
+  /* Chart palette — lime lead + neutral steps. */
+  --chart-1: oklch(0.88 0.2 128);    /* lime lead */
+  --chart-2: oklch(0.7 0.005 0);     /* step 1 */
+  --chart-3: oklch(0.55 0.005 0);    /* step 2 */
+  --chart-4: oklch(0.4 0.005 0);     /* step 3 */
+  --chart-5: oklch(0.58 0.2 25);     /* reserved destructive for bad */
 
-  --radius: 0.625rem;
+  --radius: 0.75rem;
 
-  /* Sidebar — deep warm-ink shell. No blue cast, no glow. */
-  --sidebar: oklch(0.2 0.012 60);
-  --sidebar-foreground: oklch(0.8 0.01 60);
-  --sidebar-primary: oklch(0.56 0.14 55);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.26 0.012 60);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
+  /* Sidebar — deep ink shell, lime tick on the active row. */
+  --sidebar: oklch(0.18 0 0);
+  --sidebar-foreground: oklch(0.82 0 0);
+  --sidebar-primary: oklch(0.88 0.2 128);
+  --sidebar-primary-foreground: oklch(0.14 0 0);
+  --sidebar-accent: oklch(0.24 0 0);
+  --sidebar-accent-foreground: oklch(1 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.56 0.14 55);
+  --sidebar-ring: oklch(0.88 0.2 128);
 }
 
 /* ─── DARK THEME ───────────────────────────────────────────────────────────── */
-/* Warm ink background with a brass accent — think a private
-   accounting office at night, not a startup console. Cards sit a
-   touch warmer than the background so they read as paper on a desk. */
+/* Clean cool ink. Zero hue cast on neutrals so the lime accent stays
+   the only colour on screen. */
 .dark {
-  --background: oklch(0.14 0.008 55);
-  --foreground: oklch(0.97 0.005 65);
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.98 0 0);
 
-  /* Cards lifted one step with a very faint amber warmth, so they
-     read as a different material from the surrounding ink. */
-  --card: oklch(0.205 0.011 60);
-  --card-foreground: oklch(0.97 0.005 65);
-  --popover: oklch(0.21 0.012 60);
-  --popover-foreground: oklch(0.97 0.005 65);
+  --card: oklch(0.2 0 0);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.2 0 0);
+  --popover-foreground: oklch(0.98 0 0);
 
-  /* Brass — richer than straight amber, sits closer to 50° hue.
-     Lifted lightness in dark so it still reads as polished metal
-     against the ink. */
-  --primary: oklch(0.78 0.145 65);
-  --primary-foreground: oklch(0.15 0.012 55);
+  /* Electric lime — vivid, reads like a safety vest. Primary fore
+     is deep ink so text on the lime stays legible. */
+  --primary: oklch(0.9 0.21 128);
+  --primary-foreground: oklch(0.14 0 0);
 
-  --secondary: oklch(0.26 0.01 60);
-  --secondary-foreground: oklch(0.97 0.005 65);
+  --secondary: oklch(0.26 0 0);
+  --secondary-foreground: oklch(0.98 0 0);
 
-  --muted: oklch(0.24 0.008 60);
-  --muted-foreground: oklch(0.7 0.014 60);
+  --muted: oklch(0.24 0 0);
+  --muted-foreground: oklch(0.7 0 0);
 
-  --accent: oklch(0.28 0.025 55);
-  --accent-foreground: oklch(0.97 0.005 65);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.98 0 0);
 
   --destructive: oklch(0.66 0.17 25);
 
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.78 0.145 65);
+  --ring: oklch(0.9 0.21 128);
 
-  --chart-1: oklch(0.78 0.145 65);   /* brass lead */
-  --chart-2: oklch(0.62 0.01 60);    /* step 1 */
-  --chart-3: oklch(0.48 0.01 60);    /* step 2 */
-  --chart-4: oklch(0.35 0.008 60);   /* step 3 */
-  --chart-5: oklch(0.62 0.1 170);    /* reserved deep teal */
+  --chart-1: oklch(0.9 0.21 128);    /* lime lead */
+  --chart-2: oklch(0.62 0 0);        /* step 1 */
+  --chart-3: oklch(0.46 0 0);        /* step 2 */
+  --chart-4: oklch(0.34 0 0);        /* step 3 */
+  --chart-5: oklch(0.66 0.17 25);    /* reserved destructive */
 
-  --sidebar: oklch(0.165 0.009 55);
-  --sidebar-foreground: oklch(0.86 0.01 65);
-  --sidebar-primary: oklch(0.78 0.145 65);
-  --sidebar-primary-foreground: oklch(0.15 0.012 55);
-  --sidebar-accent: oklch(0.24 0.014 60);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar: oklch(0.17 0 0);
+  --sidebar-foreground: oklch(0.86 0 0);
+  --sidebar-primary: oklch(0.9 0.21 128);
+  --sidebar-primary-foreground: oklch(0.14 0 0);
+  --sidebar-accent: oklch(0.24 0 0);
+  --sidebar-accent-foreground: oklch(1 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.78 0.145 65);
+  --sidebar-ring: oklch(0.9 0.21 128);
 }
 
 @layer base {
@@ -239,57 +225,66 @@
       0 0 0 1px oklch(1 0 0 / 0.04);
   }
 
-  /* Editorial display face. Used on the one typographic moment per
-     screen — the dashboard period, section eyebrows, and the hero
-     figure. Italic variant gets looser tracking so it reads as
-     hand-lettered rather than system-italic. */
-  .font-display {
-    font-family: var(--font-display), ui-serif, Georgia, serif;
-    letter-spacing: -0.01em;
-  }
-  .font-display.italic {
-    letter-spacing: -0.005em;
-  }
-
-  /* Hero surface — a touch warmer than a regular card, with a
-     hairline inner glow at the top edge so it reads as lit paper
-     rather than another grey block. Used on the lead KPI tile. */
-  .hero-surface {
-    background:
-      radial-gradient(
-        120% 60% at 0% 0%,
-        color-mix(in oklch, var(--color-primary) 6%, transparent) 0%,
-        transparent 55%
-      ),
-      var(--color-card);
-    box-shadow:
-      inset 0 1px 0 oklch(1 0 0 / 0.06),
-      0 1px 2px 0 oklch(0 0 0 / 0.08),
-      0 24px 48px -32px color-mix(in oklch, var(--color-primary) 40%, transparent);
-  }
-
-  /* Paper grain — a very faint repeating fibre texture laid over the
-     background. Barely perceptible but it keeps the long reading
-     surfaces from feeling like flat printing. */
-  .paper-grain {
-    background-image:
-      radial-gradient(
-        1200px 600px at 20% -10%,
-        color-mix(in oklch, var(--color-primary) 4%, transparent),
-        transparent 60%
-      ),
-      radial-gradient(
-        1000px 500px at 110% 120%,
-        color-mix(in oklch, var(--color-primary) 3%, transparent),
-        transparent 60%
-      );
-  }
-
-  /* Hair rule between related elements — thinner and warmer than the
-     default border, used inside the hero tile and under the eyebrow. */
+  /* Hair rule between related elements — thinner than the default
+     border, used for inside-card dividers. */
   .rule-hair {
     height: 1px;
     background: color-mix(in oklch, var(--color-border) 90%, transparent);
+  }
+
+  /* The signature primary CTA — big pill, lime fill, black text.
+     Mirrors the "Pay out now" / "Add Project" buttons in the comps.
+     Pair with Button variant="default" or apply standalone. */
+  .btn-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.125rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    transition: background-color 150ms ease, transform 100ms ease;
+  }
+  .btn-pill:hover {
+    background: color-mix(in oklch, var(--color-primary) 92%, white);
+  }
+  .btn-pill:active {
+    transform: translateY(0.5px);
+  }
+
+  /* Quiet "ghost" pill, for secondary actions in a dense card. */
+  .btn-pill-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    border-radius: 9999px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    background: color-mix(in oklch, var(--color-foreground) 6%, transparent);
+    color: var(--color-foreground);
+    transition: background-color 150ms ease;
+  }
+  .btn-pill-ghost:hover {
+    background: color-mix(in oklch, var(--color-foreground) 10%, transparent);
+  }
+
+  /* Status pill — bright accent fill with tiny black dot, matches the
+     "Unpaid 5" style in the Salesforce comp. */
+  .pill-accent {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
   }
 
   /* Soft grid backdrop used on empty states / marketing-style sections */

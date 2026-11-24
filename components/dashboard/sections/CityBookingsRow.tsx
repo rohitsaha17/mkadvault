@@ -206,25 +206,17 @@ export async function CityBookingsRow({
   occupancyData.reverse();
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2.5">
-          <span
-            aria-hidden
-            className="h-[1px] w-5 bg-primary/70"
-          />
-          <p className="font-display italic text-[13px] text-primary/85">
-            Geography
-          </p>
-        </div>
-        <h2 className="font-display text-[26px] tracking-tight text-foreground leading-tight">
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">Geography</p>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
           Where bookings are landing
         </h2>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
-          <CardHeader className="pb-3 space-y-1 pt-6">
-            <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+          <CardHeader className="pb-3 space-y-1 pt-5 px-5">
+            <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
               Booked value by city
             </CardTitle>
             <p className="text-xs text-muted-foreground tabular-nums">
@@ -232,20 +224,20 @@ export async function CityBookingsRow({
               {cityValue.size === 1 ? "city" : "cities"} in this window
             </p>
           </CardHeader>
-          <CardContent className="pb-6">
+          <CardContent className="pb-5 px-5">
             <CityBookingsChart data={valueData} />
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-3 space-y-1 pt-6">
-            <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+          <CardHeader className="pb-3 space-y-1 pt-5 px-5">
+            <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
               Site occupancy by city
             </CardTitle>
             <p className="text-xs text-muted-foreground tabular-nums">
               {occupancyRows.length} cities · booked against available right now
             </p>
           </CardHeader>
-          <CardContent className="pb-6">
+          <CardContent className="pb-5 px-5">
             <CityOccupancyChart data={occupancyData} />
           </CardContent>
         </Card>

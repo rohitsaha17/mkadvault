@@ -135,29 +135,16 @@ export default async function DashboardPage({ params, searchParams }: PageProps)
 
   // Full admin dashboard — streamed in sections.
   return (
-    <div className="space-y-10 paper-grain pb-4">
+    <div className="space-y-6 pb-4">
       {/* Header renders immediately — no awaits above this point cross
           the Suspense boundaries below, so the title paints at ~0 ms
-          even before any KPI query resolves. The period name is the
-          one typographic moment on this header: a large editorial
-          serif that sits above a thin brass rule. */}
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between pt-2">
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <span
-              aria-hidden
-              className="h-[1px] w-6 bg-primary/70"
-            />
-            <p className="font-display italic text-[13px] text-primary/80 tracking-wide">
-              Owner's dashboard
-            </p>
-          </div>
-          <h1 className="font-display text-[44px] md:text-[56px] leading-[0.95] text-foreground tracking-tight">
+          even before any KPI query resolves. */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground">Overview</p>
+          <h1 className="text-[32px] md:text-[40px] font-semibold leading-none text-foreground tracking-tight">
             {dashboardHeadline(preset, rangeFrom, rangeTo)}
           </h1>
-          <p className="text-xs text-muted-foreground tracking-wide tabular-nums">
-            Every figure below is scoped to this window.
-          </p>
         </div>
         <DashboardFilters
           currentPreset={preset}

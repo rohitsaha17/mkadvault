@@ -49,8 +49,8 @@ interface Props {
 export function DashboardAlerts({ alerts, locale }: Props) {
   return (
     <Card>
-      <CardHeader className="pb-3 pt-6">
-        <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+      <CardHeader className="pb-3 pt-5 px-5">
+        <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
           Critical alerts
         </CardTitle>
       </CardHeader>

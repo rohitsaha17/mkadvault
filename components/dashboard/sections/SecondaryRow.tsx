@@ -96,8 +96,8 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <Card>
-        <CardHeader className="pb-3 pt-6">
-          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+        <CardHeader className="pb-3 pt-5 px-5">
+          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
             {tDash("outstanding_ar")}
           </CardTitle>
         </CardHeader>
@@ -116,8 +116,8 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3 pt-6">
-          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+        <CardHeader className="pb-3 pt-5 px-5">
+          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
             {tDash("outstanding_payables")}
           </CardTitle>
         </CardHeader>
@@ -148,8 +148,8 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3 pt-6">
-          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+        <CardHeader className="pb-3 pt-5 px-5">
+          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
             {tDash("campaign_pipeline")}
           </CardTitle>
         </CardHeader>

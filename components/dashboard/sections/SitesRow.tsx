@@ -233,28 +233,28 @@ export async function SitesRow({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
-        <CardHeader className="pb-3 pt-6 space-y-1">
-          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+        <CardHeader className="pb-3 pt-5 px-5 space-y-1">
+          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
             {tDash("top_sites")}
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             Pro-rated to the window
           </p>
         </CardHeader>
-        <CardContent className="pb-6">
+        <CardContent className="pb-5 px-5">
           <SiteTable sites={top5Sites} labels={labels} />
         </CardContent>
       </Card>
       <Card>
-        <CardHeader className="pb-3 pt-6 space-y-1">
-          <CardTitle className="font-display text-[22px] tracking-tight leading-tight">
+        <CardHeader className="pb-3 pt-5 px-5 space-y-1">
+          <CardTitle className="text-lg font-semibold tracking-tight leading-tight">
             {tDash("bottom_sites")}
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             Lowest profit in the window
           </p>
         </CardHeader>
-        <CardContent className="pb-6">
+        <CardContent className="pb-5 px-5">
           <SiteTable sites={bottom5Sites} isBottom labels={labels} />
         </CardContent>
       </Card>
