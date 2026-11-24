@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, AlertCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +29,11 @@ import { useRouter } from "next/navigation";
 
 interface Props {
   clients: { id: string; company_name: string }[];
+  // Partner agencies also receive receipts (migration 048). Empty
+  // array falls back to the pre-048 client-only behaviour.
+  agencies?: { id: string; agency_name: string }[];
   preselectedClientId?: string;
+  preselectedAgencyId?: string;
   triggerLabel?: string;
 }
 
@@ -43,32 +47,46 @@ const PAYMENT_MODES = [
 
 export function RecordClientReceiptDialog({
   clients,
+  agencies = [],
   preselectedClientId,
+  preselectedAgencyId,
   triggerLabel = "Record on-account receipt",
 }: Props) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  // Surface server-side / DB errors inside the dialog as a red banner
+  // rather than only as a toast — matches RecordInvoicePaymentDialog.
+  const [serverError, setServerError] = useState<string | null>(null);
   const router = useRouter();
 
   const today = new Date().toISOString().slice(0, 10);
+  const defaultPayerType: "client" | "agency" = preselectedAgencyId
+    ? "agency"
+    : "client";
 
   const {
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors },
   } = useForm<ClientReceiptFormValues>({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- coerce.number shifts input type
     resolver: zodResolver(clientReceiptSchema) as any,
     defaultValues: {
-      client_id: preselectedClientId ?? "",
+      payer_type: defaultPayerType,
+      client_id: preselectedClientId ?? undefined,
+      agency_id: preselectedAgencyId ?? undefined,
       receipt_date: today,
       payment_mode: "bank_transfer",
       tds_inr: 0,
     },
   });
 
+  const payerType = watch("payer_type") ?? defaultPayerType;
+
   function onSubmit(values: ClientReceiptFormValues) {
+    setServerError(null);
     startTransition(async () => {
       try {
         const res = await callAction<{ error?: string; id?: string }>(
@@ -76,20 +94,25 @@ export function RecordClientReceiptDialog({
           values,
         );
         if (res.error) {
+          setServerError(res.error);
           toast.error(res.error);
           return;
         }
         toast.success("Receipt recorded — allocate it to invoices from the list.");
         setOpen(false);
         reset({
-          client_id: preselectedClientId ?? "",
+          payer_type: defaultPayerType,
+          client_id: preselectedClientId ?? undefined,
+          agency_id: preselectedAgencyId ?? undefined,
           receipt_date: today,
           payment_mode: "bank_transfer",
           tds_inr: 0,
         });
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Save failed");
+        const msg = err instanceof Error ? err.message : "Save failed";
+        setServerError(msg);
+        toast.error(msg);
       }
     });
   }
@@ -124,29 +147,111 @@ export function RecordClientReceiptDialog({
           }}
           className="space-y-4 py-2"
         >
-          <div className="space-y-1.5">
-            <Label>
-              Client <span className="text-destructive">*</span>
-            </Label>
-            <select
-              {...register("client_id")}
-              disabled={!!preselectedClientId}
-              className={cn(
-                "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                errors.client_id && "border-destructive",
-              )}
+          {serverError && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive"
             >
-              <option value="">— Select a client —</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.company_name}
-                </option>
-              ))}
-            </select>
-            {errors.client_id && (
-              <p className="text-xs text-destructive">{errors.client_id.message}</p>
-            )}
-          </div>
+              <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <div>
+                <p className="font-medium">Couldn&rsquo;t save receipt</p>
+                <p className="text-xs">{serverError}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Payer type switcher — client (default) or agency. Agency
+              side is hidden unless the caller passed any agencies in so
+              existing single-dropdown usage stays unchanged. */}
+          {agencies.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>Payer</Label>
+              <div className="flex gap-2">
+                <label
+                  className={cn(
+                    "flex-1 cursor-pointer rounded-md border px-3 py-2 text-sm",
+                    payerType === "client"
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border bg-background text-muted-foreground",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    value="client"
+                    className="sr-only"
+                    {...register("payer_type")}
+                  />
+                  Client
+                </label>
+                <label
+                  className={cn(
+                    "flex-1 cursor-pointer rounded-md border px-3 py-2 text-sm",
+                    payerType === "agency"
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border bg-background text-muted-foreground",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    value="agency"
+                    className="sr-only"
+                    {...register("payer_type")}
+                  />
+                  Agency
+                </label>
+              </div>
+            </div>
+          )}
+
+          {payerType === "agency" ? (
+            <div className="space-y-1.5">
+              <Label>
+                Agency <span className="text-destructive">*</span>
+              </Label>
+              <select
+                {...register("agency_id")}
+                disabled={!!preselectedAgencyId}
+                className={cn(
+                  "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                  errors.agency_id && "border-destructive",
+                )}
+              >
+                <option value="">— Select an agency —</option>
+                {agencies.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.agency_name}
+                  </option>
+                ))}
+              </select>
+              {errors.agency_id && (
+                <p className="text-xs text-destructive">{errors.agency_id.message}</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>
+                Client <span className="text-destructive">*</span>
+              </Label>
+              <select
+                {...register("client_id")}
+                disabled={!!preselectedClientId}
+                className={cn(
+                  "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                  errors.client_id && "border-destructive",
+                )}
+              >
+                <option value="">— Select a client —</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.company_name}
+                  </option>
+                ))}
+              </select>
+              {errors.client_id && (
+                <p className="text-xs text-destructive">{errors.client_id.message}</p>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

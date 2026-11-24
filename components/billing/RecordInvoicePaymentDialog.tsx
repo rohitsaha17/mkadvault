@@ -1,39 +1,20 @@
 "use client";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useForm, type FieldErrors } from "react-hook-form";
 import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
-import { Loader2, X } from "lucide-react";
+import { Loader2, X, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { inr } from "@/lib/utils";
 import { callAction } from "@/lib/utils/call-action";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
-
-// Coerce cleared number inputs (NaN from react-hook-form's valueAsNumber)
-// to 0 so the user sees "Amount must be positive" instead of Zod's
-// "Expected number, received nan" which silently blocks submit.
-const amountField = z.preprocess(
-  (v) => {
-    if (v === undefined || v === null || v === "") return 0;
-    if (typeof v === "number" && Number.isNaN(v)) return 0;
-    return v;
-  },
-  z.number().positive("Amount must be positive"),
-);
-
-const schema = z.object({
-  amount_inr: amountField,
-  payment_date: z.string().min(1, "Required"),
-  payment_mode: z.enum(["cash", "cheque", "bank_transfer", "upi", "online"]),
-  reference_number: z.string().optional(),
-  bank_name: z.string().optional(),
-  notes: z.string().optional(),
-});
-type FormValues = z.infer<typeof schema>;
+import {
+  paymentReceivedSchema,
+  type PaymentReceivedFormValues,
+} from "@/lib/validations/payment-received";
 
 interface Props {
   invoiceId: string;
@@ -45,19 +26,35 @@ interface Props {
 
 export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDuePaise, onClose, onSuccess }: Props) {
   const [isPending, startTransition] = useTransition();
-  const { register, handleSubmit, setFocus, formState: { errors } } = useForm<FormValues>({
+  // Surface server-side / DB errors inside the dialog as a red banner
+  // rather than only as a toast — the toast gets missed when the user
+  // is reading the form and reaches for the submit button again.
+  const [serverError, setServerError] = useState<string | null>(null);
+  const { register, handleSubmit, setFocus, watch, formState: { errors } } =
+    useForm<PaymentReceivedFormValues>({
     // Cast: z.preprocess() on amount_inr makes the input type `unknown`,
     // which trips zodResolver's generics. Matches SiteForm / CampaignForm.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(schema) as any,
+    resolver: zodResolver(paymentReceivedSchema) as any,
     defaultValues: {
       amount_inr: balanceDuePaise / 100,
+      tds_inr: 0,
       payment_date: new Date().toISOString().slice(0, 10),
       payment_mode: "bank_transfer",
     },
   });
 
-  function onSubmit(values: FormValues) {
+  // Live breakdown so the user can see the balance landing at zero
+  // once (amount + TDS) equals the outstanding figure.
+  const watchedAmount = watch("amount_inr");
+  const watchedTds = watch("tds_inr");
+  const effectivePaise =
+    Math.round(((Number(watchedAmount) || 0) + (Number(watchedTds) || 0)) * 100);
+  const remainingPaise = Math.max(0, balanceDuePaise - effectivePaise);
+  const overshoot = effectivePaise > balanceDuePaise + 1;
+
+  function onSubmit(values: PaymentReceivedFormValues) {
+    setServerError(null);
     const clean = sanitizeForTransport(values);
     startTransition(async () => {
       try {
@@ -66,12 +63,18 @@ export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDu
           invoiceId,
           clean,
         );
-        if (result.error) { toast.error(result.error); return; }
+        if (result.error) {
+          setServerError(result.error);
+          toast.error(result.error);
+          return;
+        }
         toast.success("Payment recorded");
         onSuccess();
         onClose();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Save failed");
+        const msg = err instanceof Error ? err.message : "Save failed";
+        setServerError(msg);
+        toast.error(msg);
       }
     });
   }
@@ -91,20 +94,67 @@ export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDu
           Invoice <strong>{invoiceNumber}</strong> · Balance due: <strong>{inr(balanceDuePaise)}</strong>
         </p>
 
+        {serverError && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div>
+              <p className="font-medium">Couldn&rsquo;t save payment</p>
+              <p className="text-xs">{serverError}</p>
+            </div>
+          </div>
+        )}
+
         <form
-          onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<FormValues>) =>
+          onSubmit={handleSubmit(onSubmit, (errs: FieldErrors<PaymentReceivedFormValues>) =>
             showFirstFormError(errs, { setFocus, label: "RecordInvoicePaymentDialog" }),
           )}
           className="space-y-3"
         >
-          <div className="space-y-1">
-            <Label>Amount Received (₹) *</Label>
-            <Input
-              {...register("amount_inr", { valueAsNumber: true })}
-              type="number"
-              step="0.01"
-            />
-            {errors.amount_inr && <p className="text-xs text-red-500">{errors.amount_inr.message}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Amount Received (₹) *</Label>
+              <Input
+                {...register("amount_inr", { valueAsNumber: true })}
+                type="number"
+                step="0.01"
+              />
+              {errors.amount_inr && <p className="text-xs text-red-500">{errors.amount_inr.message}</p>}
+            </div>
+            <div className="space-y-1">
+              <Label>TDS Deducted (₹)</Label>
+              <Input
+                {...register("tds_inr", { valueAsNumber: true })}
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0"
+              />
+              {errors.tds_inr && <p className="text-xs text-red-500">{errors.tds_inr.message}</p>}
+            </div>
+          </div>
+
+          {/* Running breakdown — amount + TDS sits against the invoice
+              balance so it's obvious when a receipt settles the bill. */}
+          <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <div className="flex items-center justify-between tabular-nums">
+              <span>Amount + TDS</span>
+              <span className="font-medium text-foreground">{inr(effectivePaise)}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between tabular-nums">
+              <span>After this receipt</span>
+              <span
+                className={
+                  overshoot
+                    ? "font-medium text-destructive"
+                    : "font-medium text-foreground"
+                }
+              >
+                {overshoot ? "Exceeds balance" : inr(remainingPaise)}
+              </span>
+            </div>
           </div>
 
           <div className="space-y-1">
@@ -144,7 +194,7 @@ export function RecordInvoicePaymentDialog({ invoiceId, invoiceNumber, balanceDu
           </div>
 
           <div className="flex gap-3 pt-2">
-            <Button type="submit" disabled={isPending} className="flex-1">
+            <Button type="submit" disabled={isPending || overshoot} className="flex-1">
               {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Record Payment
             </Button>

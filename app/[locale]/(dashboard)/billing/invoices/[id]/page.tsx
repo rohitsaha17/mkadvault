@@ -456,6 +456,7 @@ export default async function InvoiceDetailPage({
                       <th className="px-4 py-3 text-left">Date</th>
                       <th className="px-4 py-3 text-left">Mode</th>
                       <th className="px-4 py-3 text-left">Reference</th>
+                      <th className="px-4 py-3 text-right">TDS</th>
                       <th className="px-4 py-3 text-right">Amount</th>
                     </tr>
                   </thead>
@@ -466,6 +467,9 @@ export default async function InvoiceDetailPage({
                         <td className="px-4 py-3 tabular-nums text-muted-foreground">{fmt(p.payment_date)}</td>
                         <td className="px-4 py-3 text-foreground">{PM_LABELS[p.payment_mode] ?? p.payment_mode}</td>
                         <td className="px-4 py-3 text-muted-foreground">{p.reference_number ?? "—"}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                          {(p.tds_paise ?? 0) > 0 ? inr(p.tds_paise) : "—"}
+                        </td>
                         <td className="px-4 py-3 text-right font-medium tabular-nums text-emerald-700 dark:text-emerald-300">{inr(p.amount_paise)}</td>
                       </tr>
                     ))}

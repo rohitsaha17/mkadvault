@@ -115,6 +115,12 @@ export async function renderReceiptVoucherPdf(
     drawTwoColRow(doc, "Reference", payment.reference_number);
   }
   if (payment.bank_name) drawTwoColRow(doc, "Bank", payment.bank_name);
+  // Surface TDS whenever a non-zero amount was deducted — the PDF
+  // otherwise tells the client "we got X" when the invoice is being
+  // settled by X + TDS.
+  if ((payment.tds_paise ?? 0) > 0) {
+    drawTwoColRow(doc, "TDS deducted", inr(payment.tds_paise ?? 0));
+  }
   if (payment.notes) {
     doc.moveDown(0.2);
     sectionLabel(doc, "Notes");

@@ -40,6 +40,9 @@ const PM_LABELS: Record<PaymentMode, string> = {
 
 type ReceiptRow = PaymentReceived & {
   client?: { id: string; company_name: string } | null;
+  // Agency payer (migration 048) hydrated via a separate query so this
+  // list keeps rendering on pre-048 databases.
+  agency?: { id: string; agency_name: string } | null;
   invoice?: { id: string; invoice_number: string } | null;
 };
 
@@ -98,6 +101,28 @@ export default async function ReceiptsPage({
   const { data: receiptsData } = await query;
   const receipts = (receiptsData ?? []) as unknown as ReceiptRow[];
 
+  // Hydrate agency names for agency-billed receipts (migration 048).
+  // When the column doesn't exist the map stays empty and every row
+  // renders as a direct-client receipt.
+  const agencyIds = Array.from(
+    new Set(
+      receipts
+        .map((r) => (r as { agency_id?: string | null }).agency_id)
+        .filter((id): id is string => !!id),
+    ),
+  );
+  if (agencyIds.length > 0) {
+    const { data: agencyRows } = await supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .in("id", agencyIds);
+    const agencyMap = new Map((agencyRows ?? []).map((a) => [a.id, a]));
+    for (const r of receipts) {
+      const aid = (r as { agency_id?: string | null }).agency_id;
+      if (aid && agencyMap.has(aid)) r.agency = agencyMap.get(aid)!;
+    }
+  }
+
   // Pull on-account client receipts so finance can see what's sitting
   // unallocated. Separate card below the invoice-linked table.
   const { data: oaReceiptsRaw } = await supabase
@@ -118,8 +143,29 @@ export default async function ReceiptsPage({
     reference_number: string | null;
     bank_name: string | null;
     external_reference: string | null;
+    agency_id?: string | null;
     client: { id: string; company_name: string } | null;
+    agency?: { id: string; agency_name: string } | null;
   }>;
+
+  // Agency hydration for on-account receipts (same pattern as above).
+  const oaAgencyIds = Array.from(
+    new Set(
+      oaReceipts
+        .map((r) => r.agency_id ?? null)
+        .filter((id): id is string => !!id),
+    ),
+  );
+  if (oaAgencyIds.length > 0) {
+    const { data: agencyRows } = await supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .in("id", oaAgencyIds);
+    const map = new Map((agencyRows ?? []).map((a) => [a.id, a]));
+    for (const r of oaReceipts) {
+      if (r.agency_id && map.has(r.agency_id)) r.agency = map.get(r.agency_id)!;
+    }
+  }
 
   // Allocation sum per receipt, so we can show "₹X unallocated" without
   // another round-trip from the browser.
@@ -139,12 +185,22 @@ export default async function ReceiptsPage({
     }
   }
 
-  // Fetch clients once for the "Record on-account" dialog dropdown.
-  const { data: clientsForDialog } = await supabase
-    .from("clients")
-    .select("id, company_name")
-    .is("deleted_at", null)
-    .order("company_name");
+  // Fetch clients + agencies for the "Record on-account" dialog
+  // dropdowns. The dialog shows the agency side only if the array
+  // isn't empty, so on pre-048 databases the UI collapses back to the
+  // old single-dropdown form.
+  const [{ data: clientsForDialog }, { data: agenciesForDialog }] = await Promise.all([
+    supabase
+      .from("clients")
+      .select("id, company_name")
+      .is("deleted_at", null)
+      .order("company_name"),
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .is("deleted_at", null)
+      .order("agency_name"),
+  ]);
 
   // KPIs based on the *current filter window* so the tile tallies match
   // what the user is actually looking at.
@@ -177,6 +233,10 @@ export default async function ReceiptsPage({
             clients={(clientsForDialog ?? []).map((c) => ({
               id: c.id,
               company_name: c.company_name,
+            }))}
+            agencies={(agenciesForDialog ?? []).map((a) => ({
+              id: a.id,
+              agency_name: a.agency_name,
             }))}
           />
         }
@@ -293,7 +353,7 @@ export default async function ReceiptsPage({
                   <tr>
                     <th className="px-4 py-3 text-left">Receipt #</th>
                     <th className="px-4 py-3 text-left">Date</th>
-                    <th className="px-4 py-3 text-left">Client</th>
+                    <th className="px-4 py-3 text-left">Payer</th>
                     <th className="px-4 py-3 text-left">Invoice</th>
                     <th className="px-4 py-3 text-left">Mode</th>
                     <th className="px-4 py-3 text-left">Reference</th>
@@ -311,7 +371,14 @@ export default async function ReceiptsPage({
                         {fmt(r.payment_date)}
                       </td>
                       <td className="px-4 py-3 text-foreground">
-                        {r.client ? (
+                        {r.agency ? (
+                          <Link href={`/agencies/${r.agency.id}`} className="hover:text-primary hover:underline">
+                            {r.agency.agency_name}
+                            <span className="ml-1.5 inline-flex items-center rounded border border-border bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                              Agency
+                            </span>
+                          </Link>
+                        ) : r.client ? (
                           <Link href={`/clients/${r.client.id}`} className="hover:text-primary hover:underline">
                             {r.client.company_name}
                           </Link>
@@ -396,7 +463,7 @@ export default async function ReceiptsPage({
                   <tr>
                     <th className="px-4 py-3 text-left">Receipt #</th>
                     <th className="px-4 py-3 text-left">Date</th>
-                    <th className="px-4 py-3 text-left">Client</th>
+                    <th className="px-4 py-3 text-left">Payer</th>
                     <th className="px-4 py-3 text-left">Mode</th>
                     <th className="px-4 py-3 text-left">Reference</th>
                     <th className="px-4 py-3 text-right">Amount</th>
@@ -416,7 +483,14 @@ export default async function ReceiptsPage({
                           {fmt(r.receipt_date)}
                         </td>
                         <td className="px-4 py-3 text-foreground">
-                          {r.client ? (
+                          {r.agency ? (
+                            <Link href={`/agencies/${r.agency.id}`} className="hover:text-primary hover:underline">
+                              {r.agency.agency_name}
+                              <span className="ml-1.5 inline-flex items-center rounded border border-border bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                                Agency
+                              </span>
+                            </Link>
+                          ) : r.client ? (
                             <Link href={`/clients/${r.client.id}`} className="hover:text-primary hover:underline">
                               {r.client.company_name}
                             </Link>

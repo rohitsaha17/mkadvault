@@ -1,11 +1,14 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { z } from "zod";
 import type { InvoiceStatus, PaymentMode } from "@/lib/types/database";
 import { notify } from "@/lib/notifications/dispatch";
 import { inr } from "@/lib/utils";
 import { invoiceSchema } from "@/lib/validations/invoice";
+import {
+  paymentReceivedSchema,
+  balanceAfterReceipt,
+} from "@/lib/validations/payment-received";
 
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -283,72 +286,130 @@ export async function deleteInvoice(id: string): Promise<{ error?: string }> {
 
 // ─── Record Payment ───────────────────────────────────────────────────────────
 
-const recordPaymentSchema = z.object({
-  amount_inr: z.number().positive("Amount must be positive"),
-  payment_date: z.string().min(1, "Payment date required"),
-  payment_mode: z.enum(["cash", "cheque", "bank_transfer", "upi", "online"]),
-  reference_number: z.string().optional(),
-  bank_name: z.string().optional(),
-  notes: z.string().optional(),
-});
-
 export async function recordPayment(
   invoiceId: string,
   values: unknown
 ): Promise<{ error?: string }> {
   try {
-    const parsed = recordPaymentSchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    const parsed = paymentReceivedSchema.safeParse(values);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue.path.length ? `${issue.path.join(".")}: ` : "";
+      return { error: path + issue.message };
+    }
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
     const d = parsed.data;
 
-    // Fetch current invoice — plus number + client name so the
-    // outbound notification can name the invoice and the payer
-    // without a second round-trip.
-    const { data: invoiceRaw } = await ctx.supabase
-      .from("invoices")
-      .select(
-        "client_id, total_paise, amount_paid_paise, invoice_number, " +
-          "client:clients(company_name)",
-      )
-      .eq("id", invoiceId)
-      .single();
-    // Postgrest's generated row type doesn't always pick up embedded
-    // relations; assert the shape we just selected.
-    const invoice = invoiceRaw as unknown as {
-      client_id: string;
+    // Fetch the invoice and read its bill-to side. The payer is either
+    // the direct client or the billed agency (migration 047); we set
+    // the matching column on payments_received so the agency-billed
+    // case doesn't fail the client_id NOT-NULL from migration 048.
+    //
+    // billed_agency_id / bill_to_type are 047 columns; wrap in a retry
+    // without them so Record Payment keeps working on databases where
+    // 047 hasn't been applied yet (the fallback path treats every
+    // invoice as client-billed, which is the pre-047 behaviour).
+    type InvoiceForReceipt = {
+      client_id: string | null;
+      billed_agency_id?: string | null;
+      bill_to_type?: "client" | "agency";
       total_paise: number | null;
       amount_paid_paise: number | null;
+      balance_due_paise: number | null;
       invoice_number: string;
       client: { company_name: string | null } | { company_name: string | null }[] | null;
-    } | null;
+      agency: { agency_name: string | null } | { agency_name: string | null }[] | null;
+    };
+
+    let invoice: InvoiceForReceipt | null = null;
+    {
+      const { data, error } = await ctx.supabase
+        .from("invoices")
+        .select(
+          "client_id, billed_agency_id, bill_to_type, total_paise, amount_paid_paise, balance_due_paise, invoice_number, " +
+            "client:clients(company_name)",
+        )
+        .eq("id", invoiceId)
+        .maybeSingle();
+      if (error && /Could not find the .* column/i.test(error.message)) {
+        const retry = await ctx.supabase
+          .from("invoices")
+          .select(
+            "client_id, total_paise, amount_paid_paise, balance_due_paise, invoice_number, " +
+              "client:clients(company_name)",
+          )
+          .eq("id", invoiceId)
+          .maybeSingle();
+        invoice = retry.data as unknown as InvoiceForReceipt | null;
+        if (invoice) {
+          invoice.billed_agency_id = null;
+          invoice.bill_to_type = "client";
+          invoice.agency = null;
+        }
+      } else {
+        invoice = data as unknown as InvoiceForReceipt | null;
+      }
+    }
 
     if (!invoice) return { error: "Invoice not found" };
 
-    const amountPaise = Math.round(d.amount_inr * 100);
-    const balanceDuePaise = (invoice.total_paise ?? 0) - (invoice.amount_paid_paise ?? 0);
-
-    // Prevent overpayment — amount cannot exceed the remaining balance
-    if (amountPaise > balanceDuePaise) {
-      return { error: "Payment amount exceeds balance due" };
+    // Hydrate the agency row for the notification payload — second
+    // query so this keeps working on pre-047 databases. Non-fatal
+    // either way; the notify() call below just loses the payer name.
+    if (invoice.billed_agency_id) {
+      const { data: agencyRow } = await ctx.supabase
+        .from("partner_agencies")
+        .select("agency_name")
+        .eq("id", invoice.billed_agency_id)
+        .maybeSingle();
+      invoice.agency = agencyRow ?? null;
     }
 
-    const newAmountPaid = (invoice.amount_paid_paise ?? 0) + amountPaise;
-    const newBalance = (invoice.total_paise ?? 0) - newAmountPaid;
-    const newStatus: InvoiceStatus = newBalance <= 0 ? "paid" : "partially_paid";
+    const isAgencyBill =
+      invoice.bill_to_type === "agency" && !!invoice.billed_agency_id;
+
+    const amountPaise = Math.round(d.amount_inr * 100);
+    const tdsPaise = Math.round((d.tds_inr ?? 0) * 100);
+    // Balance = total - sum(amount + tds). Use the stored
+    // balance_due_paise which is the running tally after every prior
+    // receipt + allocation on this invoice.
+    const balanceDuePaise =
+      invoice.balance_due_paise ??
+      (invoice.total_paise ?? 0) - (invoice.amount_paid_paise ?? 0);
+    const effectivePaise = amountPaise + tdsPaise;
+
+    // Prevent overpayment — effective (cash + TDS) can't exceed the
+    // remaining balance. Rounding tolerance of 1 paisa so a receipt
+    // that settles the invoice to within one paisa doesn't get
+    // rejected (same tolerance balanceAfterReceipt uses to flip the
+    // status to "paid").
+    if (effectivePaise > balanceDuePaise + 1) {
+      return { error: "Amount + TDS exceeds balance due" };
+    }
+
+    const projected = balanceAfterReceipt({
+      totalPaise: invoice.total_paise ?? 0,
+      previousBalancePaise: balanceDuePaise,
+      previousAmountPaidPaise: invoice.amount_paid_paise ?? 0,
+      amountPaise,
+      tdsPaise,
+    });
 
     // Generate receipt number
     const receiptNumber = await generateReceiptNumber(ctx.supabase, ctx.orgId, d.payment_date);
 
-    // Insert payment record
-    const { error: payErr } = await ctx.supabase.from("payments_received").insert({
+    // Insert payment record. Try with the 048 columns first (agency
+    // payer + TDS); if the DB hasn't applied 048 yet, retry without
+    // those and reject the agency-bill case with a clear error so we
+    // never silently drop TDS or mis-attribute an agency receipt to a
+    // NULL client_id.
+    const basePayload = {
       organization_id: ctx.orgId,
       created_by: ctx.user.id,
       invoice_id: invoiceId,
-      client_id: invoice.client_id,
       amount_paise: amountPaise,
       payment_date: d.payment_date,
       payment_mode: d.payment_mode as PaymentMode,
@@ -356,16 +417,48 @@ export async function recordPayment(
       bank_name: str(d.bank_name),
       notes: str(d.notes),
       receipt_number: receiptNumber,
-    });
+    };
+    const withNewCols = {
+      ...basePayload,
+      // Mirror the invoice's bill-to side on the receipt (048).
+      client_id: isAgencyBill ? null : invoice.client_id,
+      agency_id: isAgencyBill ? invoice.billed_agency_id : null,
+      tds_paise: tdsPaise,
+    };
+
+    let payErr: { message: string } | null = null;
+    {
+      const res = await ctx.supabase.from("payments_received").insert(withNewCols);
+      if (res.error && /Could not find the .* column/i.test(res.error.message)) {
+        if (isAgencyBill) {
+          return {
+            error:
+              "Agency-billed receipts need migration 048 to be applied. Run it from the Supabase SQL editor and try again.",
+          };
+        }
+        if (tdsPaise > 0) {
+          return {
+            error:
+              "Recording TDS needs migration 048 to be applied. Run it from the Supabase SQL editor and try again.",
+          };
+        }
+        const retry = await ctx.supabase
+          .from("payments_received")
+          .insert({ ...basePayload, client_id: invoice.client_id });
+        payErr = retry.error ? { message: retry.error.message } : null;
+      } else {
+        payErr = res.error ? { message: res.error.message } : null;
+      }
+    }
     if (payErr) return { error: payErr.message };
 
     // Update invoice totals and status
     const { error: updErr } = await ctx.supabase
       .from("invoices")
       .update({
-        amount_paid_paise: newAmountPaid,
-        balance_due_paise: Math.max(0, newBalance),
-        status: newStatus,
+        amount_paid_paise: projected.newAmountPaidPaise,
+        balance_due_paise: projected.newBalancePaise,
+        status: projected.newStatus,
         updated_by: ctx.user.id,
       })
       .eq("id", invoiceId);
@@ -378,15 +471,21 @@ export async function recordPayment(
     // Resend is down or the dispatcher hiccups the user still gets
     // a successful "payment recorded" response.
     const clientRel = invoice!.client;
+    const agencyRel = invoice!.agency;
     const clientName = Array.isArray(clientRel)
       ? clientRel[0]?.company_name ?? null
       : clientRel?.company_name ?? null;
+    const agencyName = Array.isArray(agencyRel)
+      ? agencyRel[0]?.agency_name ?? null
+      : agencyRel?.agency_name ?? null;
+    const payerName = isAgencyBill ? agencyName : clientName;
     const amountFormatted = new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency: "INR",
       maximumFractionDigits: 0,
     }).format(amountPaise / 100);
-    const isFullSettlement = newStatus === "paid";
+    const isFullSettlement = projected.newStatus === "paid";
+    const payerLabel = isAgencyBill ? "Agency" : "Client";
     await notify({
       organizationId: ctx.orgId,
       eventType: "invoice_paid",
@@ -397,11 +496,11 @@ export async function recordPayment(
         ? `Payment received — ${invoice.invoice_number} settled`
         : `Partial payment received — ${invoice.invoice_number}`,
       message: isFullSettlement
-        ? `${clientName ?? "Client"} paid ${amountFormatted} against invoice ${invoice.invoice_number}. The invoice is now fully settled.`
-        : `${clientName ?? "Client"} paid ${amountFormatted} against invoice ${invoice.invoice_number}. Balance remaining will appear on the invoice.`,
+        ? `${payerName ?? payerLabel} paid ${amountFormatted} against invoice ${invoice.invoice_number}. The invoice is now fully settled.`
+        : `${payerName ?? payerLabel} paid ${amountFormatted} against invoice ${invoice.invoice_number}. Balance remaining will appear on the invoice.`,
       data: {
         Invoice: invoice.invoice_number,
-        Client: clientName ?? "—",
+        [payerLabel]: payerName ?? "—",
         Amount: amountFormatted,
         Mode: d.payment_mode,
         "Receipt #": receiptNumber,

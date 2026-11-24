@@ -825,9 +825,15 @@ export interface PaymentReceived {
   created_by: string | null;
 
   invoice_id: string;
-  client_id: string;
+  // Exactly one of client_id / agency_id is set (migration 048). An
+  // agency-billed invoice records its receipts against agency_id.
+  client_id: string | null;
+  agency_id: string | null;
 
   amount_paise: number;
+  // TDS deducted by the payer against this receipt (migration 048).
+  // Invoice balance = total − sum(amount_paise + tds_paise).
+  tds_paise: number;
   payment_date: string;
   payment_mode: PaymentMode;
   reference_number: string | null;

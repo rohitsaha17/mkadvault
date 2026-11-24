@@ -118,9 +118,51 @@ export async function GET(
       > | null;
     };
 
-    if (!payment.invoice || !payment.client) {
+    if (!payment.invoice) {
       return NextResponse.json(
-        { error: "Payment is missing its invoice or client link." },
+        { error: "Payment is missing its invoice link." },
+        { status: 400 },
+      );
+    }
+
+    // Hydrate the agency payer when the receipt is agency-billed
+    // (migration 048). Separate query so the route still works on
+    // pre-048 databases — the main select above doesn't ask for
+    // billed_agency_id, so a missing column there is harmless too.
+    type AgencyShape = {
+      agency_name: string;
+      address: string | null;
+      city: string | null;
+      state: string | null;
+      gstin: string | null;
+    };
+    let agency: AgencyShape | null = null;
+    if (payment.agency_id) {
+      const { data: agencyData } = await supabase
+        .from("partner_agencies")
+        .select("agency_name, address, city, state, gstin")
+        .eq("id", payment.agency_id)
+        .eq("organization_id", profile.org_id)
+        .maybeSingle();
+      agency = (agencyData as AgencyShape | null) ?? null;
+    }
+
+    // Shape the payer like the client payload the PDF renderer
+    // already expects, so we don't have to fork its code path.
+    const payerShape = agency !== null
+      ? {
+          company_name: agency.agency_name,
+          brand_name: null,
+          billing_address: agency.address,
+          billing_city: agency.city,
+          billing_state: agency.state,
+          billing_pin_code: null,
+          gstin: agency.gstin,
+        }
+      : payment.client;
+    if (!payerShape) {
+      return NextResponse.json(
+        { error: "Payment is missing its payer link." },
         { status: 400 },
       );
     }
@@ -141,7 +183,7 @@ export async function GET(
     const buffer = await renderReceiptVoucherPdf({
       payment,
       invoice: payment.invoice,
-      client: payment.client,
+      client: payerShape,
       org,
       orgLogoSignedUrl,
       receivedByName: (profile as { full_name?: string | null }).full_name ?? null,
