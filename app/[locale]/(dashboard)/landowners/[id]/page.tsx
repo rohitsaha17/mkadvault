@@ -1,9 +1,11 @@
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { payableState } from "@/lib/payables";
 import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
 import { inr, fmt } from "@/lib/utils";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -59,6 +61,7 @@ export default async function LandownerDetailPage({
   }
   const siteMap = new Map(sites.map((s) => [s.id, s]));
 
+  const today = todayInIndia();
   // Fetch recent payments across all landowner contracts
   const contractIds = contracts.map((c) => c.id);
   let payments: ContractPayment[] = [];
@@ -241,9 +244,7 @@ export default async function LandownerDetailPage({
                           {p.amount_paid_paise ? inr(p.amount_paid_paise) : "—"}
                         </td>
                         <td className="px-4 py-2.5">
-                          <Badge variant="outline" className="text-xs capitalize">
-                            {p.status.replace(/_/g, " ")}
-                          </Badge>
+                          <StatusBadge status={payableState(p, today)} />
                         </td>
                       </tr>
                     ))}

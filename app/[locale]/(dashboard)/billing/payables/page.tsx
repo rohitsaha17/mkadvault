@@ -1,8 +1,14 @@
 // Payables list — themed to match the app-wide UI overhaul.
 import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
+import {
+  loadPayablesSummary,
+  payableBalance,
+  payableState,
+} from "@/lib/payables";
 import { createClient } from "@/lib/supabase/server";
 import { inr, fmt } from "@/lib/utils";
+import { monthEnd, todayInIndia } from "@/lib/utils/time-buckets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -55,61 +61,36 @@ export default async function PayablesPage({
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
-  const { tab = "upcoming", page } = await searchParams;
+  const { tab: tabParam, page } = await searchParams;
+  const tab =
+    tabParam === "overdue" || tabParam === "paid" ? tabParam : "upcoming";
   const currentPage = Math.max(1, parseInt(page ?? "1", 10));
   const PAGE_SIZE = 25;
   const offset = (currentPage - 1) * PAGE_SIZE;
 
   const supabase = await createClient();
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const nextThirtyDate = new Date();
-  nextThirtyDate.setDate(nextThirtyDate.getDate() + 30);
-  const nextThirtyDays = nextThirtyDate.toISOString().slice(0, 10);
+  const today = todayInIndia();
 
-  const [
-    { data: upcomingData },
-    { data: overdueData },
-    { data: paidThisMonthData },
-  ] = await Promise.all([
-    supabase
-      .from("contract_payments")
-      .select("amount_due_paise, tds_deducted_paise")
-      .in("status", ["upcoming", "due"])
-      .lte("due_date", nextThirtyDays),
-    supabase
-      .from("contract_payments")
-      .select("amount_due_paise, amount_paid_paise, tds_deducted_paise")
-      .eq("status", "overdue"),
-    supabase
-      .from("contract_payments")
-      .select("amount_paid_paise")
-      .eq("status", "paid")
-      .gte("payment_date", `${thisMonth}-01`)
-      .lte("payment_date", `${thisMonth}-31`),
-  ]);
+  const [payables, { data: paidThisMonthData, error: paidError }] =
+    await Promise.all([
+      loadPayablesSummary(supabase, today),
+      supabase
+        .from("contract_payments")
+        .select("amount_paid_paise")
+        .eq("status", "paid")
+        .gte("payment_date", `${today.slice(0, 7)}-01`)
+        // Not "-31": in a 30-day month that isn't a date and the query fails.
+        .lte("payment_date", monthEnd(today)),
+    ]);
 
-  const upcomingTotal = (upcomingData ?? []).reduce((s, p) => {
-    const net = (p.amount_due_paise ?? 0) - (p.tds_deducted_paise ?? 0);
-    return s + net;
-  }, 0);
-  const overdueTotal = (overdueData ?? []).reduce((s, p) => {
-    const net =
-      (p.amount_due_paise ?? 0) -
-      (p.amount_paid_paise ?? 0) -
-      (p.tds_deducted_paise ?? 0);
-    return s + Math.max(0, net);
-  }, 0);
-  const paidThisMonth = (paidThisMonthData ?? []).reduce(
-    (s, p) => s + (p.amount_paid_paise ?? 0),
-    0
-  );
+  const paidThisMonth = paidError
+    ? null
+    : (paidThisMonthData ?? []).reduce(
+        (s, p) => s + (p.amount_paid_paise ?? 0),
+        0,
+      );
 
-  let statusFilter: string[];
-  if (tab === "overdue") statusFilter = ["overdue"];
-  else if (tab === "paid") statusFilter = ["paid"];
-  else statusFilter = ["upcoming", "due"];
-
-  const { data: paymentsData, count } = await supabase
+  let query = supabase
     .from("contract_payments")
     .select(
       `
@@ -125,8 +106,19 @@ export default async function PayablesPage({
       )
     `,
       { count: "exact" }
-    )
-    .in("status", statusFilter)
+    );
+  if (tab === "paid") {
+    query = query.eq("status", "paid");
+  } else {
+    // Overdue and upcoming split on the due date, so a part-paid or stale
+    // row always lands in one of the two. See lib/payables.ts.
+    query = query.neq("status", "paid").not("contract", "is", null);
+    query =
+      tab === "overdue"
+        ? query.lt("due_date", today)
+        : query.gte("due_date", today);
+  }
+  const { data: paymentsData, count } = await query
     .order("due_date", { ascending: tab !== "paid" })
     .range(offset, offset + PAGE_SIZE - 1);
 
@@ -166,8 +158,13 @@ export default async function PayablesPage({
   });
 
   const TABS = [
-    { key: "upcoming", label: "Upcoming (30 days)" },
-    { key: "overdue", label: "Overdue" },
+    { key: "upcoming", label: "Upcoming" },
+    {
+      key: "overdue",
+      label: payables?.overdueCount
+        ? `Overdue (${payables.overdueCount})`
+        : "Overdue",
+    },
     { key: "paid", label: "Paid" },
   ];
 
@@ -183,9 +180,29 @@ export default async function PayablesPage({
 
       {/* Summary Cards */}
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <KpiTile label="Due Next 30 Days" value={inr(upcomingTotal)} hint="Net of TDS" />
-        <KpiTile label="Overdue Payables" value={inr(overdueTotal)} tone="danger" />
-        <KpiTile label="Paid This Month" value={inr(paidThisMonth)} tone="success" />
+        <KpiTile
+          label="Due Next 30 Days"
+          value={inr(payables?.dueSoon)}
+          hint={payables ? "Net of TDS" : "Couldn't load"}
+        />
+        <KpiTile
+          label="Overdue Payables"
+          value={inr(payables?.overdue)}
+          hint={
+            !payables
+              ? "Couldn't load"
+              : payables.oldestOverdue
+                ? `${payables.overdueCount} unpaid, oldest due ${fmt(payables.oldestOverdue)}`
+                : "Nothing overdue"
+          }
+          tone={payables?.overdue ? "danger" : undefined}
+        />
+        <KpiTile
+          label="Paid This Month"
+          value={inr(paidThisMonth)}
+          hint={paidThisMonth === null ? "Couldn't load" : undefined}
+          tone="success"
+        />
       </div>
 
       {/* Tabs */}
@@ -231,7 +248,10 @@ export default async function PayablesPage({
               </TableHeader>
               <TableBody>
                 {payments.map((p) => {
-                  const net = p.amount_due_paise - (p.tds_deducted_paise ?? 0);
+                  const net =
+                    tab === "paid"
+                      ? p.amount_due_paise - (p.tds_deducted_paise ?? 0)
+                      : payableBalance(p);
                   return (
                     <TableRow key={p.id}>
                       <TableCell>
@@ -263,7 +283,7 @@ export default async function PayablesPage({
                         {inr(net)}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={p.status} />
+                        <StatusBadge status={payableState(p, today)} />
                       </TableCell>
                       {tab === "paid" && (
                         <TableCell className="text-xs text-muted-foreground">

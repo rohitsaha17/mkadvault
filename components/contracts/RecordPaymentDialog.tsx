@@ -74,7 +74,7 @@ export function RecordPaymentDialog({ paymentRowId, amountDuePaise, dueDate, onS
             onClick={() => setOpen(false)}
           />
           {/* Modal */}
-          <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
+          <div className="relative rounded-2xl border border-border bg-popover text-popover-foreground text-left shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Record Payment</h2>
               <p className="text-sm text-muted-foreground mt-0.5">

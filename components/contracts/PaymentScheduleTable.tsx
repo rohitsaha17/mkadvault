@@ -1,23 +1,21 @@
 "use client";
-import { Badge } from "@/components/ui/badge";
+// The rent schedule on a contract. The badge and the Record button go by the
+// due date (see lib/payables.ts): the stored status never moves on by itself,
+// so rent that fell due after the contract was entered used to stay "upcoming"
+// with no way to record it.
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { payableState } from "@/lib/payables";
 import { inr, fmt } from "@/lib/utils";
 import { RecordPaymentDialog } from "./RecordPaymentDialog";
 import type { ContractPayment } from "@/lib/types/database";
 
 interface Props {
   payments: ContractPayment[];
-  contractId: string;
+  /** Today in India, from the server, so both sides agree on what is late. */
+  today: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  upcoming: "bg-blue-50 text-blue-700 border-blue-200",
-  due: "bg-amber-50 text-amber-700 border-amber-200",
-  paid: "bg-green-50 text-green-700 border-green-200",
-  overdue: "bg-red-50 text-red-700 border-red-200",
-  partially_paid: "bg-orange-50 text-orange-700 border-orange-200",
-};
-
-export function PaymentScheduleTable({ payments, contractId: _contractId }: Props) {
+export function PaymentScheduleTable({ payments, today }: Props) {
   if (payments.length === 0) {
     return (
       <p className="text-sm text-muted-foreground text-center py-6">No payment schedule generated.</p>
@@ -29,48 +27,50 @@ export function PaymentScheduleTable({ payments, contractId: _contractId }: Prop
       <table className="w-full text-sm">
         <thead className="border-b bg-muted">
           <tr>
-            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Due Date</th>
-            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Amount Due</th>
-            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Paid</th>
-            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">TDS</th>
-            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Mode</th>
-            <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Status</th>
-            <th className="px-4 py-2.5" />
+            <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground">Due Date</th>
+            <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground">Amount Due</th>
+            <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground">Paid</th>
+            <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground">TDS</th>
+            <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground">Mode</th>
+            <th className="text-left px-3 py-2.5 text-xs font-medium text-muted-foreground">Status</th>
+            <th className="px-3 py-2.5" />
           </tr>
         </thead>
         <tbody className="divide-y">
-          {payments.map((p) => (
-            <tr key={p.id} className="hover:bg-muted">
-              <td className="px-4 py-2.5 whitespace-nowrap">{fmt(p.due_date)}</td>
-              <td className="px-4 py-2.5">{inr(p.amount_due_paise)}</td>
-              <td className="px-4 py-2.5">
-                {p.amount_paid_paise ? inr(p.amount_paid_paise) : "—"}
-              </td>
-              <td className="px-4 py-2.5">
-                {p.tds_deducted_paise ? inr(p.tds_deducted_paise) : "—"}
-              </td>
-              <td className="px-4 py-2.5 capitalize">
-                {p.payment_mode?.replace(/_/g, " ") ?? "—"}
-              </td>
-              <td className="px-4 py-2.5">
-                <Badge
-                  variant="outline"
-                  className={`text-xs capitalize ${STATUS_COLORS[p.status] ?? ""}`}
-                >
-                  {p.status.replace(/_/g, " ")}
-                </Badge>
-              </td>
-              <td className="px-4 py-2.5 text-right">
-                {(p.status === "due" || p.status === "overdue" || p.status === "partially_paid") && (
-                  <RecordPaymentDialog
-                    paymentRowId={p.id}
-                    amountDuePaise={p.amount_due_paise}
-                    dueDate={fmt(p.due_date)}
-                  />
-                )}
-              </td>
-            </tr>
-          ))}
+          {payments.map((p) => {
+            const state = payableState(p, today);
+            const canRecord =
+              state === "due" ||
+              state === "overdue" ||
+              state === "partially_paid";
+            return (
+              <tr key={p.id} className="hover:bg-muted">
+                <td className="px-3 py-2.5 whitespace-nowrap">{fmt(p.due_date)}</td>
+                <td className="px-3 py-2.5">{inr(p.amount_due_paise)}</td>
+                <td className="px-3 py-2.5">
+                  {p.amount_paid_paise ? inr(p.amount_paid_paise) : "—"}
+                </td>
+                <td className="px-3 py-2.5">
+                  {p.tds_deducted_paise ? inr(p.tds_deducted_paise) : "—"}
+                </td>
+                <td className="px-3 py-2.5 capitalize">
+                  {p.payment_mode?.replace(/_/g, " ") ?? "—"}
+                </td>
+                <td className="px-3 py-2.5">
+                  <StatusBadge status={state} />
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  {canRecord && (
+                    <RecordPaymentDialog
+                      paymentRowId={p.id}
+                      amountDuePaise={p.amount_due_paise}
+                      dueDate={fmt(p.due_date)}
+                    />
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

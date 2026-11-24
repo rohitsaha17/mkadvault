@@ -2,8 +2,10 @@ import { setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { differenceInDays } from "date-fns";
+import { payableState } from "@/lib/payables";
 import { createClient } from "@/lib/supabase/server";
 import { inr, fmt } from "@/lib/utils";
+import { todayInIndia } from "@/lib/utils/time-buckets";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, AlertTriangle, FileText, Building2, Pencil, Calendar, CreditCard, Receipt, ScrollText,
@@ -62,9 +64,11 @@ export default async function ContractDetailPage({
     : `/agencies/${contract.agency_id}`;
 
   // Payment summary stats
-  const paidCount = payments.filter((p) => p.status === "paid").length;
-  const overdueCount = payments.filter((p) => p.status === "overdue").length;
-  const dueCount = payments.filter((p) => p.status === "due").length;
+  const today = todayInIndia();
+  const states = payments.map((p) => payableState(p, today));
+  const paidCount = states.filter((s) => s === "paid").length;
+  const overdueCount = states.filter((s) => s === "overdue").length;
+  const toComeCount = states.length - paidCount - overdueCount;
   const totalPaid = payments
     .filter((p) => p.amount_paid_paise)
     .reduce((sum, p) => sum + (p.amount_paid_paise ?? 0), 0);
@@ -242,7 +246,7 @@ export default async function ContractDetailPage({
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">Payment Schedule</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {paidCount} paid · {dueCount} due · {overdueCount} overdue
+                    {paidCount} paid · {overdueCount} overdue · {toComeCount} to come
                   </p>
                 </div>
               </div>
@@ -251,7 +255,7 @@ export default async function ContractDetailPage({
                 <p className="font-semibold tabular-nums text-foreground">{inr(totalPaid)}</p>
               </div>
             </div>
-            <PaymentScheduleTable payments={payments} contractId={id} />
+            <PaymentScheduleTable payments={payments} today={today} />
           </section>
         </div>
 
