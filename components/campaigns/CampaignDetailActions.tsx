@@ -14,6 +14,12 @@ interface Props {
   campaignId: string;
   campaignStatus: CampaignStatus;
   clientId: string;
+  // When the campaign bills a partner agency instead of the direct
+  // client, the Create-Invoice button needs to seed bill_to=agency
+  // and the agency id, otherwise the form opens with Client selected
+  // and a blank dropdown (the agency has no matching client_id).
+  billedAgencyId?: string | null;
+  billingPartyType?: "client" | "agency" | "client_on_behalf_of_agency" | null;
   currentEndDate: string | null;
   campaignName?: string | null;
   // Whether the caller has permission to delete. Computed server-side
@@ -26,6 +32,8 @@ export function CampaignDetailActions({
   campaignId,
   campaignStatus,
   clientId,
+  billedAgencyId,
+  billingPartyType,
   currentEndDate,
   campaignName,
   canDelete = false,
@@ -114,13 +122,21 @@ export function CampaignDetailActions({
         </Button>
       )}
 
-      {/* Create Invoice */}
+      {/* Create Invoice — route to agency- or client-billed form
+          depending on the campaign's billing_party_type. */}
       {canCreateInvoice && (
         <Button
           variant="outline"
           size="sm"
           className="gap-1.5"
-          onClick={() => router.push(`/billing/invoices/new?campaign_id=${campaignId}&client_id=${clientId}`)}
+          onClick={() => {
+            const base = `/billing/invoices/new?campaign_id=${campaignId}`;
+            const url =
+              billingPartyType === "agency" && billedAgencyId
+                ? `${base}&bill_to=agency&agency_id=${billedAgencyId}`
+                : `${base}&client_id=${clientId}`;
+            router.push(url);
+          }}
         >
           <Receipt className="h-4 w-4" />
           Create Invoice

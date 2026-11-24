@@ -33,6 +33,7 @@ const TABS = [
 
 interface InvoiceWithClient extends Invoice {
   client?: Pick<Client, "id" | "company_name"> | null;
+  agency?: { id: string; agency_name: string } | null;
 }
 
 export default async function InvoicesPage({
@@ -93,6 +94,10 @@ export default async function InvoicesPage({
     0
   );
 
+  // Fetch invoices + direct-client join first. The agency side (migration
+  // 047) is hydrated in a second query so the list keeps working even
+  // when 047 hasn't been applied yet — otherwise the embedded join
+  // would error and the page would silently render as empty.
   let query = supabase
     .from("invoices")
     .select("*, client:clients(id, company_name)", { count: "exact" })
@@ -104,6 +109,30 @@ export default async function InvoicesPage({
 
   const { data, count } = await query;
   const invoices = (data ?? []) as unknown as InvoiceWithClient[];
+
+  // Hydrate agency names for agency-billed invoices. When the column
+  // doesn't exist (pre-047) the map stays empty and all rows render
+  // as direct-client invoices.
+  const agencyIds = Array.from(
+    new Set(
+      invoices
+        .map((i) => (i as { billed_agency_id?: string | null }).billed_agency_id)
+        .filter((id): id is string => !!id),
+    ),
+  );
+  if (agencyIds.length > 0) {
+    const { data: agencyRows } = await supabase
+      .from("partner_agencies")
+      .select("id, agency_name")
+      .in("id", agencyIds);
+    const agencyMap = new Map((agencyRows ?? []).map((a) => [a.id, a]));
+    for (const inv of invoices) {
+      const agencyId = (inv as { billed_agency_id?: string | null }).billed_agency_id;
+      if (agencyId && agencyMap.has(agencyId)) {
+        inv.agency = agencyMap.get(agencyId)!;
+      }
+    }
+  }
   const total = count ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -175,7 +204,7 @@ export default async function InvoicesPage({
                 <TableRow>
                   <SortableTableHead column="invoice_number" label="Invoice #" currentSort={sortCol} currentDir={sortDir} />
                   <SortableTableHead column="invoice_date" label="Date" currentSort={sortCol} currentDir={sortDir} />
-                  <TableHead>Client</TableHead>
+                  <TableHead>Bill to</TableHead>
                   <SortableTableHead column="total_paise" label="Total" currentSort={sortCol} currentDir={sortDir} />
                   <TableHead className="text-right">Paid</TableHead>
                   <TableHead className="text-right">Balance</TableHead>
@@ -198,7 +227,17 @@ export default async function InvoicesPage({
                       {fmt(inv.invoice_date)}
                     </TableCell>
                     <TableCell>
-                      {inv.client ? (
+                      {inv.bill_to_type === "agency" && inv.agency ? (
+                        <Link
+                          href={`/agencies/${inv.agency.id}`}
+                          className="text-foreground hover:text-primary transition-colors"
+                        >
+                          {inv.agency.agency_name}
+                          <span className="ml-1.5 inline-flex items-center rounded border border-border bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                            Agency
+                          </span>
+                        </Link>
+                      ) : inv.client ? (
                         <Link
                           href={`/clients/${inv.client.id}`}
                           className="text-foreground hover:text-primary transition-colors"

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/supabase/session";
 import { InvoiceForm } from "@/components/billing/InvoiceForm";
 import { PageHeader } from "@/components/shared/PageHeader";
-import type { Client, Campaign, OrganizationBankAccount } from "@/lib/types/database";
+import type { Client, Campaign, OrganizationBankAccount, PartnerAgency } from "@/lib/types/database";
 
 export const metadata = { title: "Create Invoice" };
 
@@ -14,8 +14,11 @@ type InvoiceClient = Pick<Client,
 >;
 
 type InvoiceCampaign = Pick<Campaign,
-  "id" | "campaign_name" | "client_id" | "pricing_type" | "total_value_paise"
+  "id" | "campaign_name" | "client_id" | "pricing_type" | "total_value_paise" |
+  "billing_party_type" | "billed_agency_id"
 >;
+
+type InvoiceAgency = Pick<PartnerAgency, "id" | "agency_name" | "gstin" | "state">;
 
 export default async function NewInvoicePage({
   params,
@@ -24,6 +27,8 @@ export default async function NewInvoicePage({
   params: Promise<{ locale: string }>;
   searchParams: Promise<{
     client_id?: string;
+    agency_id?: string;
+    bill_to?: "client" | "agency";
     campaign_id?: string;
     // Optional billing window — pre-selects line-item period dates so
     // the invoice ships with per-site amounts already pro-rated for
@@ -35,7 +40,8 @@ export default async function NewInvoicePage({
   const { locale } = await params;
   setRequestLocale(locale);
 
-  const { client_id, campaign_id, period_from, period_to } = await searchParams;
+  const { client_id, agency_id, bill_to, campaign_id, period_from, period_to } =
+    await searchParams;
 
   const supabase = await createClient();
 
@@ -48,6 +54,7 @@ export default async function NewInvoicePage({
   const [
     { data: clientsData },
     { data: campaignsData },
+    { data: agenciesData },
     { data: orgData },
     { data: bankAccountsData },
   ] = await Promise.all([
@@ -58,10 +65,15 @@ export default async function NewInvoicePage({
       .order("company_name"),
     supabase
       .from("campaigns")
-      .select("id, campaign_name, client_id, pricing_type, total_value_paise")
+      .select("id, campaign_name, client_id, pricing_type, total_value_paise, billing_party_type, billed_agency_id")
       .is("deleted_at", null)
       .in("status", ["live", "completed"])
       .order("campaign_name"),
+    supabase
+      .from("partner_agencies")
+      .select("id, agency_name, gstin, state")
+      .is("deleted_at", null)
+      .order("agency_name"),
     supabase
       .from("organizations")
       .select("gstin, settings")
@@ -79,6 +91,7 @@ export default async function NewInvoicePage({
 
   const clients = (clientsData ?? []) as InvoiceClient[];
   const campaigns = (campaignsData ?? []) as InvoiceCampaign[];
+  const agencies = (agenciesData ?? []) as InvoiceAgency[];
   const orgGstin = orgData?.gstin ?? null;
   const orgSettings = (orgData?.settings ?? {}) as Record<string, string>;
 
@@ -116,10 +129,13 @@ export default async function NewInvoicePage({
       <InvoiceForm
         clients={clients}
         campaigns={campaigns}
+        agencies={agencies}
         orgGstin={orgGstin}
         defaultTerms={defaultTerms}
         bankAccounts={bankAccounts}
         preselectedClientId={client_id}
+        preselectedAgencyId={agency_id}
+        preselectedBillTo={bill_to ?? (agency_id ? "agency" : undefined)}
         preselectedCampaignId={campaign_id}
         preselectedPeriodFrom={period_from}
         preselectedPeriodTo={period_to}

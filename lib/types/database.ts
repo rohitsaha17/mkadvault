@@ -749,7 +749,12 @@ export interface Invoice {
   deleted_at: string | null;
 
   invoice_number: string;
-  client_id: string;
+  // One of client_id / billed_agency_id must be set, matching
+  // bill_to_type. Legacy invoices default to bill_to_type='client' and
+  // client_id NOT NULL, so the type stays compatible.
+  bill_to_type: "client" | "agency";
+  client_id: string | null;
+  billed_agency_id: string | null;
   campaign_id: string | null;
 
   invoice_date: string;
@@ -791,6 +796,10 @@ export interface InvoiceLineItem {
   created_at: string;
 
   site_id: string | null;
+  // When this line came from a specific campaign (used to group lines
+  // on the PDF, and to show the invoice on the campaign page). Null for
+  // free-form lines that aren't tied to any campaign.
+  campaign_id: string | null;
   service_type: ServiceType;
   description: string;
   hsn_sac_code: string;

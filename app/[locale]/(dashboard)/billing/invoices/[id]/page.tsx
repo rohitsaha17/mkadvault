@@ -30,6 +30,16 @@ const PM_LABELS: Record<string, string> = {
 
 interface InvoiceWithClient extends Invoice {
   client?: Pick<Client, "id" | "company_name" | "brand_name" | "billing_address" | "billing_city" | "billing_state" | "billing_pin_code" | "gstin" | "pan"> | null;
+  // Agency bill-to party (migration 047). Either `client` or `agency`
+  // is set depending on bill_to_type; never both.
+  agency?: {
+    id: string;
+    agency_name: string;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    gstin: string | null;
+  } | null;
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -52,7 +62,9 @@ export default async function InvoiceDetailPage({
   ] = await Promise.all([
     supabase
       .from("invoices")
-      .select("*, client:clients(id, company_name, brand_name, billing_address, billing_city, billing_state, billing_pin_code, gstin, pan)")
+      .select(
+        "*, client:clients(id, company_name, brand_name, billing_address, billing_city, billing_state, billing_pin_code, gstin, pan)",
+      )
       .eq("id", id)
       .is("deleted_at", null)
       .single(),
@@ -76,6 +88,19 @@ export default async function InvoiceDetailPage({
   const invoice = invData as unknown as InvoiceWithClient;
   const lineItems = (lineItemsData ?? []) as unknown as InvoiceLineItem[];
   const payments = (paymentsData ?? []) as unknown as PaymentReceived[];
+
+  // Fetch the billed agency as a second query so the page still works
+  // when migration 047 (billed_agency_id column) hasn't been applied.
+  if (invoice.billed_agency_id) {
+    const { data: agencyData } = await supabase
+      .from("partner_agencies")
+      .select("id, agency_name, address, city, state, gstin")
+      .eq("id", invoice.billed_agency_id)
+      .maybeSingle();
+    if (agencyData) {
+      invoice.agency = agencyData as unknown as typeof invoice.agency;
+    }
+  }
 
   // Fetch org data + optional bank account + signed logo URL in parallel
   type OrgData = Pick<Organization, "name" | "address" | "city" | "state" | "pin_code" | "gstin" | "pan" | "phone" | "email" | "logo_url">;
@@ -121,9 +146,21 @@ export default async function InvoiceDetailPage({
   }
 
   const client = invoice.client;
+  const agency = invoice.agency;
+  const isAgencyBill = invoice.bill_to_type === "agency";
+  const billToName = isAgencyBill
+    ? agency?.agency_name ?? null
+    : client?.company_name ?? null;
+  const billToHref = isAgencyBill
+    ? agency
+      ? `/agencies/${agency.id}`
+      : null
+    : client
+    ? `/clients/${client.id}`
+    : null;
 
-  // Build PDF props (only when we have org data)
-  const pdfReady = org !== null && client !== null;
+  // Build PDF props (only when we have org data + a bill-to party)
+  const pdfReady = org !== null && (isAgencyBill ? agency !== null : client !== null);
 
   return (
     <div className="max-w-5xl">
@@ -144,11 +181,12 @@ export default async function InvoiceDetailPage({
             <StatusBadge status={invoice.status} />
           </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            {client ? (
-              <Link href={`/clients/${client.id}`} className="hover:text-foreground transition-colors">
-                {client.company_name}
+            {billToHref && billToName ? (
+              <Link href={billToHref} className="hover:text-foreground transition-colors">
+                {billToName}
+                {isAgencyBill && <span className="ml-1 text-xs">(agency)</span>}
               </Link>
-            ) : "Unknown client"}{" "}
+            ) : (isAgencyBill ? "Unknown agency" : "Unknown client")}{" "}
             · Dated {fmt(invoice.invoice_date)}
             {invoice.campaign_id && (
               <> · <Link href={`/campaigns/${invoice.campaign_id}`} className="hover:text-foreground transition-colors">View Campaign</Link></>
@@ -161,7 +199,7 @@ export default async function InvoiceDetailPage({
             invoiceNumber={invoice.invoice_number}
             currentStatus={invoice.status}
             balanceDuePaise={invoice.balance_due_paise ?? 0}
-            showPdf={Boolean(pdfReady && org && client)}
+            showPdf={Boolean(pdfReady)}
           />
         </div>
       </div>
@@ -216,25 +254,50 @@ export default async function InvoiceDetailPage({
           </div>
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Bill To</p>
-              {client ? (
-                <Link href={`/clients/${client.id}`} className="font-semibold text-foreground hover:text-primary hover:underline">
-                  {client.company_name}
-                </Link>
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Bill To {isAgencyBill && "(Agency)"}
+              </p>
+              {isAgencyBill ? (
+                agency ? (
+                  <>
+                    <Link href={`/agencies/${agency.id}`} className="font-semibold text-foreground hover:text-primary hover:underline">
+                      {agency.agency_name}
+                    </Link>
+                    {agency.address && <p className="text-sm text-muted-foreground">{agency.address}</p>}
+                    {(agency.city || agency.state) && (
+                      <p className="text-sm text-muted-foreground">
+                        {[agency.city, agency.state].filter(Boolean).join(", ")}
+                      </p>
+                    )}
+                    {agency.gstin && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        GSTIN: <span className="font-mono text-foreground">{agency.gstin}</span>
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="font-semibold text-foreground">—</p>
+                )
+              ) : client ? (
+                <>
+                  <Link href={`/clients/${client.id}`} className="font-semibold text-foreground hover:text-primary hover:underline">
+                    {client.company_name}
+                  </Link>
+                  {client.brand_name && <p className="text-sm text-muted-foreground">{client.brand_name}</p>}
+                  {client.billing_address && <p className="text-sm text-muted-foreground">{client.billing_address}</p>}
+                  {(client.billing_city || client.billing_state) && (
+                    <p className="text-sm text-muted-foreground">
+                      {[client.billing_city, client.billing_state, client.billing_pin_code].filter(Boolean).join(", ")}
+                    </p>
+                  )}
+                  {client.gstin && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      GSTIN: <span className="font-mono text-foreground">{client.gstin}</span>
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="font-semibold text-foreground">—</p>
-              )}
-              {client?.brand_name && <p className="text-sm text-muted-foreground">{client.brand_name}</p>}
-              {client?.billing_address && <p className="text-sm text-muted-foreground">{client.billing_address}</p>}
-              {(client?.billing_city || client?.billing_state) && (
-                <p className="text-sm text-muted-foreground">
-                  {[client?.billing_city, client?.billing_state, client?.billing_pin_code].filter(Boolean).join(", ")}
-                </p>
-              )}
-              {client?.gstin && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  GSTIN: <span className="font-mono text-foreground">{client.gstin}</span>
-                </p>
               )}
             </div>
             <div className="grid grid-cols-2 gap-3">

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useEffect, useCallback, useRef } from "react";
 import { useForm, useFieldArray, useWatch, type FieldErrors } from "react-hook-form";
 import { showFirstFormError } from "@/lib/utils/form-feedback";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,7 +20,7 @@ import { callAction } from "@/lib/utils/call-action";
 // Route Handler later if it ever breaks.
 import { getCampaignLineItems } from "@/app/[locale]/(dashboard)/billing/actions";
 import { sanitizeForTransport } from "@/lib/utils/sanitize";
-import type { Client, Campaign, OrganizationBankAccount } from "@/lib/types/database";
+import type { Client, Campaign, OrganizationBankAccount, PartnerAgency } from "@/lib/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,12 +31,28 @@ type BankAccountLite = Pick<
 
 interface Props {
   clients: Pick<Client, "id" | "company_name" | "brand_name" | "gstin" | "credit_terms" | "billing_address" | "billing_city" | "billing_state">[];
-  campaigns: Pick<Campaign, "id" | "campaign_name" | "client_id" | "pricing_type" | "total_value_paise">[];
+  // A campaign may be billed to a client (billing_party_type='client')
+  // or to an agency (billing_party_type='agency' + billed_agency_id).
+  // The invoice form filters campaigns by whichever bill-to side the
+  // user has picked, so we need both.
+  campaigns: Pick<
+    Campaign,
+    | "id"
+    | "campaign_name"
+    | "client_id"
+    | "pricing_type"
+    | "total_value_paise"
+    | "billing_party_type"
+    | "billed_agency_id"
+  >[];
+  agencies?: Pick<PartnerAgency, "id" | "agency_name" | "gstin" | "state">[];
   orgGstin: string | null;
   defaultTerms: string;
   bankAccounts?: BankAccountLite[];
   preselectedClientId?: string;
+  preselectedAgencyId?: string;
   preselectedCampaignId?: string;
+  preselectedBillTo?: "client" | "agency";
   // Billing window — when provided (e.g. by the "extend campaign" flow)
   // the pre-populated line items are sized to this period, and each
   // line's own period defaults to it. Editing a line's period later
@@ -66,11 +82,21 @@ const lineItemSchema = z.object({
   period_from: z.string().optional(),
   period_to: z.string().optional(),
   site_id: z.string().optional(),
+  // Set when this line came from a specific campaign (used to group
+  // lines on the PDF, and to show the invoice on the campaign page).
+  campaign_id: z.string().optional(),
 });
 
 const formSchema = z.object({
-  client_id: z.string().uuid("Select a client"),
+  bill_to_type: z.enum(["client", "agency"]).default("client"),
+  client_id: z.string().optional(),
+  billed_agency_id: z.string().optional(),
+  // campaign_ids holds the full selection; campaign_id mirrors the FIRST
+  // selected one so the rest of the form (pricing-model badge, auto-load
+  // line items) stays single-campaign simple. Multi-campaign invoices
+  // produce one line GROUP per campaign in line_items.campaign_id.
   campaign_id: z.string().optional(),
+  campaign_ids: z.array(z.string().uuid()).default([]),
   invoice_date: z.string().min(1, "Required"),
   due_date: z.string().min(1, "Required"),
   place_of_supply_state: z.string().optional(),
@@ -82,6 +108,13 @@ const formSchema = z.object({
   terms_and_conditions: z.string().optional(),
   status: z.enum(["draft", "sent"]),
   line_items: z.array(lineItemSchema).min(1, "Add at least one line item"),
+}).superRefine((d, ctx) => {
+  if (d.bill_to_type === "client" && !d.client_id) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["client_id"], message: "Select a client" });
+  }
+  if (d.bill_to_type === "agency" && !d.billed_agency_id) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["billed_agency_id"], message: "Select an agency" });
+  }
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -184,11 +217,14 @@ function NativeSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
 export function InvoiceForm({
   clients,
   campaigns,
+  agencies = [],
   orgGstin,
   defaultTerms,
   bankAccounts = [],
   preselectedClientId,
+  preselectedAgencyId,
   preselectedCampaignId,
+  preselectedBillTo,
   preselectedPeriodFrom,
   preselectedPeriodTo,
 }: Props) {
@@ -205,14 +241,24 @@ export function InvoiceForm({
     bankAccounts[0]?.id ??
     "";
 
+  // Infer bill-to type from the preselects (the Campaign Detail
+  // "Create Invoice" button might pass an agency_id instead of a
+  // client_id when the campaign is billed to an agency).
+  const inferredBillTo: "client" | "agency" =
+    preselectedBillTo ??
+    (preselectedAgencyId ? "agency" : "client");
+
   const { register, handleSubmit, watch, control, setValue, setFocus, formState: { errors } } = useForm<FormValues>({
     // Cast: z.preprocess() on line_items.quantity / rate_inr makes zod's
     // input type `unknown`, which trips zodResolver's generics.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(formSchema) as any,
     defaultValues: {
+      bill_to_type: inferredBillTo,
       client_id: preselectedClientId ?? "",
+      billed_agency_id: preselectedAgencyId ?? "",
       campaign_id: preselectedCampaignId ?? "",
+      campaign_ids: preselectedCampaignId ? [preselectedCampaignId] : [],
       invoice_date: today,
       due_date: today,
       status: "draft",
@@ -224,12 +270,32 @@ export function InvoiceForm({
 
   const { fields, append, remove } = useFieldArray({ control, name: "line_items" });
   const watchedItems = useWatch({ control, name: "line_items" });
+  const watchedBillTo: "client" | "agency" = watch("bill_to_type");
   const watchedClientId = watch("client_id");
-  const watchedCampaignId = watch("campaign_id");
+  const watchedAgencyId = watch("billed_agency_id");
+  const watchedCampaignIds = watch("campaign_ids") ?? [];
   const watchedInvoiceDate = watch("invoice_date");
 
   const selectedClient = clients.find((c) => c.id === watchedClientId);
-  const clientCampaigns = campaigns.filter((c) => c.client_id === watchedClientId);
+  const selectedAgency = agencies.find((a) => a.id === watchedAgencyId);
+  const billToParty = watchedBillTo === "agency" ? selectedAgency : selectedClient;
+
+  // Campaigns relevant to the current bill-to side.
+  // • Direct-client invoices only show campaigns whose billing_party_type
+  //   is 'client' AND client_id matches.
+  // • Agency invoices show campaigns whose billing_party_type is
+  //   'agency' AND billed_agency_id matches.
+  const clientCampaigns = campaigns.filter((c) =>
+    watchedBillTo === "agency"
+      ? c.billing_party_type === "agency" && c.billed_agency_id === watchedAgencyId
+      : (c.billing_party_type ?? "client") === "client" && c.client_id === watchedClientId,
+  );
+
+  // Track whether the user has manually typed Qty on each line. When
+  // true, recomputeQtyFromDates leaves that line's quantity alone — so
+  // setting a period after a manual Qty entry does NOT overwrite it.
+  // Keyed by react-hook-form field id so it survives reorder / append.
+  const qtyManuallyEditedRef = useRef<Record<string, boolean>>({});
 
   // Auto-set due date when client changes
   useEffect(() => {
@@ -239,53 +305,119 @@ export function InvoiceForm({
     }
   }, [watchedClientId, watchedInvoiceDate, selectedClient, setValue]);
 
-  // Load campaign line items when campaign changes. When a billing
-  // window is provided (via the extend-campaign redirect), the server
-  // uses it to pro-rate each per-site rental line to that window.
-  const loadCampaignItems = useCallback(
-    async (campaignId: string) => {
-      if (!campaignId) return;
+  // When the user swaps bill-to type, clear the opposite side and the
+  // campaign selection so the form doesn't carry stale values across.
+  useEffect(() => {
+    if (watchedBillTo === "client") {
+      setValue("billed_agency_id", "");
+    } else {
+      setValue("client_id", "");
+    }
+    setValue("campaign_id", "");
+    setValue("campaign_ids", []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedBillTo]);
+
+  // Load campaign line items when the campaign SET changes. When a
+  // billing window is provided (via the extend-campaign redirect), the
+  // server uses it to pro-rate each per-site rental line to that
+  // window. For multi-campaign invoices we concat each campaign's lines
+  // and tag every line with its source campaign_id.
+  const loadLinesForCampaigns = useCallback(
+    async (campaignIds: string[]) => {
+      if (!campaignIds.length) return;
       setLoadingCampaign(true);
       try {
-        const result = await getCampaignLineItems(
-          campaignId,
-          preselectedPeriodFrom,
-          preselectedPeriodTo,
+        const campaignIdToName = new Map(
+          campaigns.map((c) => [c.id, c.campaign_name] as const),
         );
-        if ("error" in result) {
-          toast.error(result.error);
-          return;
+        const merged: {
+          service_type: "display_rental" | "flex_printing" | "mounting" | "design" | "transport" | "other";
+          description: string;
+          hsn_sac_code: string;
+          quantity: number;
+          rate_inr: number;
+          period_from?: string;
+          period_to?: string;
+          site_id?: string;
+          campaign_id?: string;
+        }[] = [];
+        for (const cid of campaignIds) {
+          const result = await getCampaignLineItems(
+            cid,
+            preselectedPeriodFrom,
+            preselectedPeriodTo,
+          );
+          if ("error" in result) {
+            toast.error(`${campaignIdToName.get(cid) ?? "Campaign"}: ${result.error}`);
+            continue;
+          }
+          for (const item of result.items) {
+            // Prefix the description with the campaign name when the
+            // invoice covers more than one — otherwise the finance team
+            // can't tell which campaign a line belongs to on the PDF.
+            const prefix = campaignIds.length > 1 && campaignIdToName.get(cid)
+              ? `[${campaignIdToName.get(cid)}] `
+              : "";
+            merged.push({ ...item, description: prefix + item.description, campaign_id: cid });
+          }
         }
-        if (result.items.length > 0) {
-          // Replace line items
+        if (merged.length > 0) {
           while (fields.length > 0) remove(0);
-          result.items.forEach((item) => append(item));
-          toast.info("Line items loaded from campaign");
+          merged.forEach((item) => append(item));
+          // Reset the manual-Qty tracker: these are freshly loaded rows,
+          // not user-typed quantities.
+          qtyManuallyEditedRef.current = {};
+          toast.info(
+            campaignIds.length > 1
+              ? `Line items loaded from ${campaignIds.length} campaigns`
+              : "Line items loaded from campaign",
+          );
         }
       } finally {
         setLoadingCampaign(false);
       }
     },
-    [fields.length, remove, append, preselectedPeriodFrom, preselectedPeriodTo],
+    [fields.length, remove, append, preselectedPeriodFrom, preselectedPeriodTo, campaigns],
   );
 
+  // Mirror the FIRST campaign_id selection into campaign_id so legacy
+  // single-campaign plumbing (pricing badge, invoices.campaign_id) stays
+  // consistent with the multi-select. Depend on the joined id list so
+  // a fresh array identity with the same values doesn't fire the
+  // effect every render.
+  const firstCampaignId = watchedCampaignIds[0] ?? "";
   useEffect(() => {
-    if (watchedCampaignId) {
-      loadCampaignItems(watchedCampaignId);
+    setValue("campaign_id", firstCampaignId);
+  }, [firstCampaignId, setValue]);
+
+  // Fire line-item loader whenever the selection list changes. Depend on
+  // the JOINED id list so a fresh array identity with the same values
+  // doesn't re-trigger it.
+  const campaignKey = watchedCampaignIds.join(",");
+  useEffect(() => {
+    if (campaignKey) {
+      loadLinesForCampaigns(campaignKey.split(","));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedCampaignId]);
+  }, [campaignKey]);
 
   // Pro-rata recalc: when a line's period dates change, re-set
-  // `quantity` to the inclusive day count between them. We only
-  // overwrite quantity for display_rental lines because flex/mounting/
-  // design/etc. are flat charges where "qty" means something different
-  // (sheets printed, panels mounted, hours, etc.). This matches the
-  // user's expectation that "the duration drives the billable amount".
+  // `quantity` to the inclusive day count between them. Two guards keep
+  // us from stepping on the user's toes:
+  //   1. Only display_rental lines auto-compute Qty — flex/mounting/
+  //      design etc. are flat charges where "qty" means something
+  //      different (sheets printed, panels mounted, hours).
+  //   2. If the user has typed in Qty themselves since this row loaded
+  //      (tracked via qtyManuallyEditedRef, flipped on Qty onChange),
+  //      we leave their value alone. Previously, setting a period AFTER
+  //      typing Qty silently overwrote it with the day count.
   function recomputeQtyFromDates(idx: number) {
     const row = watchedItems?.[idx];
     if (!row) return;
     if (row.service_type && row.service_type !== "display_rental") return;
+    const fieldId = fields[idx]?.id;
+    if (fieldId && qtyManuallyEditedRef.current[fieldId]) return;
     const from = row.period_from;
     const to = row.period_to;
     if (!from || !to || to < from) return;
@@ -297,25 +429,42 @@ export function InvoiceForm({
     });
   }
 
+  function markQtyManuallyEdited(idx: number) {
+    const fieldId = fields[idx]?.id;
+    if (fieldId) qtyManuallyEditedRef.current[fieldId] = true;
+  }
+
   // Calculated totals
   const subtotalPaise = (watchedItems ?? []).reduce((sum, item) => {
     return sum + Math.round((item.rate_inr ?? 0) * (item.quantity ?? 1) * 100);
   }, 0);
 
-  const gst = calcGST(subtotalPaise, orgGstin, selectedClient?.gstin ?? null);
+  const buyerGstin = watchedBillTo === "agency" ? selectedAgency?.gstin ?? null : selectedClient?.gstin ?? null;
+  const gst = calcGST(subtotalPaise, orgGstin, buyerGstin);
 
   function onSubmit(values: FormValues, submitStatus: "draft" | "sent") {
     const finalValues = {
       ...values,
       status: submitStatus,
+      // Normalise opt-out fields to undefined so the server schema's
+      // emptyToUndefined preprocess sees "missing", not "". Without
+      // this, a blank "Place of supply" field was coming through as
+      // null → "Invalid input: expected string, received null".
+      client_id: values.bill_to_type === "client" ? values.client_id || undefined : undefined,
+      billed_agency_id: values.bill_to_type === "agency" ? values.billed_agency_id || undefined : undefined,
+      campaign_id: values.campaign_id || undefined,
       bank_account_id: values.bank_account_id || undefined,
+      place_of_supply_state: values.place_of_supply_state || undefined,
+      external_invoice_number: values.external_invoice_number || undefined,
+      notes: values.notes || undefined,
+      terms_and_conditions: values.terms_and_conditions || undefined,
       subtotal_inr: subtotalPaise / 100,
       cgst_inr: gst.cgst / 100,
       sgst_inr: gst.sgst / 100,
       igst_inr: gst.igst / 100,
       total_inr: gst.total / 100,
       supplier_gstin: orgGstin,
-      buyer_gstin: selectedClient?.gstin,
+      buyer_gstin: buyerGstin,
       is_inter_state: gst.is_inter_state,
     };
 
@@ -340,25 +489,98 @@ export function InvoiceForm({
 
   return (
     <form className="space-y-6 max-w-5xl">
-      {/* ── Client + Campaign ── */}
+      {/* ── Bill-to party + Campaign ── */}
       <section className="rounded-2xl border border-border bg-card card-elevated p-6 space-y-4">
         <h2 className="text-sm font-semibold text-foreground border-b border-border pb-2">Invoice Details</h2>
+
+        {/* Bill-to type switcher. Default is "client"; switch to
+            "agency" when billing a partner agency (direct agency
+            bookings or client_on_behalf_of_agency campaigns). */}
+        <F label="Bill to">
+          <div className="inline-flex rounded-lg border border-border bg-background p-0.5">
+            {([
+              { value: "client", label: "Client" },
+              { value: "agency", label: "Agency" },
+            ] as const).map((opt) => (
+              <label
+                key={opt.value}
+                className={cn(
+                  "cursor-pointer px-4 py-1.5 text-sm rounded-md transition-colors",
+                  watchedBillTo === opt.value
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <input
+                  type="radio"
+                  value={opt.value}
+                  {...register("bill_to_type")}
+                  className="sr-only"
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </F>
+
         <div className="grid grid-cols-2 gap-4">
-          <F label="Client" error={errors.client_id?.message} required>
-            <NativeSelect {...register("client_id")} className={cn(errors.client_id && "border-destructive focus-visible:ring-destructive/40")}>
-              <option value="">Select client…</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.company_name}{c.brand_name ? ` — ${c.brand_name}` : ""}</option>
-              ))}
-            </NativeSelect>
-          </F>
-          <F label="Campaign (optional)">
-            <NativeSelect {...register("campaign_id")} disabled={!watchedClientId || loadingCampaign}>
-              <option value="">Select campaign…</option>
-              {clientCampaigns.map((c) => (
-                <option key={c.id} value={c.id}>{c.campaign_name}</option>
-              ))}
-            </NativeSelect>
+          {watchedBillTo === "client" ? (
+            <F label="Client" error={errors.client_id?.message} required>
+              <NativeSelect {...register("client_id")} className={cn(errors.client_id && "border-destructive focus-visible:ring-destructive/40")}>
+                <option value="">Select client…</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.company_name}{c.brand_name ? ` — ${c.brand_name}` : ""}</option>
+                ))}
+              </NativeSelect>
+            </F>
+          ) : (
+            <F label="Agency" error={errors.billed_agency_id?.message} required>
+              <NativeSelect {...register("billed_agency_id")} className={cn(errors.billed_agency_id && "border-destructive focus-visible:ring-destructive/40")}>
+                <option value="">Select agency…</option>
+                {agencies.map((a) => (
+                  <option key={a.id} value={a.id}>{a.agency_name}</option>
+                ))}
+              </NativeSelect>
+            </F>
+          )}
+
+          {/* Multi-campaign picker. One invoice can cover several
+              campaigns (billed to the same client / agency). Each
+              picked campaign appends its own line items, tagged via
+              invoice_line_items.campaign_id so the PDF can group
+              them. For the single-campaign case the checkbox list
+              behaves exactly like a dropdown with one tick. */}
+          <F label="Campaigns (optional)">
+            {clientCampaigns.length === 0 ? (
+              <p className="text-xs text-muted-foreground px-1 py-2">
+                {(watchedBillTo === "client" ? !watchedClientId : !watchedAgencyId)
+                  ? `Select a ${watchedBillTo === "client" ? "client" : "agency"} first.`
+                  : `No campaigns on file for this ${watchedBillTo}.`}
+              </p>
+            ) : (
+              <div className="rounded-md border border-border bg-background p-2 max-h-40 overflow-y-auto space-y-1.5">
+                {clientCampaigns.map((c) => {
+                  const checked = watchedCampaignIds.includes(c.id);
+                  return (
+                    <label key={c.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={loadingCampaign}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...watchedCampaignIds, c.id]
+                            : watchedCampaignIds.filter((id) => id !== c.id);
+                          setValue("campaign_ids", next, { shouldDirty: true });
+                        }}
+                        className="h-4 w-4 rounded border-input"
+                      />
+                      <span className="text-foreground">{c.campaign_name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </F>
         </div>
         <div className="grid grid-cols-3 gap-4">
@@ -373,11 +595,21 @@ export function InvoiceForm({
           </F>
         </div>
 
-        {selectedClient && (
+        {billToParty && (
           <div className="text-xs text-muted-foreground space-y-0.5 p-3 bg-muted rounded-md">
-            <p><strong className="text-foreground">Bill to:</strong> {selectedClient.company_name}</p>
-            {selectedClient.billing_address && <p>{selectedClient.billing_address}, {selectedClient.billing_city}, {selectedClient.billing_state}</p>}
-            {selectedClient.gstin && <p>GSTIN: {selectedClient.gstin}</p>}
+            {watchedBillTo === "client" && selectedClient ? (
+              <>
+                <p><strong className="text-foreground">Bill to:</strong> {selectedClient.company_name}</p>
+                {selectedClient.billing_address && <p>{selectedClient.billing_address}, {selectedClient.billing_city}, {selectedClient.billing_state}</p>}
+                {selectedClient.gstin && <p>GSTIN: {selectedClient.gstin}</p>}
+              </>
+            ) : watchedBillTo === "agency" && selectedAgency ? (
+              <>
+                <p><strong className="text-foreground">Bill to (agency):</strong> {selectedAgency.agency_name}</p>
+                {selectedAgency.state && <p>State: {selectedAgency.state}</p>}
+                {selectedAgency.gstin && <p>GSTIN: {selectedAgency.gstin}</p>}
+              </>
+            ) : null}
           </div>
         )}
 
@@ -475,7 +707,16 @@ export function InvoiceForm({
                       </div>
                     </td>
                     <td className="px-2 py-2">
-                      <Input {...register(`line_items.${idx}.quantity`, { valueAsNumber: true })} type="number" min={0.01} step="0.01" className="w-16 tabular-nums" />
+                      <Input
+                        {...register(`line_items.${idx}.quantity`, {
+                          valueAsNumber: true,
+                          onChange: () => markQtyManuallyEdited(idx),
+                        })}
+                        type="number"
+                        min={0.01}
+                        step="0.01"
+                        className="w-16 tabular-nums"
+                      />
                     </td>
                     <td className="px-2 py-2">
                       <Input {...register(`line_items.${idx}.rate_inr`, { valueAsNumber: true })} type="number" step="0.01" className="w-28 tabular-nums" />

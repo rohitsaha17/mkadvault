@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { InvoiceStatus, PaymentMode } from "@/lib/types/database";
 import { notify } from "@/lib/notifications/dispatch";
 import { inr } from "@/lib/utils";
+import { invoiceSchema } from "@/lib/validations/invoice";
 
 import { isNextInternalThrow, toActionError } from "@/lib/actions/safe";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -44,42 +45,10 @@ async function generateReceiptNumber(
   return `MKACS-RCP-${ym}-${String(seq).padStart(4, "0")}`;
 }
 
-// ─── Invoice line item schema ─────────────────────────────────────────────────
-
-const lineItemSchema = z.object({
-  service_type: z.enum(["display_rental", "flex_printing", "mounting", "design", "transport", "other"]),
-  description: z.string().min(1, "Description required"),
-  hsn_sac_code: z.string().default("998361"),
-  quantity: z.number().positive().default(1),
-  rate_inr: z.number().min(0),
-  period_from: z.string().optional(),
-  period_to: z.string().optional(),
-  site_id: z.string().uuid().optional(),
-});
-
-// ─── Invoice creation schema ──────────────────────────────────────────────────
-
-const invoiceSchema = z.object({
-  client_id: z.string().uuid("Select a client"),
-  campaign_id: z.string().uuid().optional(),
-  invoice_date: z.string().min(1, "Invoice date required"),
-  due_date: z.string().min(1, "Due date required"),
-  subtotal_inr: z.number().min(0),
-  cgst_inr: z.number().min(0).default(0),
-  sgst_inr: z.number().min(0).default(0),
-  igst_inr: z.number().min(0).default(0),
-  total_inr: z.number().min(0),
-  supplier_gstin: z.string().optional(),
-  buyer_gstin: z.string().optional(),
-  place_of_supply_state: z.string().optional(),
-  is_inter_state: z.boolean().default(false),
-  bank_account_id: z.string().uuid().optional(),
-  external_invoice_number: z.string().max(64).optional(),
-  notes: z.string().optional(),
-  terms_and_conditions: z.string().optional(),
-  status: z.enum(["draft", "sent"]).default("draft"),
-  line_items: z.array(lineItemSchema).min(1, "Add at least one line item"),
-});
+// Invoice line-item and whole-invoice schemas live in
+// lib/validations/invoice.ts so a lightweight node --test suite can
+// import them without pulling the Next.js server runtime. See the
+// JSDoc there for the rationale (bugs #1-#2 of the Nov 2026 batch).
 
 
 // ─── Create Invoice ───────────────────────────────────────────────────────────
@@ -87,48 +56,94 @@ const invoiceSchema = z.object({
 export async function createInvoice(values: unknown): Promise<{ error: string } | { id: string }> {
   try {
     const parsed = invoiceSchema.safeParse(values);
-    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    if (!parsed.success) {
+      // Surface the FAILING FIELD NAME so "Invalid input: expected
+      // string, received null" is actually traceable. Previously the
+      // toast only showed the raw message and the user had to guess
+      // which field was wrong (bug reports kept landing with no clue).
+      const issue = parsed.error.issues[0];
+      const path = issue.path.length ? `${issue.path.join(".")}: ` : "";
+      return { error: path + issue.message };
+    }
 
     const ctx = await getOrgAndUser();
     if (!ctx) return { error: "Not authenticated" };
 
     const d = parsed.data;
 
-    const { data: inv, error: invErr } = await ctx.supabase
-      .from("invoices")
-      .insert({
-        organization_id: ctx.orgId,
-        created_by: ctx.user.id,
-        updated_by: ctx.user.id,
-        client_id: d.client_id,
-        campaign_id: d.campaign_id ?? null,
-        invoice_date: d.invoice_date,
-        due_date: d.due_date,
-        subtotal_paise: n(d.subtotal_inr),
-        cgst_paise: n(d.cgst_inr),
-        sgst_paise: n(d.sgst_inr),
-        igst_paise: n(d.igst_inr),
-        total_paise: n(d.total_inr),
-        balance_due_paise: n(d.total_inr),
-        supplier_gstin: str(d.supplier_gstin),
-        buyer_gstin: str(d.buyer_gstin),
-        place_of_supply_state: str(d.place_of_supply_state),
-        is_inter_state: d.is_inter_state,
-        bank_account_id: d.bank_account_id ?? null,
-        external_invoice_number: str(d.external_invoice_number),
-        status: d.status,
-        notes: str(d.notes),
-        terms_and_conditions: str(d.terms_and_conditions),
-      })
-      .select("id")
-      .single();
+    // Build the insert payload. Try with migration-047 columns first;
+    // if they don't exist yet, retry without them so the create keeps
+    // working for users who haven't applied 047. Agency bill-to needs
+    // 047 and is rejected below when it isn't available.
+    const basePayload = {
+      organization_id: ctx.orgId,
+      created_by: ctx.user.id,
+      updated_by: ctx.user.id,
+      client_id:  d.bill_to_type === "client" ? d.client_id ?? null : null,
+      campaign_id: d.campaign_id ?? null,
+      invoice_date: d.invoice_date,
+      due_date: d.due_date,
+      subtotal_paise: n(d.subtotal_inr),
+      cgst_paise: n(d.cgst_inr),
+      sgst_paise: n(d.sgst_inr),
+      igst_paise: n(d.igst_inr),
+      total_paise: n(d.total_inr),
+      balance_due_paise: n(d.total_inr),
+      supplier_gstin: str(d.supplier_gstin),
+      buyer_gstin: str(d.buyer_gstin),
+      place_of_supply_state: str(d.place_of_supply_state),
+      is_inter_state: d.is_inter_state,
+      bank_account_id: d.bank_account_id ?? null,
+      status: d.status,
+      notes: str(d.notes),
+      terms_and_conditions: str(d.terms_and_conditions),
+    };
+    const withNewCols = {
+      ...basePayload,
+      bill_to_type: d.bill_to_type,
+      billed_agency_id: d.bill_to_type === "agency" ? d.billed_agency_id ?? null : null,
+      external_invoice_number: str(d.external_invoice_number),
+    };
+
+    let inv: { id: string } | null = null;
+    let invErr: { message: string } | null = null;
+    {
+      const res = await ctx.supabase
+        .from("invoices")
+        .insert(withNewCols)
+        .select("id")
+        .single();
+      inv = res.data;
+      invErr = res.error;
+    }
+    // Retry once without the 047-only columns if the DB rejected them.
+    // The error shape from Postgrest / PGRST204 matches this message.
+    if (invErr && /Could not find the .* column/i.test(invErr.message)) {
+      if (d.bill_to_type === "agency") {
+        return {
+          error:
+            "Agency billing needs migration 047 applied. Run supabase/migrations/047_invoice_bill_to_agency_and_multi_campaign.sql first.",
+        };
+      }
+      const res = await ctx.supabase
+        .from("invoices")
+        .insert(basePayload)
+        .select("id")
+        .single();
+      inv = res.data;
+      invErr = res.error;
+    }
 
     if (invErr || !inv) return { error: invErr?.message ?? "Failed to create invoice" };
 
-    // Insert line items
-    const lineItems = d.line_items.map((li) => ({
+    // Insert line items. Each line can carry its own campaign_id so one
+    // invoice can span several campaigns. When migration 047 hasn't
+    // been applied, invoice_line_items.campaign_id doesn't exist — we
+    // retry without it on that one specific error.
+    const invoiceId = inv.id;
+    const lineItemsBase = d.line_items.map((li) => ({
       organization_id: ctx.orgId,
-      invoice_id: inv.id,
+      invoice_id: invoiceId,
       site_id: li.site_id ?? null,
       service_type: li.service_type,
       description: li.description,
@@ -139,11 +154,19 @@ export async function createInvoice(values: unknown): Promise<{ error: string } 
       period_from: str(li.period_from),
       period_to: str(li.period_to),
     }));
+    const lineItemsWithCampaign = d.line_items.map((li, i) => ({
+      ...lineItemsBase[i],
+      campaign_id: li.campaign_id ?? d.campaign_id ?? null,
+    }));
 
-    const { error: liErr } = await ctx.supabase.from("invoice_line_items").insert(lineItems);
+    let liErr = (await ctx.supabase.from("invoice_line_items").insert(lineItemsWithCampaign)).error;
+    if (liErr && /Could not find the .* column/i.test(liErr.message)) {
+      liErr = (await ctx.supabase.from("invoice_line_items").insert(lineItemsBase)).error;
+    }
     if (liErr) return { error: liErr.message };
 
     revalidatePath("/billing/invoices");
+    revalidatePath("/billing/receivables");
     return { id: inv.id };
   } catch (err) {
     if (isNextInternalThrow(err)) throw err;

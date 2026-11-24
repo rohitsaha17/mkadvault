@@ -104,8 +104,54 @@ export async function GET(
         | "pan"
       > | null;
     };
-    if (!invoice.client) {
-      return NextResponse.json({ error: "Invoice client missing" }, { status: 400 });
+
+    // Hydrate the billed agency as a follow-up query so the PDF route
+    // still works when migration 047 hasn't been applied.
+    type AgencyShape = {
+      agency_name: string;
+      address: string | null;
+      city: string | null;
+      state: string | null;
+      gstin: string | null;
+    };
+    let agency: AgencyShape | null = null;
+    if (invoice.billed_agency_id) {
+      const { data: agencyData } = await supabase
+        .from("partner_agencies")
+        .select("agency_name, address, city, state, gstin")
+        .eq("id", invoice.billed_agency_id)
+        .eq("organization_id", profile.org_id)
+        .maybeSingle();
+      agency = (agencyData as AgencyShape | null) ?? null;
+    }
+
+    // Build the "bill to" block from whichever counterparty is set.
+    // Migration 047 guarantees exactly one of them is populated.
+    const billTo = invoice.bill_to_type === "agency" && agency !== null
+      ? {
+          company_name: agency.agency_name,
+          brand_name: null,
+          billing_address: agency.address,
+          billing_city: agency.city,
+          billing_state: agency.state,
+          billing_pin_code: null,
+          gstin: agency.gstin,
+          pan: null,
+        }
+      : invoice.client
+      ? {
+          company_name: invoice.client.company_name,
+          brand_name: invoice.client.brand_name,
+          billing_address: invoice.client.billing_address,
+          billing_city: invoice.client.billing_city,
+          billing_state: invoice.client.billing_state,
+          billing_pin_code: invoice.client.billing_pin_code,
+          gstin: invoice.client.gstin,
+          pan: invoice.client.pan,
+        }
+      : null;
+    if (!billTo) {
+      return NextResponse.json({ error: "Invoice bill-to party missing" }, { status: 400 });
     }
     const lineItems = (lineItemsData ?? []) as unknown as InvoiceLineItem[];
     const org = orgData as Pick<
@@ -149,7 +195,7 @@ export async function GET(
     const buffer = await renderInvoicePdf({
       invoice,
       lineItems,
-      client: invoice.client,
+      billTo,
       org,
       orgLogoSignedUrl,
       bankAccount,

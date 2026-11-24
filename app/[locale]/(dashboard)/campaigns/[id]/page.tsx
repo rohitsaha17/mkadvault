@@ -344,6 +344,8 @@ export default async function CampaignDetailPage({
             campaignId={id}
             campaignStatus={campaign.status}
             clientId={campaign.client_id ?? ""}
+            billedAgencyId={campaign.billed_agency_id ?? null}
+            billingPartyType={campaign.billing_party_type ?? "client"}
             currentEndDate={campaign.end_date}
             campaignName={campaign.campaign_name}
             // Delete is a privileged action — scoped to admin /

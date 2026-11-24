@@ -6,10 +6,10 @@ import { inr, fmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  ChevronLeft, Phone, Mail, MapPin, FileText, Building2, Pencil, User, MapPinned,
+  ChevronLeft, Phone, Mail, MapPin, FileText, Building2, Pencil, User, MapPinned, Receipt,
 } from "lucide-react";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import type { PartnerAgency, Contract, Site } from "@/lib/types/database";
+import type { PartnerAgency, Contract, Site, Invoice } from "@/lib/types/database";
 
 export default async function AgencyDetailPage({
   params,
@@ -31,14 +31,38 @@ export default async function AgencyDetailPage({
   if (!data) notFound();
   const agency = data as unknown as PartnerAgency;
 
-  // Linked contracts
-  const { data: contractsData } = await supabase
-    .from("contracts")
-    .select("*")
-    .eq("agency_id", id)
-    .is("deleted_at", null)
-    .order("start_date", { ascending: false });
+  // Linked contracts + invoices billed to this agency — fetched in
+  // parallel so the page still lands in one round-trip.
+  const [{ data: contractsData }, { data: invoicesData }] = await Promise.all([
+    supabase
+      .from("contracts")
+      .select("*")
+      .eq("agency_id", id)
+      .is("deleted_at", null)
+      .order("start_date", { ascending: false }),
+    supabase
+      .from("invoices")
+      .select(
+        "id, invoice_number, invoice_date, due_date, total_paise, amount_paid_paise, balance_due_paise, status",
+      )
+      .eq("billed_agency_id", id)
+      .is("deleted_at", null)
+      .order("invoice_date", { ascending: false })
+      .limit(25),
+  ]);
   const contracts = (contractsData ?? []) as unknown as Contract[];
+  type AgencyInvoiceRow = Pick<
+    Invoice,
+    | "id"
+    | "invoice_number"
+    | "invoice_date"
+    | "due_date"
+    | "total_paise"
+    | "amount_paid_paise"
+    | "balance_due_paise"
+    | "status"
+  >;
+  const agencyInvoices = (invoicesData ?? []) as unknown as AgencyInvoiceRow[];
 
   // Sites for contracts (include status and media_type for the Rented Sites section)
   const siteIds = [...new Set(contracts.map((c) => c.site_id))];
@@ -143,6 +167,70 @@ export default async function AgencyDetailPage({
                     <StatusBadge status={s.status} />
                   </Link>
                 ))}
+              </div>
+            )}
+          </Section>
+
+          {/* Invoices billed to this agency (migration 047) */}
+          <Section title="Invoices" icon={<Receipt className="h-4 w-4" />}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Invoices raised with this agency as the bill-to party.
+              </p>
+              <Link
+                href={`/billing/invoices/new?bill_to=agency&agency_id=${id}`}
+                className="text-xs text-primary hover:underline"
+              >
+                + New
+              </Link>
+            </div>
+            {agencyInvoices.length === 0 ? (
+              <p className="py-3 text-center text-sm text-muted-foreground">
+                No invoices yet.
+              </p>
+            ) : (
+              <div className="rounded-xl border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-xs font-medium text-muted-foreground">
+                    <tr>
+                      <th className="text-left px-3 py-2">Invoice #</th>
+                      <th className="text-left px-3 py-2">Date</th>
+                      <th className="text-right px-3 py-2">Total</th>
+                      <th className="text-right px-3 py-2">Balance</th>
+                      <th className="text-left px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agencyInvoices.map((inv) => (
+                      <tr key={inv.id} className="border-t border-border hover:bg-muted/30">
+                        <td className="px-3 py-2">
+                          <Link
+                            href={`/billing/invoices/${inv.id}`}
+                            className="font-mono text-xs text-foreground hover:text-primary transition-colors"
+                          >
+                            {inv.invoice_number}
+                          </Link>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums">
+                          {fmt(inv.invoice_date)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs tabular-nums text-foreground">
+                          {inr(inv.total_paise)}
+                        </td>
+                        <td className={`px-3 py-2 text-right text-xs tabular-nums ${
+                          (inv.balance_due_paise ?? 0) > 0
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-muted-foreground"
+                        }`}>
+                          {inr(inv.balance_due_paise)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <StatusBadge status={inv.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </Section>

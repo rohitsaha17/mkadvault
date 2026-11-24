@@ -25,10 +25,27 @@ import type {
   OrganizationBankAccount,
 } from "@/lib/types/database";
 
+// Normalised "whoever gets the bill" — either side of the invoice
+// (client or agency, migration 047) gets squashed into this shape so
+// the PDF layout doesn't need to branch on bill_to_type.
+export interface InvoiceBillTo {
+  company_name: string;
+  brand_name?: string | null;
+  billing_address?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_pin_code?: string | null;
+  gstin?: string | null;
+  pan?: string | null;
+}
+
 export interface InvoicePdfInput {
   invoice: Invoice;
   lineItems: InvoiceLineItem[];
-  client: Pick<
+  // Prefer `billTo`. `client` is kept for legacy callers and converted
+  // to billTo internally when present.
+  billTo?: InvoiceBillTo;
+  client?: Pick<
     Client,
     | "company_name"
     | "brand_name"
@@ -69,7 +86,19 @@ const STATUS_PILL: Record<
 };
 
 export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Buffer> {
-  const { invoice, lineItems, client, org, bankAccount, termsText } = input;
+  const { invoice, lineItems, org, bankAccount, termsText } = input;
+  // billTo is the canonical shape. If an old caller still passes
+  // `client`, convert it so the rest of the function stays simple.
+  const client: InvoiceBillTo = input.billTo ?? {
+    company_name: input.client?.company_name ?? "",
+    brand_name: input.client?.brand_name ?? null,
+    billing_address: input.client?.billing_address ?? null,
+    billing_city: input.client?.billing_city ?? null,
+    billing_state: input.client?.billing_state ?? null,
+    billing_pin_code: input.client?.billing_pin_code ?? null,
+    gstin: input.client?.gstin ?? null,
+    pan: input.client?.pan ?? null,
+  };
   const doc = createDoc();
   const logoBytes = await fetchLogoBytes(input.orgLogoSignedUrl);
 
