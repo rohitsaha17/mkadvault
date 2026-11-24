@@ -77,29 +77,44 @@ export default async function ReceiptsPage({
 
   const supabase = await createClient();
 
-  // Build query with the selected filters applied server-side so we
-  // don't pull thousands of rows just to filter in JS.
-  let query = supabase
+  // Two parallel queries with identical filters:
+  //   A. the 50 most recent receipts the table renders;
+  //   B. the aggregate pull for KPI tiles — same filters, no row cap,
+  //      only amount_paise + payment_date + payment_mode, so "Total
+  //      received", "Today", "Top mode", "Avg receipt" tally EVERY
+  //      matching receipt, not only the 50 visible ones.
+  let pagedQuery = supabase
     .from("payments_received")
     .select(
-      "*, client:clients(id, company_name), invoice:invoices(id, invoice_number)"
+      "*, client:clients(id, company_name), invoice:invoices(id, invoice_number)",
+      { count: "exact" },
     )
     .order("payment_date", { ascending: false })
     .order("created_at", { ascending: false })
-    // 50 most recent receipts. Range filter ("Last 7 / 30 / 90 days
-    // / All time") + payment-mode filter narrow the query before
-    // this cap applies, so older receipts stay reachable via filter.
     .limit(50);
+  let aggQuery = supabase
+    .from("payments_received")
+    .select("amount_paise, payment_date, payment_mode");
 
   const days = RANGE_OPTIONS[rangeKey].days;
   if (days != null) {
-    const from = startOfDay(subDays(new Date(), days)).toISOString().slice(0, 10);
-    query = query.gte("payment_date", from);
+    const windowStart = startOfDay(subDays(new Date(), days)).toISOString().slice(0, 10);
+    pagedQuery = pagedQuery.gte("payment_date", windowStart);
+    aggQuery = aggQuery.gte("payment_date", windowStart);
   }
-  if (mode) query = query.eq("payment_mode", mode);
+  if (mode) {
+    pagedQuery = pagedQuery.eq("payment_mode", mode);
+    aggQuery = aggQuery.eq("payment_mode", mode);
+  }
 
-  const { data: receiptsData } = await query;
+  const [pagedRes, aggRes] = await Promise.all([pagedQuery, aggQuery]);
+  const { data: receiptsData, count: receiptsTotalCount } = pagedRes;
   const receipts = (receiptsData ?? []) as unknown as ReceiptRow[];
+  const aggReceipts = (aggRes.data ?? []) as Array<{
+    amount_paise: number | null;
+    payment_date: string;
+    payment_mode: PaymentMode;
+  }>;
 
   // Hydrate agency names for agency-billed receipts (migration 048).
   // When the column doesn't exist the map stays empty and every row
@@ -202,10 +217,13 @@ export default async function ReceiptsPage({
       .order("agency_name"),
   ]);
 
-  // KPIs based on the *current filter window* so the tile tallies match
-  // what the user is actually looking at.
-  const totalPaise = receipts.reduce((s, r) => s + (r.amount_paise ?? 0), 0);
-  const countByMode = receipts.reduce<Record<string, { count: number; paise: number }>>(
+  // KPIs are computed from the AGGREGATE pull so the tiles tally every
+  // matching receipt, not just the 50 rendered. The headline "Total
+  // received" + "Transactions" matches a SQL `SUM(amount_paise)` and
+  // `COUNT(*)` for the filter.
+  const totalPaise = aggReceipts.reduce((s, r) => s + (r.amount_paise ?? 0), 0);
+  const totalCount = receiptsTotalCount ?? aggReceipts.length;
+  const countByMode = aggReceipts.reduce<Record<string, { count: number; paise: number }>>(
     (acc, r) => {
       const key = r.payment_mode ?? "other";
       if (!acc[key]) acc[key] = { count: 0, paise: 0 };
@@ -217,9 +235,10 @@ export default async function ReceiptsPage({
   );
   const topMode = Object.entries(countByMode).sort((a, b) => b[1].paise - a[1].paise)[0];
 
-  // Build the "today" count without another DB round-trip.
+  // "Today" is computed off the aggregate set so a day with >50
+  // receipts still tallies correctly.
   const todayStr = endOfDay(new Date()).toISOString().slice(0, 10);
-  const todayReceipts = receipts.filter((r) => r.payment_date === todayStr.slice(0, 10));
+  const todayReceipts = aggReceipts.filter((r) => r.payment_date === todayStr.slice(0, 10));
   const todayPaise = todayReceipts.reduce((s, r) => s + (r.amount_paise ?? 0), 0);
 
   return (
@@ -304,7 +323,7 @@ export default async function ReceiptsPage({
           icon={<IndianRupee className="h-4 w-4 text-emerald-600" />}
           label="Total received"
           value={inr(totalPaise)}
-          hint={`${receipts.length} receipt${receipts.length === 1 ? "" : "s"}`}
+          hint={`${totalCount} receipt${totalCount === 1 ? "" : "s"}`}
         />
         <Tile
           icon={<Calendar className="h-4 w-4 text-indigo-600" />}
@@ -321,7 +340,7 @@ export default async function ReceiptsPage({
         <Tile
           icon={<ArrowRight className="h-4 w-4 text-amber-600" />}
           label="Avg receipt"
-          value={inr(receipts.length ? Math.round(totalPaise / receipts.length) : 0)}
+          value={inr(totalCount ? Math.round(totalPaise / totalCount) : 0)}
           hint="Across this window"
         />
       </div>
@@ -330,9 +349,13 @@ export default async function ReceiptsPage({
       <section className="rounded-2xl border border-border bg-card card-elevated p-5 sm:p-6">
         <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
           <h2 className="text-sm font-semibold text-foreground">
-            {receipts.length} receipt{receipts.length === 1 ? "" : "s"}
+            {totalCount} receipt{totalCount === 1 ? "" : "s"} in this window
           </h2>
-          <p className="text-xs text-muted-foreground">Showing latest 50 — narrow with the filters above to find older</p>
+          <p className="text-xs text-muted-foreground">
+            {totalCount > receipts.length
+              ? `Showing the latest ${receipts.length} of ${totalCount} — narrow with the filters above to find older`
+              : "Showing every receipt in this window"}
+          </p>
         </div>
 
         {receipts.length === 0 ? (

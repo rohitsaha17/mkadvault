@@ -11,10 +11,14 @@
 //   pricing_type = 'bundled' → campaign.total_value is split evenly
 //                              across its sites, then pro-rated by overlap
 //
-// Costs are filtered to contract_payments whose payment_date falls
-// inside the range. Services (printing / mounting) attach to
-// campaigns, not sites, so they stay out of the per-site number — same
-// gap that the city rollup documents.
+// Costs combine two streams, both narrowed to the range:
+//   1. contract_payments (status=paid, by payment_date) — rent paid
+//      to the landowner / agency who owns the structure.
+//   2. site_expenses (status=paid, by paid_at) that CARRY a site_id —
+//      one-off payment requests tagged to this structure
+//      (maintenance, electricity, permits, mounting).
+// A site_expense with no site_id is a general overhead and stays out
+// of the per-site number.
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { getTranslations } from "next-intl/server";
@@ -47,7 +51,8 @@ export async function SitesRow({
   // the pro-rata math matches the other sections exactly.
   const [
     { data: campaignSites },
-    { data: rangeCosts },
+    { data: rangeContractCosts },
+    { data: rangeExpenseCosts },
     { data: siteRows },
   ] = await Promise.all([
     supabase
@@ -71,6 +76,15 @@ export async function SitesRow({
       .eq("status", "paid")
       .gte("payment_date", from)
       .lte("payment_date", to),
+    supabase
+      .from("site_expenses")
+      .select("amount_paise, site_id")
+      .eq("organization_id", orgId)
+      .eq("status", "paid")
+      .not("site_id", "is", null)
+      .gte("paid_at", `${from}T00:00:00Z`)
+      .lte("paid_at", `${to}T23:59:59Z`)
+      .is("deleted_at", null),
     supabase
       .from("sites")
       .select("id, name, site_code")
@@ -161,7 +175,7 @@ export async function SitesRow({
   }
 
   const siteCosts = new Map<string, number>();
-  for (const row of (rangeCosts ?? []) as unknown as Array<{
+  for (const row of (rangeContractCosts ?? []) as unknown as Array<{
     amount_paid_paise: number | null;
     payment_date: string | null;
     contract: { site_id: string | null } | null;
@@ -173,6 +187,16 @@ export async function SitesRow({
         (siteCosts.get(siteId) ?? 0) + (row.amount_paid_paise ?? 0),
       );
     }
+  }
+  for (const row of (rangeExpenseCosts ?? []) as Array<{
+    amount_paise: number | null;
+    site_id: string | null;
+  }>) {
+    if (!row.site_id) continue;
+    siteCosts.set(
+      row.site_id,
+      (siteCosts.get(row.site_id) ?? 0) + (row.amount_paise ?? 0),
+    );
   }
 
   const siteProfits: SiteProfitRow[] = (

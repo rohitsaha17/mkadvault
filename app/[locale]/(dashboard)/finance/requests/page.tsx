@@ -99,7 +99,12 @@ export default async function FinanceRequestsPage({
     campaign_code: string | null;
   }[];
 
-  let query = supabase
+  // Two parallel queries with identical filters:
+  //   A. the paged table (100 at a time);
+  //   B. the aggregate pull for Outstanding / Paid / Rejected cards —
+  //      same filters, no row cap, just amount_paise + status, so the
+  //      totals reflect EVERY matching row, not just the 100 visible.
+  let pagedQuery = supabase
     .from("site_expenses")
     .select(
       `id, category, description, amount_paise, status, payee_name, payee_type,
@@ -111,24 +116,32 @@ export default async function FinanceRequestsPage({
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(100);
+  let aggQuery = supabase
+    .from("site_expenses")
+    .select("amount_paise, status")
+    .is("deleted_at", null);
 
   if (status && EXPENSE_STATUSES.some((s) => s.value === status)) {
-    query = query.eq("status", status);
+    pagedQuery = pagedQuery.eq("status", status);
+    aggQuery = aggQuery.eq("status", status);
   }
   if (category && EXPENSE_CATEGORIES.some((c) => c.value === category)) {
-    query = query.eq("category", category);
+    pagedQuery = pagedQuery.eq("category", category);
+    aggQuery = aggQuery.eq("category", category);
   }
   if (site) {
-    query = query.eq("site_id", site);
+    pagedQuery = pagedQuery.eq("site_id", site);
+    aggQuery = aggQuery.eq("site_id", site);
   }
   if (q) {
     const safe = sanitizeSearch(q);
-    query = query.or(
-      `description.ilike.%${safe}%,payee_name.ilike.%${safe}%`,
-    );
+    const orClause = `description.ilike.%${safe}%,payee_name.ilike.%${safe}%`;
+    pagedQuery = pagedQuery.or(orClause);
+    aggQuery = aggQuery.or(orClause);
   }
 
-  const { data, error } = await query;
+  const [pagedRes, aggRes] = await Promise.all([pagedQuery, aggQuery]);
+  const { data, error } = pagedRes;
 
   const expenses: ExpenseRow[] = ((data ?? []) as unknown as Array<
     Omit<ExpenseRow, "site"> & {
@@ -139,11 +152,16 @@ export default async function FinanceRequestsPage({
     site: Array.isArray(r.site) ? r.site[0] ?? null : r.site ?? null,
   }));
 
-  const totals = expenses.reduce(
+  const aggRows = (aggRes.data ?? []) as Array<{
+    amount_paise: number | null;
+    status: string | null;
+  }>;
+  const totals = aggRows.reduce(
     (acc, e) => {
-      if (e.status === "paid") acc.paid += e.amount_paise;
-      else if (e.status === "rejected") acc.rejected += e.amount_paise;
-      else acc.outstanding += e.amount_paise;
+      const amt = e.amount_paise ?? 0;
+      if (e.status === "paid") acc.paid += amt;
+      else if (e.status === "rejected") acc.rejected += amt;
+      else acc.outstanding += amt;
       return acc;
     },
     { outstanding: 0, paid: 0, rejected: 0 },
@@ -171,12 +189,19 @@ export default async function FinanceRequestsPage({
           label="Outstanding"
           value={inr(totals.outstanding)}
           tone="warning"
+          badge={hasFilters ? "matching filters" : "all requests"}
         />
-        <KpiCard label="Paid" value={inr(totals.paid)} tone="success" />
+        <KpiCard
+          label="Paid"
+          value={inr(totals.paid)}
+          tone="success"
+          badge={hasFilters ? "matching filters" : "all requests"}
+        />
         <KpiCard
           label="Rejected"
           value={inr(totals.rejected)}
           tone="neutral"
+          badge={hasFilters ? "matching filters" : "all requests"}
         />
       </div>
 
@@ -263,10 +288,12 @@ function KpiCard({
   label,
   value,
   tone,
+  badge,
 }: {
   label: string;
   value: string;
   tone: "success" | "warning" | "neutral";
+  badge: string;
 }) {
   const toneClass =
     tone === "success"
@@ -281,7 +308,7 @@ function KpiCard({
           {label}
         </p>
         <Badge variant="outline" className="text-[10px]">
-          current view
+          {badge}
         </Badge>
       </div>
       <p className={`mt-2 text-2xl font-semibold tabular-nums ${toneClass}`}>

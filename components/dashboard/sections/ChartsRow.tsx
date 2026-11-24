@@ -40,14 +40,19 @@ export async function ChartsRow({
   const supabase = await createClient();
   const tDash = await getTranslations("dashboard");
 
+  // Four queries in parallel. Revenue uses invoice SUBTOTAL (taxable
+  // value) — GST is a pass-through and shouldn't inflate revenue.
+  // Costs combine contract_payments AND paid site_expenses so the
+  // charts match the KPI cards.
   const [
     { data: rangeInvoices },
-    { data: rangeCosts },
+    { data: rangeContractCosts },
+    { data: rangeExpenseCosts },
     { data: rangePayments },
   ] = await Promise.all([
     supabase
       .from("invoices")
-      .select("invoice_date, total_paise")
+      .select("invoice_date, subtotal_paise")
       .eq("organization_id", orgId)
       .gte("invoice_date", from)
       .lte("invoice_date", to)
@@ -60,6 +65,14 @@ export async function ChartsRow({
       .gte("payment_date", from)
       .lte("payment_date", to),
     supabase
+      .from("site_expenses")
+      .select("paid_at, amount_paise")
+      .eq("organization_id", orgId)
+      .eq("status", "paid")
+      .gte("paid_at", `${from}T00:00:00Z`)
+      .lte("paid_at", `${to}T23:59:59Z`)
+      .is("deleted_at", null),
+    supabase
       .from("payments_received")
       .select("payment_date, amount_paise")
       .eq("organization_id", orgId)
@@ -69,15 +82,22 @@ export async function ChartsRow({
 
   const monthKeys = monthKeysInRange(from, to);
   const revenueMap = new Map<string, number>();
-  for (const row of (rangeInvoices ?? []) as Array<{ invoice_date: string; total_paise: number }>) {
+  for (const row of (rangeInvoices ?? []) as Array<{ invoice_date: string; subtotal_paise: number | null }>) {
     const key = monthKey(row.invoice_date);
-    revenueMap.set(key, (revenueMap.get(key) ?? 0) + (row.total_paise ?? 0));
+    revenueMap.set(key, (revenueMap.get(key) ?? 0) + (row.subtotal_paise ?? 0));
   }
   const costsMap = new Map<string, number>();
-  for (const row of (rangeCosts ?? []) as Array<{ payment_date: string | null; amount_paid_paise: number | null }>) {
+  for (const row of (rangeContractCosts ?? []) as Array<{ payment_date: string | null; amount_paid_paise: number | null }>) {
     if (!row.payment_date) continue;
     const key = monthKey(row.payment_date);
     costsMap.set(key, (costsMap.get(key) ?? 0) + (row.amount_paid_paise ?? 0));
+  }
+  for (const row of (rangeExpenseCosts ?? []) as Array<{ paid_at: string | null; amount_paise: number | null }>) {
+    if (!row.paid_at) continue;
+    // paid_at is a full ISO timestamptz; slice to the date before
+    // bucketing so timezones can't move an expense to a different month.
+    const key = monthKey(row.paid_at.slice(0, 10));
+    costsMap.set(key, (costsMap.get(key) ?? 0) + (row.amount_paise ?? 0));
   }
   const chartData = monthKeys.map((month) => ({
     month,

@@ -25,6 +25,8 @@ const FINANCE_ROLES: UserRole[] = [
   "accounts",
 ];
 
+const PAGE_SIZE = 50;
+
 export default async function FinancePaymentsPage({
   params,
   searchParams,
@@ -35,12 +37,16 @@ export default async function FinancePaymentsPage({
     from?: string;
     to?: string;
     site?: string;
+    page?: string;
   }>;
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
 
-  const { q, from, to, site } = await searchParams;
+  const { q, from, to, site, page } = await searchParams;
+  const currentPage = Math.max(1, parseInt(page ?? "1", 10));
+  const rangeFrom = (currentPage - 1) * PAGE_SIZE;
+  const rangeTo = rangeFrom + PAGE_SIZE - 1;
 
   const supabase = await createClient();
 
@@ -75,33 +81,56 @@ export default async function FinancePaymentsPage({
     site_code: string | null;
   }[];
 
-  // Show the 50 most recent paid expenses by default. Filters above
-  // (date range, site, search) narrow before this limit applies, so
-  // older payments stay reachable via filtering.
-  let query = supabase
+  // Two parallel queries with identical filters:
+  //   A. the paged row set the table renders (50 at a time);
+  //   B. the aggregate pull for the KPI cards — same filters, no
+  //      pagination, just amount_paise + payment_proof_urls, so the
+  //      "Total paid", "Transactions", and "Missing proof" cards tally
+  //      ALL matching rows, not only the 50 visible ones.
+  let pagedQuery = supabase
     .from("site_expenses")
     .select(
       `id, category, description, amount_paise, status, payee_name, payee_type,
        needed_by, paid_at, payment_mode, receipt_doc_urls, payment_proof_urls,
        created_at, site_id,
        site:sites(id, name, site_code)`,
+      { count: "exact" },
     )
     .is("deleted_at", null)
     .eq("status", "paid")
     .order("paid_at", { ascending: false })
-    .limit(50);
+    .range(rangeFrom, rangeTo);
+  let aggQuery = supabase
+    .from("site_expenses")
+    .select("amount_paise, payment_proof_urls")
+    .is("deleted_at", null)
+    .eq("status", "paid");
 
-  if (from) query = query.gte("paid_at", `${from}T00:00:00Z`);
-  if (to) query = query.lte("paid_at", `${to}T23:59:59Z`);
-  if (site) query = query.eq("site_id", site);
+  if (from) {
+    pagedQuery = pagedQuery.gte("paid_at", `${from}T00:00:00Z`);
+    aggQuery = aggQuery.gte("paid_at", `${from}T00:00:00Z`);
+  }
+  if (to) {
+    pagedQuery = pagedQuery.lte("paid_at", `${to}T23:59:59Z`);
+    aggQuery = aggQuery.lte("paid_at", `${to}T23:59:59Z`);
+  }
+  if (site) {
+    pagedQuery = pagedQuery.eq("site_id", site);
+    aggQuery = aggQuery.eq("site_id", site);
+  }
   if (q) {
     const safe = sanitizeSearch(q);
-    query = query.or(
-      `description.ilike.%${safe}%,payee_name.ilike.%${safe}%`,
-    );
+    const orClause = `description.ilike.%${safe}%,payee_name.ilike.%${safe}%`;
+    pagedQuery = pagedQuery.or(orClause);
+    aggQuery = aggQuery.or(orClause);
   }
 
-  const { data, error } = await query;
+  const [pagedRes, aggRes] = await Promise.all([pagedQuery, aggQuery]);
+  const { data, error, count: totalCount } = pagedRes;
+  const aggRows = (aggRes.data ?? []) as Array<{
+    amount_paise: number | null;
+    payment_proof_urls: string[] | null;
+  }>;
 
   const expenses: ExpenseRow[] = ((data ?? []) as unknown as Array<
     Omit<ExpenseRow, "site"> & {
@@ -112,12 +141,27 @@ export default async function FinancePaymentsPage({
     site: Array.isArray(r.site) ? r.site[0] ?? null : r.site ?? null,
   }));
 
-  const total = expenses.reduce((a, e) => a + e.amount_paise, 0);
-  const missingProof = expenses.filter(
-    (e) => (e.payment_proof_urls?.length ?? 0) === 0,
+  // Totals over the WHOLE filter match, not the 50 visible rows.
+  const total = aggRows.reduce((a, r) => a + (r.amount_paise ?? 0), 0);
+  const transactionCount = totalCount ?? aggRows.length;
+  const missingProof = aggRows.filter(
+    (r) => (r.payment_proof_urls?.length ?? 0) === 0,
   ).length;
 
   const hasFilters = !!(q || from || to || site);
+  const totalPages = Math.max(1, Math.ceil(transactionCount / PAGE_SIZE));
+  const rangeStart = transactionCount === 0 ? 0 : rangeFrom + 1;
+  const rangeEnd = Math.min(rangeFrom + expenses.length, transactionCount);
+  const buildPageHref = (p: number) => {
+    const u = new URLSearchParams();
+    if (q) u.set("q", q);
+    if (from) u.set("from", from);
+    if (to) u.set("to", to);
+    if (site) u.set("site", site);
+    if (p > 1) u.set("page", String(p));
+    const qs = u.toString();
+    return qs ? `/finance/payments?${qs}` : `/finance/payments`;
+  };
 
   return (
     <div>
@@ -131,13 +175,13 @@ export default async function FinancePaymentsPage({
         <StatCard
           label="Total paid"
           value={inr(total)}
-          badge="filtered view"
+          badge={hasFilters ? "matching filters" : "all paid"}
           tone="success"
         />
         <StatCard
           label="Transactions"
-          value={String(expenses.length)}
-          badge="in view"
+          value={String(transactionCount)}
+          badge={hasFilters ? "matching filters" : "all paid"}
           tone="neutral"
         />
         <StatCard
@@ -207,15 +251,46 @@ export default async function FinancePaymentsPage({
       )}
 
       {!error && (
-        <ExpensesList
-          expenses={expenses}
-          canSettle={canSettle}
-          emptyMessage={
-            hasFilters
-              ? "No payments match those filters."
-              : "No payments settled yet."
-          }
-        />
+        <>
+          <ExpensesList
+            expenses={expenses}
+            canSettle={canSettle}
+            emptyMessage={
+              hasFilters
+                ? "No payments match those filters."
+                : "No payments settled yet."
+            }
+          />
+          {transactionCount > 0 && (
+            <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+              <p className="tabular-nums">
+                Showing <span className="font-medium text-foreground">{rangeStart}–{rangeEnd}</span> of{" "}
+                <span className="font-medium text-foreground">{transactionCount}</span>
+              </p>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  {currentPage > 1 ? (
+                    <Link href={buildPageHref(currentPage - 1)}>
+                      <Button variant="outline" size="sm">← Previous</Button>
+                    </Link>
+                  ) : (
+                    <Button variant="outline" size="sm" disabled>← Previous</Button>
+                  )}
+                  <span className="tabular-nums">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  {currentPage < totalPages ? (
+                    <Link href={buildPageHref(currentPage + 1)}>
+                      <Button variant="outline" size="sm">Next →</Button>
+                    </Link>
+                  ) : (
+                    <Button variant="outline" size="sm" disabled>Next →</Button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
