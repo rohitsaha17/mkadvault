@@ -10,7 +10,7 @@
 // still live in-file because they're much smaller.
 
 import { Suspense } from "react";
-import { setRequestLocale, getTranslations } from "next-intl/server";
+import { setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { format, addDays, parseISO } from "date-fns";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,12 +39,57 @@ interface PageProps {
   searchParams: Promise<{ range?: string; from?: string; to?: string }>;
 }
 
+// Name the window the page is scoped to, concretely. "FY 2026-27",
+// "Oct 2026", "This quarter" — whichever reads clearest for the preset.
+// Falls back to a date-range for custom and anything we don't recognise.
+function dashboardHeadline(
+  preset: string | undefined,
+  from: string,
+  to: string,
+): string {
+  // parseISO on a YYYY-MM-DD string returns LOCAL midnight — so we
+  // must read it with the local getters, not the UTC ones, or the IST
+  // offset shifts April 1 into March 31 of the previous year and we
+  // end up calling this "FY 2025-26" when the window is actually 26-27.
+  const start = parseISO(from);
+  const end = parseISO(to);
+  // Indian FY: Apr 1 → Mar 31. Named by the two calendar years it spans.
+  const fyLabel = (d: Date) => {
+    const y = d.getFullYear();
+    // Months Jan–Mar belong to FY (y-1)→y.
+    return d.getMonth() < 3 ? `FY ${y - 1}-${String(y).slice(2)}` : `FY ${y}-${String(y + 1).slice(2)}`;
+  };
+  switch (preset) {
+    case "current_fy":
+    case "last_fy":
+      return fyLabel(start);
+    case "ytd":
+      return `Year to date · ${format(end, "d MMM yyyy")}`;
+    case "this_month":
+    case "last_month":
+      return format(start, "MMMM yyyy");
+    case "current_quarter":
+    case "last_quarter":
+      return `${fyLabel(start)} · ${format(start, "MMM")}–${format(end, "MMM")}`;
+    case "today":
+      return format(start, "EEEE, d MMM yyyy");
+    case "yesterday":
+      return format(start, "EEEE, d MMM yyyy");
+    case "this_week":
+    case "last_week":
+      return `Week of ${format(start, "d MMM yyyy")}`;
+    case "all":
+      return "All time";
+    default:
+      return `${format(start, "d MMM yyyy")} – ${format(end, "d MMM yyyy")}`;
+  }
+}
+
 export default async function DashboardPage({ params, searchParams }: PageProps) {
   const { locale } = await params;
   const { range, from, to } = await searchParams;
   setRequestLocale(locale);
 
-  const tDash = await getTranslations("dashboard");
   const session = await getSession();
 
   if (!session) redirect(`/${locale}/login`);
@@ -91,22 +136,20 @@ export default async function DashboardPage({ params, searchParams }: PageProps)
   // Full admin dashboard — streamed in sections.
   return (
     <div className="space-y-6">
-      {/* Header renders immediately — no awaits above this point cross the
-          Suspense boundaries below, so the user sees "Welcome back, X" at
-          ~0 ms even before any KPI query resolves. */}
+      {/* Header renders immediately — no awaits above this point cross
+          the Suspense boundaries below, so the title paints at ~0 ms
+          even before any KPI query resolves. The headline names the
+          period in view rather than greeting the user: it's what
+          every number on this page is scoped to, so it should lead. */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="flex flex-col gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            {tDash("overview")}
-          </p>
-          <h1 className="text-2xl md:text-[28px] font-semibold tracking-tight text-foreground leading-tight">
-            {profile?.full_name
-              ? `${tDash("welcome_back")}, ${profile.full_name.split(" ")[0]}`
-              : tDash("welcome_back")}
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className="h-[2px] w-3 rounded-full bg-primary/70"
+          />
+          <h1 className="text-2xl md:text-[28px] font-medium tracking-tight text-foreground leading-tight">
+            {dashboardHeadline(preset, rangeFrom, rangeTo)}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {tDash("dashboard_subtitle")}
-          </p>
         </div>
         <DashboardFilters
           currentPreset={preset}

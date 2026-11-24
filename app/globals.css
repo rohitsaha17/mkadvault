@@ -5,11 +5,14 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Design tokens
+   Design tokens — "hoarding at dusk" direction
    ----------------------------------------------------------------------------
-   - Neutral palette: warm-slate (slightly cooler than Tailwind default)
-   - Brand accent: indigo → violet gradient for primary / focus states
-   - Chart palette: 5 distinct hues that read well in both light & dark
+   - Neutral palette: warm ink. One ramp, slight amber cast, so surfaces
+     stay quiet across a long reading session.
+   - Accent: hoarding-vinyl amber. Used once or twice per screen on the
+     one figure or action that matters. No gradient, no glow.
+   - Chart palette: warm neutral steps plus the amber accent. Series
+     only pick up colour when they really have to tell themselves apart.
    - Radius:   10px base (lg). xl/2xl derived.
    - Shadows:  soft ambient + thin ring so cards feel elevated without
                looking heavy on dark mode.
@@ -60,98 +63,103 @@
 }
 
 /* ─── LIGHT THEME ──────────────────────────────────────────────────────────── */
+/* Neutrals sit at hue 60 (warm amber-ink) with very low chroma so the
+   surfaces read as paper, not as orange. The hoarding-vinyl amber lives
+   in --primary / --ring and shows up only where it is called. */
 :root {
-  /* Neutral surface — very subtle warm tint so big white areas don't glare */
-  --background: oklch(0.995 0.002 240);
-  --foreground: oklch(0.18 0.01 255);
+  --background: oklch(0.994 0.003 60);
+  --foreground: oklch(0.2 0.012 60);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.01 255);
+  --card-foreground: oklch(0.2 0.012 60);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.01 255);
+  --popover-foreground: oklch(0.2 0.012 60);
 
-  /* Brand: indigo 600 — used for primary buttons, active nav, links */
-  --primary: oklch(0.52 0.21 265);
+  /* Hoarding-vinyl amber — the one accent. Darkened below oklch 0.6 so
+     text on primary stays above 4.5:1 contrast. */
+  --primary: oklch(0.56 0.14 55);
   --primary-foreground: oklch(0.99 0 0);
 
-  --secondary: oklch(0.965 0.005 255);
-  --secondary-foreground: oklch(0.22 0.01 255);
+  --secondary: oklch(0.965 0.006 60);
+  --secondary-foreground: oklch(0.24 0.012 60);
 
-  --muted: oklch(0.965 0.005 255);
-  --muted-foreground: oklch(0.52 0.015 255);
+  --muted: oklch(0.965 0.006 60);
+  --muted-foreground: oklch(0.52 0.012 60);
 
-  --accent: oklch(0.955 0.015 265);
-  --accent-foreground: oklch(0.35 0.15 265);
+  --accent: oklch(0.955 0.01 60);
+  --accent-foreground: oklch(0.32 0.1 55);
 
-  --destructive: oklch(0.6 0.22 25);
+  --destructive: oklch(0.56 0.18 25);
 
-  --border: oklch(0.92 0.008 255);
-  --input: oklch(0.92 0.008 255);
-  --ring: oklch(0.52 0.21 265);
+  --border: oklch(0.92 0.006 60);
+  --input: oklch(0.92 0.006 60);
+  --ring: oklch(0.56 0.14 55);
 
-  /* Chart palette — indigo / violet / teal / amber / rose. Distinct hues,
-     readable at small sizes. */
-  --chart-1: oklch(0.55 0.21 265);   /* indigo */
-  --chart-2: oklch(0.6 0.2 305);     /* violet */
-  --chart-3: oklch(0.68 0.14 180);   /* teal   */
-  --chart-4: oklch(0.75 0.16 70);    /* amber  */
-  --chart-5: oklch(0.62 0.22 15);    /* rose   */
+  /* Chart palette — neutral steps with the amber as the one lead. Used
+     by Recharts via var(--color-chart-N). Series only pick up a hue
+     when they genuinely have to disambiguate. */
+  --chart-1: oklch(0.56 0.14 55);    /* amber lead */
+  --chart-2: oklch(0.72 0.015 60);   /* step 1 */
+  --chart-3: oklch(0.58 0.015 60);   /* step 2 */
+  --chart-4: oklch(0.42 0.015 60);   /* step 3 */
+  --chart-5: oklch(0.52 0.12 160);   /* reserved — a calm teal for "healthy" */
 
   --radius: 0.625rem;
 
-  /* Sidebar — deep indigo shell with subtle ring */
-  --sidebar: oklch(0.18 0.035 260);
-  --sidebar-foreground: oklch(0.8 0.02 255);
-  --sidebar-primary: oklch(0.55 0.22 265);
+  /* Sidebar — deep warm-ink shell. No blue cast, no glow. */
+  --sidebar: oklch(0.2 0.012 60);
+  --sidebar-foreground: oklch(0.8 0.01 60);
+  --sidebar-primary: oklch(0.56 0.14 55);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.24 0.03 260);
+  --sidebar-accent: oklch(0.26 0.012 60);
   --sidebar-accent-foreground: oklch(0.97 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.55 0.22 265);
+  --sidebar-ring: oklch(0.56 0.14 55);
 }
 
 /* ─── DARK THEME ───────────────────────────────────────────────────────────── */
 .dark {
-  --background: oklch(0.145 0.02 260);
-  --foreground: oklch(0.97 0.005 255);
+  --background: oklch(0.145 0.006 60);
+  --foreground: oklch(0.97 0.004 60);
 
-  --card: oklch(0.2 0.025 260);
-  --card-foreground: oklch(0.97 0.005 255);
-  --popover: oklch(0.2 0.025 260);
-  --popover-foreground: oklch(0.97 0.005 255);
+  --card: oklch(0.2 0.008 60);
+  --card-foreground: oklch(0.97 0.004 60);
+  --popover: oklch(0.2 0.008 60);
+  --popover-foreground: oklch(0.97 0.004 60);
 
-  --primary: oklch(0.72 0.17 265);
-  --primary-foreground: oklch(0.15 0.02 260);
+  /* Amber lifted a touch in dark so it still reads as vinyl, not brown. */
+  --primary: oklch(0.72 0.14 55);
+  --primary-foreground: oklch(0.15 0.01 60);
 
-  --secondary: oklch(0.26 0.025 260);
-  --secondary-foreground: oklch(0.97 0.005 255);
+  --secondary: oklch(0.26 0.008 60);
+  --secondary-foreground: oklch(0.97 0.004 60);
 
-  --muted: oklch(0.24 0.02 260);
-  --muted-foreground: oklch(0.68 0.015 255);
+  --muted: oklch(0.24 0.006 60);
+  --muted-foreground: oklch(0.68 0.012 60);
 
-  --accent: oklch(0.28 0.04 265);
-  --accent-foreground: oklch(0.97 0.005 255);
+  --accent: oklch(0.28 0.02 55);
+  --accent-foreground: oklch(0.97 0.004 60);
 
-  --destructive: oklch(0.68 0.2 22);
+  --destructive: oklch(0.65 0.18 25);
 
-  --border: oklch(1 0 0 / 10%);
+  --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.65 0.2 265);
+  --ring: oklch(0.72 0.14 55);
 
-  --chart-1: oklch(0.7 0.2 265);
-  --chart-2: oklch(0.72 0.2 305);
-  --chart-3: oklch(0.75 0.16 180);
-  --chart-4: oklch(0.8 0.18 70);
-  --chart-5: oklch(0.72 0.22 15);
+  --chart-1: oklch(0.74 0.14 55);    /* amber lead */
+  --chart-2: oklch(0.6 0.008 60);    /* step 1 */
+  --chart-3: oklch(0.46 0.008 60);   /* step 2 */
+  --chart-4: oklch(0.34 0.008 60);   /* step 3 */
+  --chart-5: oklch(0.6 0.1 160);     /* reserved teal for "healthy" */
 
-  --sidebar: oklch(0.16 0.025 260);
-  --sidebar-foreground: oklch(0.85 0.01 255);
-  --sidebar-primary: oklch(0.7 0.2 265);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.24 0.03 260);
+  --sidebar: oklch(0.17 0.008 60);
+  --sidebar-foreground: oklch(0.85 0.008 60);
+  --sidebar-primary: oklch(0.72 0.14 55);
+  --sidebar-primary-foreground: oklch(0.15 0.01 60);
+  --sidebar-accent: oklch(0.24 0.012 60);
   --sidebar-accent-foreground: oklch(0.97 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.65 0.2 265);
+  --sidebar-ring: oklch(0.72 0.14 55);
 }
 
 @layer base {

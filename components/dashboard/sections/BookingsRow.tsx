@@ -16,15 +16,9 @@
 //
 // Every number pro-rates via prorateByRange() so a campaign that
 // straddles two periods is counted in each by its actual days-in-period.
-import {
-  CalendarCheck,
-  CalendarClock,
-  PlayCircle,
-  AlertTriangle,
-  ArrowUpRight,
-} from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { inr } from "@/lib/utils";
 import { prorateByRange, daysInRange } from "@/lib/utils/date-ranges";
@@ -33,9 +27,9 @@ interface BookingCardProps {
   title: string;
   value: string;
   subtitle: string;
-  icon: React.ReactNode;
-  iconBg: string;
   href: string;
+  // Warning is only used to tip the hairline amber on the "Ending in
+  // range" card when there's something still open to act on.
   tone?: "default" | "warning";
 }
 
@@ -209,17 +203,18 @@ export async function BookingsRow({
   return (
     <div className="space-y-3">
       <div className="flex items-end justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Bookings
-          </p>
-          <h2 className="text-lg font-semibold tracking-tight text-foreground">
-            Sales momentum & campaign pipeline
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden
+            className="h-[2px] w-3 rounded-full bg-primary/70"
+          />
+          <h2 className="text-lg font-medium tracking-tight text-foreground">
+            Sales momentum
           </h2>
         </div>
         <Link
           href={`/${locale}/campaigns`}
-          className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1"
+          className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
         >
           View all campaigns
           <ArrowUpRight className="h-3.5 w-3.5" />
@@ -228,47 +223,35 @@ export async function BookingsRow({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <BookingCard
-          title="Booked Value in Range"
+          title="Booked in this window"
           value={inr(bookedValueInRange)}
           subtitle={
             bookingsInRangeCount > 0
-              ? `${bookingsInRangeCount} ${bookingsInRangeCount === 1 ? "campaign" : "campaigns"} overlap (pro-rata)`
-              : "No bookings touching this range"
+              ? `${bookingsInRangeCount} ${bookingsInRangeCount === 1 ? "campaign" : "campaigns"} overlap, pro-rated`
+              : "No bookings touching this window"
           }
-          iconBg="bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300"
-          icon={<CalendarCheck className="h-5 w-5" />}
           href={`/${locale}/campaigns`}
         />
         <BookingCard
-          title="Live Right Now"
+          title="Live right now"
           value={String(liveCount)}
-          subtitle={`${inr(liveValue)} total value running`}
-          iconBg="bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300"
-          icon={<PlayCircle className="h-5 w-5" />}
+          subtitle={`${inr(liveValue)} running on hoardings today`}
           href={`/${locale}/campaigns?status=live`}
         />
         <BookingCard
-          title="Starting in Range"
+          title="Starting in this window"
           value={String(startingInRange.length)}
           subtitle={`${inr(startingValue)} booked`}
-          iconBg="bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300"
-          icon={<CalendarClock className="h-5 w-5" />}
           href={`/${locale}/campaigns`}
         />
         <BookingCard
-          title="Ending in Range"
+          title="Ending in this window"
           value={String(endingInRange.length)}
           subtitle={
             endingActionable > 0
               ? `${endingActionable} still open · ${inr(endingValue)} up for renewal`
               : `${inr(endingValue)} total ending`
           }
-          iconBg={
-            endingActionable > 0
-              ? "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300"
-              : "bg-muted text-muted-foreground"
-          }
-          icon={<AlertTriangle className="h-5 w-5" />}
           href={`/${locale}/campaigns`}
           tone={endingActionable > 0 ? "warning" : "default"}
         />
@@ -281,39 +264,29 @@ function BookingCard({
   title,
   value,
   subtitle,
-  icon,
-  iconBg,
   href,
   tone = "default",
 }: BookingCardProps) {
-  const borderClass =
-    tone === "warning"
-      ? "ring-1 ring-inset ring-amber-200/60 dark:ring-amber-500/20 bg-amber-50/30 dark:bg-amber-500/5"
-      : "";
+  // The warning tone is the one place on this row where the accent
+  // shows up — a thin amber top rail on cards that have something
+  // still open to act on. Everything else sits in the neutral ramp.
+  const accentRail =
+    tone === "warning" ? (
+      <span
+        aria-hidden
+        className="absolute left-0 right-0 top-0 h-[2px] bg-primary/70"
+      />
+    ) : null;
   return (
     <Link href={href} className="group">
-      <Card
-        className={`relative overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5 ${borderClass}`}
-      >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br from-primary/10 to-transparent blur-2xl"
-        />
-        <CardHeader className="flex flex-row items-start justify-between pb-3 space-y-0 relative">
-          <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            {title}
-          </CardTitle>
-          <div
-            className={`h-10 w-10 rounded-xl flex items-center justify-center ring-1 ring-inset ring-border/60 ${iconBg}`}
-          >
-            {icon}
-          </div>
-        </CardHeader>
-        <CardContent className="relative">
-          <div className="text-[28px] font-semibold tabular-nums tracking-tight text-foreground leading-none">
+      <Card className="relative overflow-hidden transition-colors hover:bg-accent/40">
+        {accentRail}
+        <CardContent className="relative pt-6">
+          <p className="text-xs text-muted-foreground">{title}</p>
+          <div className="mt-2 text-[26px] font-medium tabular-nums tracking-tight text-foreground leading-none">
             {value}
           </div>
-          <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+          <p className="mt-3 text-xs text-muted-foreground tabular-nums">
             {subtitle}
           </p>
         </CardContent>

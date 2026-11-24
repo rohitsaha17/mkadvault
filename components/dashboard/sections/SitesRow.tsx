@@ -233,10 +233,12 @@ export async function SitesRow({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">{tDash("top_sites")}</CardTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Pro-rated to the selected range
+        <CardHeader className="pb-2 space-y-0.5">
+          <CardTitle className="text-base font-medium tracking-tight">
+            {tDash("top_sites")}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Pro-rated to the window
           </p>
         </CardHeader>
         <CardContent>
@@ -244,10 +246,12 @@ export async function SitesRow({
         </CardContent>
       </Card>
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">{tDash("bottom_sites")}</CardTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Lowest profit in the selected range
+        <CardHeader className="pb-2 space-y-0.5">
+          <CardTitle className="text-base font-medium tracking-tight">
+            {tDash("bottom_sites")}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Lowest profit in the window
           </p>
         </CardHeader>
         <CardContent>
@@ -255,6 +259,22 @@ export async function SitesRow({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// Signature detail: the site-code chip. A tiny mono tag that reads
+// like a hoarding ID screwed to a steel frame — mono text, hairline
+// border, warm neutral background, zero fluff.
+function SiteCodeChip({ code }: { code: string }) {
+  if (!code) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-sm border border-border/60 bg-muted/50 px-1.5 py-[1px] font-mono text-[10px] tracking-tight text-muted-foreground">
+      <span
+        aria-hidden
+        className="h-1 w-1 rounded-full bg-primary/80"
+      />
+      {code}
+    </span>
   );
 }
 
@@ -271,33 +291,41 @@ function SiteTable({
     new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(p / 100);
 
   if (sites.length === 0) {
-    return <p className="text-sm text-muted-foreground py-4 text-center">{labels.noData}</p>;
+    return <p className="text-sm text-muted-foreground py-6 text-center">{labels.noData}</p>;
   }
 
   return (
     <table className="w-full text-sm">
       <thead>
-        <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
-          <th className="text-left pb-2 font-semibold">{labels.site}</th>
-          <th className="text-right pb-2 font-semibold">{labels.revenue}</th>
-          <th className="text-right pb-2 font-semibold">{labels.costs}</th>
-          <th className="text-right pb-2 font-semibold">{labels.profit}</th>
+        <tr className="text-xs text-muted-foreground border-b border-border">
+          <th className="text-left pb-2 font-normal">{labels.site}</th>
+          <th className="text-right pb-2 font-normal">{labels.revenue}</th>
+          <th className="text-right pb-2 font-normal">{labels.costs}</th>
+          <th className="text-right pb-2 font-normal">{labels.profit}</th>
         </tr>
       </thead>
       <tbody>
         {sites.map((s) => (
-          <tr key={s.id} className="border-b border-border last:border-0">
-            <td className="py-3 pr-2">
-              <p className="font-medium text-foreground truncate max-w-[140px]">{s.name}</p>
-              <p className="text-[11px] text-muted-foreground">{s.site_code}</p>
+          <tr key={s.id} className="border-b border-border/60 last:border-0">
+            <td className="py-3 pr-3 align-top">
+              <div className="flex items-start gap-2">
+                <SiteCodeChip code={s.site_code} />
+                <p className="text-foreground leading-tight truncate max-w-[180px]">
+                  {s.name}
+                </p>
+              </div>
             </td>
-            <td className="py-3 text-right tabular-nums text-muted-foreground">{fmt(s.revenue)}</td>
-            <td className="py-3 text-right tabular-nums text-muted-foreground">{fmt(s.costs)}</td>
+            <td className="py-3 text-right tabular-nums text-muted-foreground align-top">
+              {fmt(s.revenue)}
+            </td>
+            <td className="py-3 text-right tabular-nums text-muted-foreground align-top">
+              {fmt(s.costs)}
+            </td>
             <td
-              className={`py-3 text-right font-semibold tabular-nums ${
+              className={`py-3 text-right font-medium tabular-nums align-top ${
                 isBottom || s.profit < 0
-                  ? "text-rose-600 dark:text-rose-400"
-                  : "text-emerald-600 dark:text-emerald-400"
+                  ? "text-destructive"
+                  : "text-foreground"
               }`}
             >
               {fmt(s.profit)}

@@ -119,18 +119,26 @@ export async function ChartsRow({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">
+        <CardHeader className="pb-2 space-y-0.5">
+          <CardTitle className="text-base font-medium tracking-tight">
             {tDash("revenue_vs_cost")}
           </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Taxable revenue against paid cost, by month
+          </p>
         </CardHeader>
         <CardContent>
           <RevenueCostChart data={chartData} />
         </CardContent>
       </Card>
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">{tDash("cash_flow")}</CardTitle>
+        <CardHeader className="pb-2 space-y-0.5">
+          <CardTitle className="text-base font-medium tracking-tight">
+            {tDash("cash_flow")}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Money in from clients against money out to payees
+          </p>
         </CardHeader>
         <CardContent>
           <CashFlowChart data={cashFlowData} />

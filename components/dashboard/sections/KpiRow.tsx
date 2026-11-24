@@ -12,8 +12,8 @@
 // (status=paid, by payment_date) and site_expenses (status=paid, by
 // paid_at) — the finance team pays rent through contracts AND files
 // one-off payment requests, and the dashboard has to see both.
-import { TrendingUp, TrendingDown, DollarSign, BarChart2, Building2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TrendingUp, TrendingDown } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { createClient } from "@/lib/supabase/server";
 import { inr } from "@/lib/utils";
@@ -160,53 +160,54 @@ export async function KpiRow({
   const bookedSiteCount = (bookedSites ?? []).length;
   const occupancyPct = totalSiteCount > 0 ? Math.round((bookedSiteCount / totalSiteCount) * 100) : 0;
 
+  // Previous-period comparison. When there's no prior data (fresh FY,
+  // empty window) we hide the delta row entirely rather than show a
+  // misleading "+0.0%" with an up-arrow — a dashboard that lies about
+  // its own change is worse than one that admits it doesn't know yet.
+  const hasRevenueDelta = lastMonthRevenue > 0;
+  const hasCostDelta = lastMonthCostTotal > 0;
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <KpiCard
         title="Revenue"
         value={inr(thisMonthRevenue)}
-        changePercent={revenueChange}
-        iconBg="bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300"
-        icon={<DollarSign className="h-5 w-5" />}
-        vsLabel="vs previous period"
+        hint={`Taxable value · ${thisMonthInvoices?.length ?? 0} invoices`}
+        changePercent={hasRevenueDelta ? revenueChange : null}
+        changeLabel="vs previous period"
       />
       <KpiCard
-        title="Costs"
+        title="Cost"
         value={inr(thisMonthCostTotal)}
-        changePercent={-costChange}
-        iconBg="bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300"
-        icon={<BarChart2 className="h-5 w-5" />}
-        vsLabel="vs previous period"
+        hint="Rent paid + settled requests"
+        // On cost, a NEGATIVE change is a good thing, so we flip the
+        // sign so "lower cost" reads as an up-tick.
+        changePercent={hasCostDelta ? -costChange : null}
+        changeLabel="vs previous period"
       />
       <KpiCard
-        title="Net Profit"
+        title="Net profit"
         value={inr(netProfit)}
-        changePercent={profitMargin}
-        iconBg="bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300"
-        icon={<TrendingUp className="h-5 w-5" />}
-        vsLabel="margin"
+        hint="Taxable revenue − cost"
+        // Margin keeps its real sign: a loss shows a down arrow with
+        // the magnitude, not an up arrow with the absolute value.
+        changePercent={thisMonthRevenue > 0 ? profitMargin : null}
+        changeLabel="margin"
       />
       <Card className="relative overflow-hidden">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br from-violet-500/10 to-transparent blur-2xl"
-        />
-        <CardHeader className="flex flex-row items-start justify-between pb-3 space-y-0 relative">
-          <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <CardContent className="relative pt-6">
+          <p className="text-xs text-muted-foreground">
             {tDash("site_occupancy")}
-          </CardTitle>
-          <div className="h-10 w-10 rounded-xl flex items-center justify-center ring-1 ring-inset ring-border/60 bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
-            <Building2 className="h-5 w-5" />
-          </div>
-        </CardHeader>
-        <CardContent className="relative">
-          <div className="text-[28px] font-semibold tabular-nums tracking-tight text-foreground leading-none">
-            {occupancyPct}%
-          </div>
-          <Progress value={occupancyPct} className="mt-4 h-1.5" />
-          <p className="mt-2 text-xs text-muted-foreground tabular-nums">
-            {bookedSiteCount} {tDash("of_sites_booked", { total: totalSiteCount })}
           </p>
+          <div className="mt-2 flex items-baseline gap-2">
+            <div className="text-[28px] font-medium tabular-nums tracking-tight text-foreground leading-none">
+              {occupancyPct}%
+            </div>
+            <div className="text-xs text-muted-foreground tabular-nums">
+              {bookedSiteCount} of {totalSiteCount} sites
+            </div>
+          </div>
+          <Progress value={occupancyPct} className="mt-4 h-1" />
         </CardContent>
       </Card>
     </div>
@@ -216,52 +217,54 @@ export async function KpiRow({
 function KpiCard({
   title,
   value,
+  hint,
   changePercent,
-  icon,
-  iconBg,
-  vsLabel,
+  changeLabel,
 }: {
   title: string;
   value: string;
-  changePercent: number;
-  icon: React.ReactNode;
-  iconBg: string;
-  vsLabel: string;
+  hint?: string;
+  // null = no prior-period data; render the row quiet instead of a
+  // fake 0.0% with a green arrow. Numbers may be negative — the sign
+  // decides the arrow and the colour.
+  changePercent: number | null;
+  changeLabel: string;
 }) {
-  const isPositive = changePercent >= 0;
+  const isPositive = (changePercent ?? 0) >= 0;
   return (
     <Card className="relative overflow-hidden">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br from-primary/10 to-transparent blur-2xl"
-      />
-      <CardHeader className="flex flex-row items-start justify-between pb-3 space-y-0 relative">
-        <CardTitle className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          {title}
-        </CardTitle>
-        <div className={`h-10 w-10 rounded-xl flex items-center justify-center ring-1 ring-inset ring-border/60 ${iconBg}`}>
-          {icon}
-        </div>
-      </CardHeader>
-      <CardContent className="relative">
-        <div className="text-[28px] font-semibold tabular-nums tracking-tight text-foreground leading-none">
+      <CardContent className="relative pt-6">
+        <p className="text-xs text-muted-foreground">{title}</p>
+        <div className="mt-2 text-[28px] font-medium tabular-nums tracking-tight text-foreground leading-none">
           {value}
         </div>
-        <div
-          className={`mt-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-            isPositive
-              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-              : "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
-          }`}
-        >
-          {isPositive ? (
-            <TrendingUp className="h-3 w-3" strokeWidth={2.5} />
+        <div className="mt-3 flex items-center gap-2 text-xs">
+          {changePercent === null ? (
+            <span className="text-muted-foreground/70 tabular-nums">
+              — {changeLabel}
+            </span>
           ) : (
-            <TrendingDown className="h-3 w-3" strokeWidth={2.5} />
+            <>
+              <span
+                className={`inline-flex items-center gap-1 tabular-nums ${
+                  isPositive ? "text-foreground" : "text-destructive"
+                }`}
+              >
+                {isPositive ? (
+                  <TrendingUp className="h-3.5 w-3.5" strokeWidth={1.75} />
+                ) : (
+                  <TrendingDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+                )}
+                {!isPositive && "−"}
+                {Math.abs(changePercent).toFixed(1)}%
+              </span>
+              <span className="text-muted-foreground">{changeLabel}</span>
+            </>
           )}
-          <span className="tabular-nums">{Math.abs(changePercent).toFixed(1)}%</span>
-          <span className="text-muted-foreground font-normal ml-0.5">{vsLabel}</span>
         </div>
+        {hint && (
+          <p className="mt-2 text-[11px] text-muted-foreground/80">{hint}</p>
+        )}
       </CardContent>
     </Card>
   );

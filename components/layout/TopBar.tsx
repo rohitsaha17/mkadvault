@@ -164,7 +164,7 @@ export function TopBar({ profile, email }: TopBarProps) {
           >
             <Avatar className="h-9 w-9 ring-2 ring-border hover:ring-primary/40 transition-colors">
               <AvatarImage src={profile?.avatar_url ?? undefined} />
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+              <AvatarFallback className="bg-sidebar text-sidebar-foreground text-xs font-medium">
                 {initials}
               </AvatarFallback>
             </Avatar>

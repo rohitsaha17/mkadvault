@@ -132,11 +132,11 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
         <BrandMark size={36} />
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-[15px] tracking-tight text-white truncate leading-tight">
-              MK ADD VAULT
+            <p className="font-medium text-[15px] tracking-tight text-white truncate leading-tight">
+              MK Add Vault
             </p>
-            <p className="text-[10px] text-sidebar-foreground/60 uppercase tracking-[0.14em] font-medium mt-0.5">
-              Outdoor Ad Suite
+            <p className="text-[11px] text-sidebar-foreground/55 mt-0.5">
+              Outdoor advertising
             </p>
           </div>
         )}
@@ -147,9 +147,16 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
         {NAV_SECTIONS.map((section) => (
           <div key={section.label} className="space-y-1">
             {!collapsed && (
-              <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/40">
-                {t(section.label as "workspace" | "inventory" | "revenue" | "insights")}
-              </p>
+              <div className="flex items-center gap-2 px-3 pb-2">
+                {/* Tiny tick — the "highway marker" signature detail. */}
+                <span
+                  aria-hidden
+                  className="h-[2px] w-2 rounded-full bg-sidebar-foreground/30"
+                />
+                <p className="text-[11px] text-sidebar-foreground/55">
+                  {t(section.label as "workspace" | "inventory" | "revenue" | "insights")}
+                </p>
+              </div>
             )}
 
             {section.items.map(({ key, href, icon: Icon }) => {
@@ -172,9 +179,9 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
                   className={btnClass}
                   prefetch
                 >
-                  {/* Active left rail indicator */}
+                  {/* Active left rail indicator — solid amber, no gradient. */}
                   {active && (
-                    <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-gradient-to-b from-indigo-400 to-violet-500" />
+                    <span className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-r-full bg-primary" />
                   )}
                   <Icon
                     className={cn(
@@ -217,7 +224,7 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
                 <div className="flex items-center justify-center">
                   <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border hover:ring-primary/50 transition-colors">
                     <AvatarImage src={profile?.avatar_url ?? undefined} />
-                    <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+                    <AvatarFallback className="bg-sidebar-accent text-white text-xs font-medium">
                       {initials}
                     </AvatarFallback>
                   </Avatar>
@@ -239,7 +246,7 @@ export function Sidebar({ profile, email, onCollapsedChange }: SidebarProps) {
             <div className="flex items-center gap-3 rounded-xl bg-sidebar-accent/40 hover:bg-sidebar-accent/70 p-2 pr-3 transition-colors cursor-pointer">
               <Avatar className="h-9 w-9 shrink-0 ring-2 ring-sidebar-border">
                 <AvatarImage src={profile?.avatar_url ?? undefined} />
-                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xs font-semibold">
+                <AvatarFallback className="bg-sidebar-accent text-white text-xs font-medium">
                   {initials}
                 </AvatarFallback>
               </Avatar>

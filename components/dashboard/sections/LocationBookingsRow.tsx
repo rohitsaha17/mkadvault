@@ -154,16 +154,18 @@ export async function LocationBookingsRow({
   return (
     <Card>
       <CardHeader className="pb-2 flex flex-row items-end justify-between">
-        <div>
-          <CardTitle className="text-base">Top sites by booking value</CardTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Pro-rated to the selected range — where the revenue is coming from
+        <div className="space-y-0.5">
+          <CardTitle className="text-base font-medium tracking-tight">
+            Top sites by booking value
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Pro-rated to the window — where the revenue is coming from
           </p>
         </div>
         {rows.length > 0 && (
           <Link
             href="/sites"
-            className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1"
+            className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
           >
             All sites
             <ArrowUpRight className="h-3.5 w-3.5" />
@@ -172,27 +174,25 @@ export async function LocationBookingsRow({
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="py-6 text-sm text-center text-muted-foreground">
-            No site-level bookings in this range
+          <p className="py-8 text-sm text-center text-muted-foreground">
+            No site-level bookings in this window
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
-                  <th className="text-left pb-2 font-semibold">Site</th>
-                  <th className="text-left pb-2 font-semibold">City</th>
-                  <th className="text-left pb-2 font-semibold hidden sm:table-cell">
+                <tr className="text-xs text-muted-foreground border-b border-border">
+                  <th className="text-left pb-2 font-normal">Site</th>
+                  <th className="text-left pb-2 font-normal">City</th>
+                  <th className="text-left pb-2 font-normal hidden sm:table-cell">
                     Type
                   </th>
-                  <th className="text-left pb-2 font-semibold hidden md:table-cell">
+                  <th className="text-left pb-2 font-normal hidden md:table-cell">
                     Status
                   </th>
-                  <th className="text-right pb-2 font-semibold">
-                    Campaigns
-                  </th>
-                  <th className="text-right pb-2 font-semibold">
-                    Booked (range)
+                  <th className="text-right pb-2 font-normal">Campaigns</th>
+                  <th className="text-right pb-2 font-normal">
+                    Booked in window
                   </th>
                 </tr>
               </thead>
@@ -200,34 +200,40 @@ export async function LocationBookingsRow({
                 {rows.map((s) => (
                   <tr
                     key={s.id}
-                    className="border-b border-border last:border-0 hover:bg-muted/30"
+                    className="border-b border-border/60 last:border-0 hover:bg-muted/30 transition-colors"
                   >
-                    <td className="py-3 pr-2">
-                      <Link
-                        href={`/sites/${s.id}`}
-                        className="font-medium text-foreground hover:underline truncate block max-w-[180px]"
-                      >
-                        {s.name}
-                      </Link>
-                      {s.site_code && (
-                        <p className="text-[11px] text-muted-foreground">
-                          {s.site_code}
-                        </p>
-                      )}
+                    <td className="py-3 pr-3 align-top">
+                      <div className="flex items-start gap-2">
+                        {s.site_code && (
+                          <span className="inline-flex items-center gap-1 rounded-sm border border-border/60 bg-muted/50 px-1.5 py-[1px] font-mono text-[10px] tracking-tight text-muted-foreground whitespace-nowrap">
+                            <span
+                              aria-hidden
+                              className="h-1 w-1 rounded-full bg-primary/80"
+                            />
+                            {s.site_code}
+                          </span>
+                        )}
+                        <Link
+                          href={`/sites/${s.id}`}
+                          className="text-foreground hover:underline truncate block max-w-[200px] leading-tight"
+                        >
+                          {s.name}
+                        </Link>
+                      </div>
                     </td>
-                    <td className="py-3 pr-2 text-foreground">
+                    <td className="py-3 pr-2 text-foreground align-top">
                       {s.city ?? "—"}
                     </td>
-                    <td className="py-3 pr-2 text-muted-foreground capitalize hidden sm:table-cell">
+                    <td className="py-3 pr-2 text-muted-foreground capitalize hidden sm:table-cell align-top">
                       {s.media_type?.replace(/_/g, " ") ?? "—"}
                     </td>
-                    <td className="py-3 pr-2 hidden md:table-cell">
+                    <td className="py-3 pr-2 hidden md:table-cell align-top">
                       <StatusBadge status={s.status ?? "—"} />
                     </td>
-                    <td className="py-3 pr-2 text-right tabular-nums text-foreground">
+                    <td className="py-3 pr-2 text-right tabular-nums text-muted-foreground align-top">
                       {s.campaigns}
                     </td>
-                    <td className="py-3 text-right font-semibold tabular-nums text-foreground">
+                    <td className="py-3 text-right font-medium tabular-nums text-foreground align-top">
                       {inr(s.value)}
                     </td>
                   </tr>

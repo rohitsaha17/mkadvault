@@ -50,15 +50,17 @@ export function DashboardAlerts({ alerts, locale }: Props) {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Critical Alerts</CardTitle>
+        <CardTitle className="text-base font-medium tracking-tight">
+          Critical alerts
+        </CardTitle>
       </CardHeader>
 
       <CardContent className="space-y-1 pb-3">
         {alerts.length === 0 ? (
-          // All-clear state
-          <div className="flex items-center gap-3 py-4 text-green-600">
-            <CheckCircle2 className="h-5 w-5 shrink-0" />
-            <span className="text-sm font-medium">No critical alerts — everything looks good.</span>
+          // All-clear state — understated, not a celebration.
+          <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+            <span>Nothing needs your attention right now</span>
           </div>
         ) : (
           <>

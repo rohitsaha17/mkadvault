@@ -207,23 +207,24 @@ export async function CityBookingsRow({
 
   return (
     <div className="space-y-3">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          By city
-        </p>
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden
+          className="h-[2px] w-3 rounded-full bg-primary/70"
+        />
+        <h2 className="text-lg font-medium tracking-tight text-foreground">
           Where bookings are landing
         </h2>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">
+          <CardHeader className="pb-2 space-y-0.5">
+            <CardTitle className="text-base font-medium tracking-tight">
               Booked value by city
             </CardTitle>
             <p className="text-xs text-muted-foreground tabular-nums">
               {inr(totalValue)} across {cityValue.size}{" "}
-              {cityValue.size === 1 ? "city" : "cities"} in this range
+              {cityValue.size === 1 ? "city" : "cities"} in this window
             </p>
           </CardHeader>
           <CardContent>
@@ -231,13 +232,12 @@ export async function CityBookingsRow({
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">
+          <CardHeader className="pb-2 space-y-0.5">
+            <CardTitle className="text-base font-medium tracking-tight">
               Site occupancy by city
             </CardTitle>
             <p className="text-xs text-muted-foreground tabular-nums">
-              {occupancyRows.length} city breakdown · booked vs available
-              sites right now
+              {occupancyRows.length} cities · booked against available right now
             </p>
           </CardHeader>
           <CardContent>

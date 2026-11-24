@@ -87,45 +87,60 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
   const PIPELINE_LABELS: Record<PipelineStatus, string> = {
     live: "Live",
   };
+  // Live status gets a quiet pill with a lit amber dot — the one spot
+  // of accent on this card.
   const PIPELINE_COLORS: Record<PipelineStatus, string> = {
-    live: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+    live: "text-foreground bg-muted/60",
   };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">{tDash("outstanding_ar")}</CardTitle>
+          <CardTitle className="text-base font-medium tracking-tight">
+            {tDash("outstanding_ar")}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
+          {/* Aging uses stepped neutrals, with the one accent reserved
+              for the 90+ bucket so the eye lands on what actually
+              needs chasing. */}
           <AgingRow label="0–30 days" amount={agingCurrent} color="text-foreground" />
-          <AgingRow label="31–60 days" amount={aging31_60} color="text-amber-600 dark:text-amber-400" />
-          <AgingRow label="61–90 days" amount={aging61_90} color="text-orange-600 dark:text-orange-400" />
-          <AgingRow label="90+ days" amount={aging90plus} color="text-rose-600 dark:text-rose-400" />
+          <AgingRow label="31–60 days" amount={aging31_60} color="text-muted-foreground" />
+          <AgingRow label="61–90 days" amount={aging61_90} color="text-muted-foreground" />
+          <AgingRow label="90+ days" amount={aging90plus} color="text-destructive" />
           <div className="border-t border-border pt-2 mt-1">
-            <AgingRow label="Total" amount={agingTotal} color="font-semibold text-foreground" />
+            <AgingRow label="Total" amount={agingTotal} color="font-medium text-foreground" />
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">{tDash("outstanding_payables")}</CardTitle>
+          <CardTitle className="text-base font-medium tracking-tight">
+            {tDash("outstanding_payables")}
+          </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           <div className="rounded-xl bg-muted/40 p-4">
-            <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
-              Due in next 30 days
-            </p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
+            <p className="text-xs text-muted-foreground">Due in next 30 days</p>
+            <p className="mt-1 text-lg font-medium tabular-nums text-foreground">
               {inr(payablesDueSoonTotal)}
             </p>
           </div>
-          <div className="rounded-xl bg-rose-50/70 dark:bg-rose-500/10 p-4 ring-1 ring-inset ring-rose-200/60 dark:ring-rose-500/20">
-            <p className="text-[11px] uppercase tracking-wider font-semibold text-rose-700/80 dark:text-rose-300/80">
-              Overdue
-            </p>
-            <p className="mt-1 text-lg font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+          <div
+            className={`rounded-xl p-4 ${
+              payablesOverdueTotal > 0
+                ? "bg-destructive/10 ring-1 ring-inset ring-destructive/20"
+                : "bg-muted/40"
+            }`}
+          >
+            <p className="text-xs text-muted-foreground">Overdue</p>
+            <p
+              className={`mt-1 text-lg font-medium tabular-nums ${
+                payablesOverdueTotal > 0 ? "text-destructive" : "text-foreground"
+              }`}
+            >
               {inr(payablesOverdueTotal)}
             </p>
           </div>
@@ -134,17 +149,25 @@ export async function SecondaryRow({ orgId }: { orgId: string }) {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">{tDash("campaign_pipeline")}</CardTitle>
+          <CardTitle className="text-base font-medium tracking-tight">
+            {tDash("campaign_pipeline")}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {(["live"] as PipelineStatus[]).map((s) => (
             <div key={s} className="flex items-center justify-between gap-2">
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${PIPELINE_COLORS[s]}`}>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-md inline-flex items-center gap-1.5 ${PIPELINE_COLORS[s]}`}
+              >
+                <span
+                  aria-hidden
+                  className="h-1.5 w-1.5 rounded-full bg-primary"
+                />
                 {PIPELINE_LABELS[s]}
               </span>
               <span className="text-sm text-foreground tabular-nums">
                 {pipeline[s].count}
-                <span className="mx-1.5 text-muted-foreground/50">•</span>
+                <span className="mx-1.5 text-muted-foreground/50">·</span>
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {inr(pipeline[s].value)}
                 </span>
